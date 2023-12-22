@@ -24,8 +24,11 @@ private slots:
   void open();
   void playSong();
   void pauseSong();
+  void seek(int mseconds);
 
 private:
+  void positionChanged(qint64 progress);
+  void durationChanged(qint64 duration);
   Ui::MainWindow *ui;
   SongTableModel model;
   QStandardItemModel *tableModel; // managed in model; TODO: use inheritance
@@ -33,5 +36,6 @@ private:
   QString currentFile;
   QMediaPlayer *mediaPlayer;
   QMediaPlayer::PlaybackState m_playerState = QMediaPlayer::StoppedState;
+  qint64 duration;
 };
 #endif // MAINWINDOW_H

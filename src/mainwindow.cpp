@@ -23,9 +23,8 @@ MainWindow::MainWindow(QWidget *parent)
                          Field::COMMENT, Field::FILE_PATH};
   model.setColumns(fields);
   tableModel = model.getModel();
-  mediaPlayer = new QMediaPlayer(this);
 
-  QMediaPlayer mplayer;
+  mediaPlayer = new QMediaPlayer(this);
   auto audioOutput = new QAudioOutput;
   mediaPlayer->setAudioOutput(audioOutput);
   // audioOutput->setVolume(50);
@@ -34,12 +33,24 @@ MainWindow::MainWindow(QWidget *parent)
   ui->tableView->setEditTriggers(QAbstractItemView::NoEditTriggers);
   ui->tableView->setSelectionBehavior(QAbstractItemView::SelectRows);
 
+  ui->horizontalSlider->setRange(0, mediaPlayer->duration());
+
   connect(ui->actionAdd, &QAction::triggered, this, &MainWindow::addEntry);
   connect(ui->tableView, &QTableView::doubleClicked, this,
           &MainWindow::selectEntry);
   connect(ui->actionOpen, &QAction::triggered, this, &MainWindow::open);
   connect(ui->actionPlay, &QAction::triggered, this, &MainWindow::playSong);
+  connect(ui->actionPlay, &QAction::triggered, this, &MainWindow::playSong);
+  connect(ui->play_button, &QAbstractButton::clicked, this,
+          &MainWindow::playSong);
   connect(ui->actionPause, &QAction::triggered, this, &MainWindow::pauseSong);
+  connect(ui->pause_button, &QAbstractButton::clicked, this,
+          &MainWindow::pauseSong);
+  connect(ui->horizontalSlider, &QSlider::sliderMoved, this, &MainWindow::seek);
+  connect(mediaPlayer, &QMediaPlayer::durationChanged, this,
+          &MainWindow::durationChanged);
+  connect(mediaPlayer, &QMediaPlayer::positionChanged, this,
+          &MainWindow::positionChanged);
 }
 
 void MainWindow::selectEntry(const QModelIndex &index) {
@@ -60,6 +71,25 @@ void MainWindow::addEntry() {
 void MainWindow::playSong() { mediaPlayer->play(); }
 
 void MainWindow::pauseSong() { mediaPlayer->pause(); }
+
+void MainWindow::durationChanged(qint64 newDuration) {
+  duration = newDuration;
+  // qDebug() << "new duration" << duration;
+  ui->horizontalSlider->setMaximum(duration);
+}
+
+void MainWindow::positionChanged(qint64 progress) {
+  // qDebug() << "new position" << progress;
+  if (!ui->horizontalSlider->isSliderDown())
+    ui->horizontalSlider->setValue(progress);
+
+  // updateDurationInfo(progress / 1000);
+}
+
+void MainWindow::seek(int mseconds) {
+  qDebug() << "seek" << mseconds;
+  mediaPlayer->setPosition(mseconds);
+}
 
 void MainWindow::open() {
   QString fileName = QFileDialog::getOpenFileName(this, "Open the file");
