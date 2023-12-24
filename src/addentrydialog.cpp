@@ -1,4 +1,5 @@
 #include "addentrydialog.h"
+
 #include "ui_addentrydialog.h"
 
 AddEntryDialog::AddEntryDialog(QWidget *parent)

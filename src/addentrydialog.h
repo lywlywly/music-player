@@ -10,16 +10,16 @@ class AddEntryDialog;
 class AddEntryDialog : public QDialog {
   Q_OBJECT
 
-public:
+ public:
   explicit AddEntryDialog(QWidget *parent = nullptr);
   ~AddEntryDialog();
 
-signals:
+ signals:
   void entryStringEntered(const QString &text);
 
-private:
+ private:
   Ui::AddEntryDialog *ui;
   void emitEntryString();
 };
 
-#endif // ADDENTRYDIALOG_H
+#endif  // ADDENTRYDIALOG_H

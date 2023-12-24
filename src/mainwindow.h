@@ -1,11 +1,13 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
-#include "qmediaplayer.h"
-#include "qstandarditemmodel.h"
-#include "songtablemodel.h"
 #include <QMainWindow>
 
+#include "myproxymodel.h"
+#include "mytableheader.h"
+#include "playercontrolmodel.h"
+#include "qmediaplayer.h"
+#include "songtablemodel.h"
 QT_BEGIN_NAMESPACE
 namespace Ui {
 class MainWindow;
@@ -15,10 +17,10 @@ QT_END_NAMESPACE
 class MainWindow : public QMainWindow {
   Q_OBJECT
 
-public:
+ public:
   MainWindow(QWidget *parent = nullptr);
   ~MainWindow();
-private slots:
+ private slots:
   void selectEntry(const QModelIndex &index);
   void addEntry();
   void open();
@@ -26,16 +28,16 @@ private slots:
   void pauseSong();
   void seek(int mseconds);
 
-private:
+ private:
   void positionChanged(qint64 progress);
   void durationChanged(qint64 duration);
+  void statusChanged(QMediaPlayer::MediaStatus status);
   Ui::MainWindow *ui;
-  SongTableModel model;
-  QStandardItemModel *tableModel; // managed in model; TODO: use inheritance
-                                  // instead of composition
-  QString currentFile;
+  SongTableModel *model;
+  MyProxyModel *proxyModel;
+  MyTableHeader *tableHeader;
   QMediaPlayer *mediaPlayer;
-  QMediaPlayer::PlaybackState m_playerState = QMediaPlayer::StoppedState;
+  PlayerControlModel *control;
   qint64 duration;
 };
-#endif // MAINWINDOW_H
+#endif  // MAINWINDOW_H
