@@ -28,14 +28,16 @@ set(PROJECT_SOURCES
     myproxymodel.h
     myproxymodel.cpp
     songparser.h
-    songparser.cpp)
+    songparser.cpp
+    playlist.h )
 
 add_library(MYLib ${PROJECT_SOURCES})
 
 target_link_libraries(MYLib Qt${QT_VERSION_MAJOR}::Widgets
                       Qt${QT_VERSION_MAJOR}::Multimedia PkgConfig::FFMPEG)
 
-add_executable(EXEC main.cpp)
+add_executable(EXEC main.cpp
+    )
 target_link_libraries(EXEC MYLib)
 
 add_subdirectory(Tests)

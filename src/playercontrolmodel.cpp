@@ -3,11 +3,10 @@
 #include <QRandomGenerator>
 #include <algorithm>
 
-#include "myproxymodel.h"
 #include "qurl.h"
 #include "songtablemodel.h"
 
-PlayerControlModel::PlayerControlModel(MyProxyModel* parent) : QObject(parent) {
+PlayerControlModel::PlayerControlModel(PlayList* parent) {
   model = parent;
   std::vector<std::pair<Field, QString>> myVector(fieldToStringMap.begin(),
                                                   fieldToStringMap.end());
@@ -18,9 +17,7 @@ PlayerControlModel::PlayerControlModel(MyProxyModel* parent) : QObject(parent) {
   filePathColumnIndex = std::distance(myVector.begin(), it);
 }
 
-QUrl PlayerControlModel::getCurrentUrl() {
-  return model->data(model->index(index, filePathColumnIndex)).toUrl();
-}
+QUrl PlayerControlModel::getCurrentUrl() { return model->getUrl(index); }
 
 void PlayerControlModel::onPlayListChange() {
   indices = model->getSourceIndices();
@@ -28,20 +25,67 @@ void PlayerControlModel::onPlayListChange() {
 
 int PlayerControlModel::currentRawIndex() const { return indices[index]; }
 
+void PlayerControlModel::addToQueue(int i) {
+  playList.append(i);
+  qDebug() << playList;
+}
+
+// playback follows cursor
+void PlayerControlModel::setNext(int idx) {
+  qDebug() << "setNext" << idx;
+  toBeInsertedIndex = idx;
+}
+
 void PlayerControlModel::shuffle() {
   int randomIndex = QRandomGenerator::global()->bounded(indices.size());
   index = indices[randomIndex];
-  emit indexChange();
+  emit indexChange(index);
 }
 
+// current position + queue
 void PlayerControlModel::next() {
-  if (index + 1 < indices.size()) {
-    index++;
+  qDebug() << "next()" << playList;
+  // initPlayList();
+  // Initial state, no history
+  if (position == -1) {
+    if (playList.isEmpty()) {
+      if (toBeInsertedIndex > 0) {
+        playList.append(toBeInsertedIndex);
+        toBeInsertedIndex = -1;
+      } else {
+        playList.append(0);
+      }
+    }
+    position = 0;
   } else {
-    index = 0;
+    // default playback mode position is always 0 except for initial state
+    position = 0;
+    // To be inserted position
+    if (toBeInsertedIndex != index && toBeInsertedIndex >= 0) {
+      playList.insert(1, toBeInsertedIndex);
+      toBeInsertedIndex = -1;
+    }
+
+    // Remove previous
+    playList.removeAt(0);
+
+    // Queue
+    if (position < playList.length()) {
+      qDebug() << "queue";
+    } else {
+      // No queue
+      if (index + 1 < indices.size()) {
+        index++;
+      } else {
+        index = 0;
+      }
+
+      playList.append(index);
+    }
   }
-  qDebug() << index;
-  emit indexChange();
+
+  index = playList[position];
+  emit indexChange(index);
 }
 
 void PlayerControlModel::previous() {
@@ -50,8 +94,22 @@ void PlayerControlModel::previous() {
   } else {
     index = indices.size() - 1;
   }
+  playList.append(index);
+  position++;
   qDebug() << index;
-  emit indexChange();
+  qDebug() << position << "in" << playList;
+  emit indexChange(index);
 }
 
-void PlayerControlModel::setCurrentIndex(int index) { this->index = index; }
+void PlayerControlModel::setCurrentIndex(int index) {
+  if (position == -1) {
+    playList.insert(0, index);
+    position = 0;
+    this->index = playList[position];
+    emit indexChange(this->index);
+    return;
+  }
+  playList.insert(1, index);
+  qDebug() << "setCurrentIndex" << playList;
+  next();
+}

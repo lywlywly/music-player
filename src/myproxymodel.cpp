@@ -14,6 +14,8 @@ QList<int> MyProxyModel::getSourceIndices() {
   return indices;
 }
 
+QUrl MyProxyModel::getUrl(int i) { return data(index(i, 7)).toUrl(); }
+
 void MyProxyModel::toogleSortOrder(int column) {
   int& orderPolicy = this->order[column];
   if (orderPolicy == 0) {

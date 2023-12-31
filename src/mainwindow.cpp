@@ -65,8 +65,13 @@ MainWindow::MainWindow(QWidget *parent)
           &MainWindow::positionChanged);
   // initialize ui actions
   connect(ui->actionAdd, &QAction::triggered, this, &MainWindow::addEntry);
-  connect(ui->tableView, &QTableView::doubleClicked, this,
-          &MainWindow::selectEntry);
+  connect(ui->tableView, &QTableView::clicked,
+          [this](QModelIndex i) { control->setNext(i.row()); });
+  // doubleClicked will also trigger clicked, here set next to -1
+  connect(ui->tableView, &QTableView::doubleClicked, [this](QModelIndex i) {
+    control->setNext(-1);
+    selectEntry(i);
+  });
   connect(ui->actionOpen, &QAction::triggered, this, &MainWindow::open);
   connect(ui->actionPlay, &QAction::triggered, this, &MainWindow::playSong);
   connect(ui->actionPlay, &QAction::triggered, this, &MainWindow::playSong);
@@ -81,6 +86,11 @@ MainWindow::MainWindow(QWidget *parent)
           &PlayerControlModel::previous);
   connect(ui->random_button, &QAbstractButton::clicked, control,
           &PlayerControlModel::shuffle);
+  connect(control, &PlayerControlModel::indexChange, this,
+          [myUI = ui](int idx) {
+            qDebug() << "new index" << idx;
+            myUI->tableView->selectRow(idx);
+          });
 }
 
 void MainWindow::selectEntry(const QModelIndex &index) {
@@ -149,7 +159,7 @@ void MainWindow::statusChanged(QMediaPlayer::MediaStatus status) {
 
 void MainWindow::open() {
   QList<QString> fileName = QFileDialog::getOpenFileNames(
-      this, "Open the file", QDir::homePath() + "/Videos");
+      this, "Open the file", QDir::homePath() + "/Music");
   qDebug() << "opening file" << fileName;
   for (QString s : fileName) {
     model->appendSong(s);

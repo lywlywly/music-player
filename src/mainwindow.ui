@@ -111,6 +111,8 @@
     <addaction name="actionRandom"/>
     <addaction name="separator"/>
     <addaction name="actionOrder"/>
+    <addaction name="actionPlayback_follows_cursor"/>
+    <addaction name="actionCursor_follows_playback"/>
    </widget>
    <addaction name="menuFile"/>
    <addaction name="menuEdit"/>
@@ -171,6 +173,16 @@
   <action name="actionAdd">
    <property name="text">
     <string>Add</string>
+   </property>
+  </action>
+  <action name="actionPlayback_follows_cursor">
+   <property name="text">
+    <string>Playback follows cursor</string>
+   </property>
+  </action>
+  <action name="actionCursor_follows_playback">
+   <property name="text">
+    <string>Cursor follows playback</string>
    </property>
   </action>
  </widget>

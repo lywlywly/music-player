@@ -11,4 +11,6 @@ endfunction()
 SETUP_TESTS(
    basics
    parser
+   # playercontrol0
+   playercontrol
 )

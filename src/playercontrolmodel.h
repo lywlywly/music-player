@@ -3,11 +3,12 @@
 
 #include <QObject>
 
-#include "myproxymodel.h"
+#include "playlist.h"
+
 class PlayerControlModel : public QObject {
   Q_OBJECT
  public:
-  explicit PlayerControlModel(MyProxyModel *parent = nullptr);
+  explicit PlayerControlModel(PlayList *parent = nullptr);
   enum PlaybackMode { RepeatPlayList, RepeatTrack, Random };
   QUrl getCurrentUrl();
   PlaybackMode playbackMode() const;
@@ -16,6 +17,8 @@ class PlayerControlModel : public QObject {
   QUrl currentMedia() const;
   int nextIndex(int steps = 1) const;
   int previousIndex(int steps = 1) const;
+  void addToQueue(int);
+  void setNext(int);
  public slots:
   void shuffle();
   void next();
@@ -24,13 +27,16 @@ class PlayerControlModel : public QObject {
   void onPlayListChange();
  signals:
   // currently not used
-  void indexChange();
+  void indexChange(int newIndex);
 
  private:
-  MyProxyModel *model;
+  PlayList *model;
   int index;
   int filePathColumnIndex;
   QList<int> indices;
+  QList<int> playList = {};
+  int position = -1;
+  int toBeInsertedIndex = -1;
 };
 
 #endif  // PLAYERCONTROLMODEL_H
