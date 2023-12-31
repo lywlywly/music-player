@@ -37,12 +37,12 @@ QJsonValue SongParser::getValue(const QJsonObject& jsonObject, Field field) {
   return value;
 }
 
-QVariant SongParser::getValue(const QMap<QString, QString>& jsonObject,
+QVariant SongParser::getValue(const QMap<QString, QString>& metaDataMap,
                               Field field) {
   QVariant value;
 
   for (const QString key : fieldMap[field]) {
-    value = jsonObject[key];
+    value = metaDataMap[key];
     if (!value.toString().isEmpty()) {
       break;
     }

@@ -1,80 +1,41 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.9)
+project(my_player)
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
-project(my_player VERSION 0.1 LANGUAGES CXX)
-
-set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Multimedia)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Multimedia)
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Multimedia Test)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Multimedia Test)
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavcodec libavformat libavutil)
+pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavcodec libavformat
+                  libavutil)
 
 set(PROJECT_SOURCES
-        main.cpp
-        mainwindow.cpp
-        mainwindow.h
-        mainwindow.ui
-)
+    mainwindow.cpp
+    mainwindow.h
+    mainwindow.ui
+    songtablemodel.cpp
+    songtablemodel.h
+    addentrydialog.h
+    addentrydialog.cpp
+    addentrydialog.ui
+    mytableheader.h
+    mytableheader.cpp
+    playercontrolmodel.h
+    playercontrolmodel.cpp
+    myproxymodel.h
+    myproxymodel.cpp
+    songparser.h
+    songparser.cpp)
 
-if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
-    qt_add_executable(my_player
-        MANUAL_FINALIZATION
-        ${PROJECT_SOURCES}
+add_library(MYLib ${PROJECT_SOURCES})
 
+target_link_libraries(MYLib Qt${QT_VERSION_MAJOR}::Widgets
+                      Qt${QT_VERSION_MAJOR}::Multimedia PkgConfig::FFMPEG)
 
-        songtablemodel.cpp songtablemodel.h
-        addentrydialog.h addentrydialog.cpp addentrydialog.ui
-        mytableheader.h mytableheader.cpp
-        playercontrolmodel.h playercontrolmodel.cpp
-        myproxymodel.h myproxymodel.cpp
-        songparser.h songparser.cpp
-    )
-# Define target properties for Android with Qt 6 as:
-#    set_property(TARGET my_player APPEND PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR
-#                 ${CMAKE_CURRENT_SOURCE_DIR}/android)
-# For more information, see https://doc.qt.io/qt-6/qt-add-executable.html#target-creation
-else()
-    if(ANDROID)
-        add_library(my_player SHARED
-            ${PROJECT_SOURCES}
-        )
-# Define properties for Android with Qt 5 after find_package() calls as:
-#    set(ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android")
-    else()
-        add_executable(my_player
-            ${PROJECT_SOURCES}
-        )
-    endif()
-endif()
+add_executable(EXEC main.cpp)
+target_link_libraries(EXEC MYLib)
 
-target_link_libraries(my_player PRIVATE Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Multimedia PkgConfig::FFMPEG)
-
-# Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
-# If you are developing for iOS or macOS you should consider setting an
-# explicit, fixed bundle identifier manually though.
-if(${QT_VERSION} VERSION_LESS 6.1.0)
-  set(BUNDLE_ID_OPTION MACOSX_BUNDLE_GUI_IDENTIFIER com.example.my_player)
-endif()
-set_target_properties(my_player PROPERTIES
-    ${BUNDLE_ID_OPTION}
-    MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
-    MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
-    MACOSX_BUNDLE TRUE
-    WIN32_EXECUTABLE TRUE
-)
-
-include(GNUInstallDirs)
-install(TARGETS my_player
-    BUNDLE DESTINATION .
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
-
-if(QT_VERSION_MAJOR EQUAL 6)
-    qt_finalize_executable(my_player)
-endif()
+add_subdirectory(Tests)
