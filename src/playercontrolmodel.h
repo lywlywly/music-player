@@ -33,7 +33,7 @@ class PlayerControlModel : public QObject {
  private:
   void initPlayList();
   void handleInitialPlay();
-  void handleNoQueue(bool isDirectionNext = true);
+  void moveIndex(int &index, bool isDirectionNext = true);
   IPlayList *model;
   int filePathColumnIndex;
   QList<int> indices;

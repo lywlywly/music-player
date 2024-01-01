@@ -60,18 +60,18 @@ void PlayerControlModel::handleInitialPlay() {
   position = 0;
 }
 
-void PlayerControlModel::handleNoQueue(bool isDirectionNext) {
+void PlayerControlModel::moveIndex(int& index, bool isDirectionNext) {
   if (isDirectionNext) {
-    if (playList[position] + 1 < indices.size()) {
-      playList[position]++;
+    if (index + 1 < indices.size()) {
+      index++;
     } else {
-      playList[position] = 0;
+      index = 0;
     }
   } else {
-    if (playList[position] >= 1) {
-      playList[position]--;
+    if (index >= 1) {
+      index--;
     } else {
-      playList[position] = indices.size() - 1;
+      index = indices.size() - 1;
     }
   }
 }
@@ -98,7 +98,7 @@ void PlayerControlModel::next() {
     } else {
       // No queue
       qDebug() << "no queue";
-      handleNoQueue();
+      moveIndex(playList[position]);
     }
   }
   qDebug() << "emit indexChange(playList[position]);" << playList[position];
@@ -107,7 +107,7 @@ void PlayerControlModel::next() {
 }
 
 void PlayerControlModel::previous() {
-  handleNoQueue(false);
+  moveIndex(playList[position], false);
   emit indexChange(playList[position]);
 }
 
