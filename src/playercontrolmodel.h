@@ -3,12 +3,12 @@
 
 #include <QObject>
 
-#include "playlist.h"
+#include "iplaylist.h"
 
 class PlayerControlModel : public QObject {
   Q_OBJECT
  public:
-  explicit PlayerControlModel(PlayList *parent = nullptr);
+  explicit PlayerControlModel(IPlayList *parent = nullptr);
   enum PlaybackMode { RepeatPlayList, RepeatTrack, Random };
   QUrl getCurrentUrl();
   PlaybackMode playbackMode() const;
@@ -19,6 +19,7 @@ class PlayerControlModel : public QObject {
   int previousIndex(int steps = 1) const;
   void addToQueue(int);
   void setNext(int);
+  QList<int> getQueue();
  public slots:
   void shuffle();
   void next();
@@ -30,8 +31,10 @@ class PlayerControlModel : public QObject {
   void indexChange(int newIndex);
 
  private:
-  PlayList *model;
-  int index;
+  void initPlayList();
+  void handleInitialPlay();
+  void handleNoQueue(bool isDirectionNext = true);
+  IPlayList *model;
   int filePathColumnIndex;
   QList<int> indices;
   QList<int> playList = {};

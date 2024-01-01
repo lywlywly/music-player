@@ -6,7 +6,7 @@
 #include "qurl.h"
 #include "songtablemodel.h"
 
-PlayerControlModel::PlayerControlModel(PlayList* parent) {
+PlayerControlModel::PlayerControlModel(IPlayList* parent) {
   model = parent;
   std::vector<std::pair<Field, QString>> myVector(fieldToStringMap.begin(),
                                                   fieldToStringMap.end());
@@ -17,13 +17,17 @@ PlayerControlModel::PlayerControlModel(PlayList* parent) {
   filePathColumnIndex = std::distance(myVector.begin(), it);
 }
 
-QUrl PlayerControlModel::getCurrentUrl() { return model->getUrl(index); }
+QUrl PlayerControlModel::getCurrentUrl() {
+  return model->getUrl(playList[position]);
+}
 
 void PlayerControlModel::onPlayListChange() {
   indices = model->getSourceIndices();
 }
 
-int PlayerControlModel::currentRawIndex() const { return indices[index]; }
+int PlayerControlModel::currentRawIndex() const {
+  return indices[playList[position]];
+}
 
 void PlayerControlModel::addToQueue(int i) {
   playList.append(i);
@@ -36,77 +40,83 @@ void PlayerControlModel::setNext(int idx) {
   toBeInsertedIndex = idx;
 }
 
+QList<int> PlayerControlModel::getQueue() { return playList; }
+
 void PlayerControlModel::shuffle() {
   int randomIndex = QRandomGenerator::global()->bounded(indices.size());
-  index = indices[randomIndex];
-  emit indexChange(index);
+  // TODO
+  emit indexChange(playList[position]);
+}
+
+void PlayerControlModel::handleInitialPlay() {
+  if (playList.isEmpty()) {
+    if (toBeInsertedIndex > 0) {
+      playList.append(toBeInsertedIndex);
+      toBeInsertedIndex = -1;
+    } else {
+      playList.append(0);
+    }
+  }
+  position = 0;
+}
+
+void PlayerControlModel::handleNoQueue(bool isDirectionNext) {
+  if (isDirectionNext) {
+    if (playList[position] + 1 < indices.size()) {
+      playList[position]++;
+    } else {
+      playList[position] = 0;
+    }
+  } else {
+    if (playList[position] >= 1) {
+      playList[position]--;
+    } else {
+      playList[position] = indices.size() - 1;
+    }
+  }
 }
 
 // current position + queue
 void PlayerControlModel::next() {
-  qDebug() << "next()" << playList;
-  // initPlayList();
   // Initial state, no history
   if (position == -1) {
-    if (playList.isEmpty()) {
-      if (toBeInsertedIndex > 0) {
-        playList.append(toBeInsertedIndex);
-        toBeInsertedIndex = -1;
-      } else {
-        playList.append(0);
-      }
-    }
-    position = 0;
+    handleInitialPlay();
   } else {
     // default playback mode position is always 0 except for initial state
-    position = 0;
     // To be inserted position
-    if (toBeInsertedIndex != index && toBeInsertedIndex >= 0) {
+    if (toBeInsertedIndex != playList[position] && toBeInsertedIndex >= 0) {
+      qDebug() << "toBeInsertedIndex != playList[position] && "
+                  "toBeInsertedIndex >= 0";
       playList.insert(1, toBeInsertedIndex);
       toBeInsertedIndex = -1;
     }
 
-    // Remove previous
-    playList.removeAt(0);
-
     // Queue
-    if (position < playList.length()) {
+    if (position + 1 < playList.length()) {
       qDebug() << "queue";
+      playList.removeFirst();
     } else {
       // No queue
-      if (index + 1 < indices.size()) {
-        index++;
-      } else {
-        index = 0;
-      }
-
-      playList.append(index);
+      qDebug() << "no queue";
+      handleNoQueue();
     }
   }
-
-  index = playList[position];
-  emit indexChange(index);
+  qDebug() << "emit indexChange(playList[position]);" << playList[position];
+  qDebug() << indices;
+  emit indexChange(playList[position]);
 }
 
 void PlayerControlModel::previous() {
-  if (index >= 1) {
-    index--;
-  } else {
-    index = indices.size() - 1;
-  }
-  playList.append(index);
-  position++;
-  qDebug() << index;
-  qDebug() << position << "in" << playList;
-  emit indexChange(index);
+  handleNoQueue(false);
+  emit indexChange(playList[position]);
 }
 
 void PlayerControlModel::setCurrentIndex(int index) {
   if (position == -1) {
     playList.insert(0, index);
     position = 0;
-    this->index = playList[position];
-    emit indexChange(this->index);
+    this->playList[position] = playList[position];
+    emit indexChange(this->playList[position]);
     return;
   }
   playList.insert(1, index);

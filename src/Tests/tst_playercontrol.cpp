@@ -5,12 +5,16 @@
 #include "../playercontrolmodel.h"
 #include "../songtablemodel.h"
 
-class TestPlayList : public PlayList {
+class TestPlayList : public QObject, virtual public IPlayList {
+  Q_OBJECT
+  Q_INTERFACES(IPlayList)
   QList<int> getSourceIndices() override {
     QList<int> l = {0, 1, 2, 3, 4};
     return l;
   };
   QUrl getUrl(int) override { return QUrl{"url"}; };
+ signals:
+  void playlistChanged() override;
 };
 
 class TestPlayerControl : public QObject {

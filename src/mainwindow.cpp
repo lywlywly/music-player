@@ -30,10 +30,11 @@ MainWindow::MainWindow(QWidget *parent)
   proxyModel->setSourceModel(model);
   // initialize player control
   control = new PlayerControlModel(proxyModel);
-  connect(model, &SongTableModel::playlistChanged, proxyModel,
-          &MyProxyModel::playlistChanged);
-  connect(proxyModel, &MyProxyModel::playlistChanged, control,
-          &PlayerControlModel::onPlayListChange);
+  // have to use old style signal and slot here
+  connect(model, SIGNAL(playlistChanged()), dynamic_cast<QObject *>(proxyModel),
+          SIGNAL(playlistChanged()));
+  connect(dynamic_cast<QObject *>(proxyModel), SIGNAL(playlistChanged()),
+          control, SLOT(onPlayListChange()));
   connect(control, &PlayerControlModel::indexChange, this, [=]() {
     mediaPlayer->setSource(control->getCurrentUrl());
     mediaPlayer->play();
@@ -87,8 +88,8 @@ MainWindow::MainWindow(QWidget *parent)
   connect(ui->random_button, &QAbstractButton::clicked, control,
           &PlayerControlModel::shuffle);
   connect(control, &PlayerControlModel::indexChange, this,
-          [myUI = ui](int idx) {
-            qDebug() << "new index" << idx;
+          [myUI = ui, ctrl = control, md = proxyModel](int idx) {
+            md->onPlayListQueueChange(ctrl->getQueue());
             myUI->tableView->selectRow(idx);
           });
 }

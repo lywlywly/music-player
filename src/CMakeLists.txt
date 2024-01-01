@@ -29,7 +29,7 @@ set(PROJECT_SOURCES
     myproxymodel.cpp
     songparser.h
     songparser.cpp
-    playlist.h )
+    iplaylist.h )
 
 add_library(MYLib ${PROJECT_SOURCES})
 

@@ -14,12 +14,12 @@ std::map<Field, QString> fieldToStringMap = {
     {Field::RATING, "Rating"},
     {Field::COMMENT, "Comment"},
     {Field::FILE_PATH, "File Path"},
-};
+    {Field::STATUS, "Status"}};
 
 SongTableModel::SongTableModel(QObject* parent) {
-  QList<Field> fields = {Field::ARTIST,  Field::TITLE,       Field::GENRE,
-                         Field::BPM,     Field::REPLAY_GAIN, Field::RATING,
-                         Field::COMMENT, Field::FILE_PATH};
+  QList<Field> fields = {Field::STATUS, Field::ARTIST,  Field::TITLE,
+                         Field::GENRE,  Field::BPM,     Field::REPLAY_GAIN,
+                         Field::RATING, Field::COMMENT, Field::FILE_PATH};
   // playerControlModel.reset(new PlayerControlModel(this));
   columnSize = fields.size();
   std::transform(fields.begin(), fields.end(),
@@ -40,7 +40,10 @@ QVariant SongTableModel::data(const QModelIndex& index, int role) const {
     Song song = songs[index.row()];
     QList<QString> itemList = SongTableModel::songToItemList(song);
     // qDebug() << itemList[index.column()];
-    return itemList[index.column()];
+    if (index.column() == 0) {
+      return -100;
+    }
+    return itemList[index.column() - 1];
   }
   return QVariant();
 }

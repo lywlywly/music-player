@@ -10,7 +10,8 @@ enum class Field {
   REPLAY_GAIN,
   RATING,
   COMMENT,
-  FILE_PATH
+  FILE_PATH,
+  STATUS,
 };
 struct Song {
   QString artist;
@@ -27,7 +28,6 @@ class SongParser {
   SongParser();
   Song parseFile(QUrl);
   QT_DEPRECATED Song parseFileLegacy(QUrl);
-
 
  private:
   QJsonValue getValue(const QJsonObject &jsonObject, Field field);
