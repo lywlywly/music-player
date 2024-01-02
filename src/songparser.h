@@ -35,7 +35,7 @@ class SongParser {
   QMap<Field, QList<QString>> fieldMap = {
       {Field::ARTIST, {"artist", "ARTIST"}},
       {Field::TITLE, {"title", "TITLE"}},
-      {Field::GENRE, {"genre"}},
+      {Field::GENRE, {"genre", "GENRE"}},
       {Field::BPM, {"TBPM"}},
       {Field::REPLAY_GAIN, {"replaygain_track_gain"}},
       {Field::RATING, {"Rating"}},
