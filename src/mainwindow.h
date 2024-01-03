@@ -39,5 +39,6 @@ class MainWindow : public QMainWindow {
   QMediaPlayer *mediaPlayer;
   PlayerControlModel *control;
   qint64 duration;
+  std::unique_ptr<SongParser> parser{new SongParser()};
 };
 #endif  // MAINWINDOW_H

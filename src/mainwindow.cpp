@@ -38,6 +38,15 @@ MainWindow::MainWindow(QWidget *parent)
   connect(control, &PlayerControlModel::indexChange, this, [=]() {
     mediaPlayer->setSource(control->getCurrentUrl());
     mediaPlayer->play();
+    auto [data, size] = parser->parseSongCover(control->getCurrentUrl());
+    if (size > 0) {
+      QPixmap pmap;
+      pmap.loadFromData(data.get(), size);
+      ui->label->setPixmap(pmap);
+      ui->label->resize(pmap.width(), pmap.height());
+    } else {
+      ui->label->setText("No cover");
+    }
   });
   // intialize tableview
   ui->tableView->setModel(proxyModel);

@@ -28,6 +28,7 @@ class SongParser {
   SongParser();
   Song parseFile(QUrl);
   QT_DEPRECATED Song parseFileLegacy(QUrl);
+  std::tuple<std::unique_ptr<uchar[]>, int> parseSongCover(QUrl);
 
  private:
   QJsonValue getValue(const QJsonObject &jsonObject, Field field);
@@ -40,6 +41,7 @@ class SongParser {
       {Field::REPLAY_GAIN, {"replaygain_track_gain"}},
       {Field::RATING, {"Rating"}},
   };
+  int idx = 0;
 };
 
 #endif  // SONGPARSER_H
