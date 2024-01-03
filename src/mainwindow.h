@@ -32,12 +32,14 @@ class MainWindow : public QMainWindow {
   void positionChanged(qint64 progress);
   void durationChanged(qint64 duration);
   void statusChanged(QMediaPlayer::MediaStatus status);
+  void updateImageSize();
   Ui::MainWindow *ui;
   SongTableModel *model;
   MyProxyModel *proxyModel;
   MyTableHeader *tableHeader;
   QMediaPlayer *mediaPlayer;
   PlayerControlModel *control;
+  QPixmap pixmap;
   qint64 duration;
   std::unique_ptr<SongParser> parser{new SongParser()};
 };

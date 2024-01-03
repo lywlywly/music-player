@@ -40,14 +40,14 @@ MainWindow::MainWindow(QWidget *parent)
     mediaPlayer->play();
     auto [data, size] = parser->parseSongCover(control->getCurrentUrl());
     if (size > 0) {
-      QPixmap pmap;
-      pmap.loadFromData(data.get(), size);
-      ui->label->setPixmap(pmap);
-      ui->label->resize(pmap.width(), pmap.height());
+      pixmap.loadFromData(data.get(), size);
+      ui->label->setPixmap(pixmap.scaled(ui->splitter->sizes().first() - 10,
+                                         800, Qt::KeepAspectRatio));
     } else {
       ui->label->setText("No cover");
     }
   });
+
   // intialize tableview
   ui->tableView->setModel(proxyModel);
   ui->tableView->setSortingEnabled(true);
@@ -101,6 +101,14 @@ MainWindow::MainWindow(QWidget *parent)
             md->onPlayListQueueChange(ctrl->getQueue());
             myUI->tableView->selectRow(idx);
           });
+  connect(ui->splitter, &QSplitter::splitterMoved, this,
+          &MainWindow::updateImageSize);
+}
+
+void MainWindow::updateImageSize() {
+  int newSize = ui->splitter->sizes().first() - 10;
+  QPixmap scaledPixmap = pixmap.scaled(newSize, 800, Qt::KeepAspectRatio);
+  ui->label->setPixmap(scaledPixmap);
 }
 
 void MainWindow::selectEntry(const QModelIndex &index) {
