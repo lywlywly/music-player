@@ -71,28 +71,58 @@
         <property name="frameShadow">
          <enum>QFrame::Raised</enum>
         </property>
-        <layout class="QHBoxLayout" name="horizontalLayout_7">
+        <layout class="QHBoxLayout" name="horizontalLayout_2">
          <item>
           <widget class="QSplitter" name="splitter">
-           <property name="maximumSize">
-            <size>
-             <width>16777215</width>
-             <height>6000</height>
-            </size>
-           </property>
            <property name="orientation">
             <enum>Qt::Horizontal</enum>
            </property>
-           <widget class="QLabel" name="label">
-            <property name="maximumSize">
+           <widget class="QFrame" name="frame_2">
+            <property name="minimumSize">
              <size>
-              <width>500</width>
-              <height>6000</height>
+              <width>0</width>
+              <height>0</height>
              </size>
             </property>
-            <property name="text">
-             <string>TextLabel</string>
+            <property name="maximumSize">
+             <size>
+              <width>620</width>
+              <height>16777215</height>
+             </size>
             </property>
+            <property name="frameShape">
+             <enum>QFrame::StyledPanel</enum>
+            </property>
+            <property name="frameShadow">
+             <enum>QFrame::Raised</enum>
+            </property>
+            <layout class="QVBoxLayout" name="verticalLayout">
+             <item>
+              <widget class="QSplitter" name="splitter_2">
+               <property name="orientation">
+                <enum>Qt::Vertical</enum>
+               </property>
+               <widget class="QTextBrowser" name="textBrowser"/>
+               <widget class="QLabel" name="label">
+                <property name="minimumSize">
+                 <size>
+                  <width>120</width>
+                  <height>120</height>
+                 </size>
+                </property>
+                <property name="maximumSize">
+                 <size>
+                  <width>600</width>
+                  <height>16777215</height>
+                 </size>
+                </property>
+                <property name="text">
+                 <string>TextLabel</string>
+                </property>
+               </widget>
+              </widget>
+             </item>
+            </layout>
            </widget>
            <widget class="QTableView" name="tableView"/>
           </widget>

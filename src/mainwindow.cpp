@@ -19,6 +19,7 @@
 #include "addentrydialog.h"
 #include "myproxymodel.h"
 #include "mytableheader.h"
+#include "qevent.h"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), ui(new Ui::MainWindow) {
@@ -42,7 +43,8 @@ MainWindow::MainWindow(QWidget *parent)
     if (size > 0) {
       pixmap.loadFromData(data.get(), size);
       ui->label->setPixmap(pixmap.scaled(ui->splitter->sizes().first() - 10,
-                                         800, Qt::KeepAspectRatio));
+                                         ui->splitter_2->sizes().last() - 10,
+                                         Qt::KeepAspectRatio));
     } else {
       ui->label->setText("No cover");
     }
@@ -101,13 +103,22 @@ MainWindow::MainWindow(QWidget *parent)
             md->onPlayListQueueChange(ctrl->getQueue());
             myUI->tableView->selectRow(idx);
           });
+  // setting up splitter
   connect(ui->splitter, &QSplitter::splitterMoved, this,
           &MainWindow::updateImageSize);
+  connect(ui->splitter_2, &QSplitter::splitterMoved, this,
+          &MainWindow::updateImageSize);
+}
+
+void MainWindow::resizeEvent(QResizeEvent *event) {
+  QMainWindow::resizeEvent(event);
+  updateImageSize();
 }
 
 void MainWindow::updateImageSize() {
   int newSize = ui->splitter->sizes().first() - 10;
-  QPixmap scaledPixmap = pixmap.scaled(newSize, 800, Qt::KeepAspectRatio);
+  int newHeight = ui->splitter_2->sizes().last() - 10;
+  QPixmap scaledPixmap = pixmap.scaled(newSize, newHeight, Qt::KeepAspectRatio);
   ui->label->setPixmap(scaledPixmap);
 }
 

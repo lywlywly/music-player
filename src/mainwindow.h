@@ -28,6 +28,9 @@ class MainWindow : public QMainWindow {
   void pauseSong();
   void seek(int mseconds);
 
+ protected:
+  void resizeEvent(QResizeEvent *event) override;
+
  private:
   void positionChanged(qint64 progress);
   void durationChanged(qint64 duration);
