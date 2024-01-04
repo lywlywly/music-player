@@ -3,6 +3,7 @@
 
 #include <QMainWindow>
 
+#include "lyricshandler.h"
 #include "myproxymodel.h"
 #include "mytableheader.h"
 #include "playercontrolmodel.h"
@@ -42,6 +43,7 @@ class MainWindow : public QMainWindow {
   MyTableHeader *tableHeader;
   QMediaPlayer *mediaPlayer;
   PlayerControlModel *control;
+  LyricsHandler *lyricsHandler;
   QPixmap pixmap;
   qint64 duration;
   std::unique_ptr<SongParser> parser{new SongParser()};

@@ -99,10 +99,23 @@
             <layout class="QVBoxLayout" name="verticalLayout">
              <item>
               <widget class="QSplitter" name="splitter_2">
+               <property name="maximumSize">
+                <size>
+                 <width>6000</width>
+                 <height>16777215</height>
+                </size>
+               </property>
                <property name="orientation">
                 <enum>Qt::Vertical</enum>
                </property>
-               <widget class="QTextBrowser" name="textBrowser"/>
+               <widget class="QPlainTextEdit" name="plainTextEdit">
+                <property name="maximumSize">
+                 <size>
+                  <width>600</width>
+                  <height>16777215</height>
+                 </size>
+                </property>
+               </widget>
                <widget class="QLabel" name="label">
                 <property name="minimumSize">
                  <size>

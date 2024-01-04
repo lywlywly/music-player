@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.9)
 project(my_player)
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 set(CMAKE_AUTOUIC ON)
@@ -31,7 +31,10 @@ set(PROJECT_SOURCES
     myproxymodel.cpp
     songparser.h
     songparser.cpp
-    iplaylist.h)
+    iplaylist.h
+    lyricshandler.h
+    lyricshandler.cpp
+)
 
 add_library(MYLib ${PROJECT_SOURCES})
 

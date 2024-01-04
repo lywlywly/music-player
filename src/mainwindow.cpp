@@ -31,12 +31,13 @@ MainWindow::MainWindow(QWidget *parent)
   proxyModel->setSourceModel(model);
   // initialize player control
   control = new PlayerControlModel(proxyModel);
+  lyricsHandler = new LyricsHandler(this);
   // have to use old style signal and slot here
   connect(model, SIGNAL(playlistChanged()), dynamic_cast<QObject *>(proxyModel),
           SIGNAL(playlistChanged()));
   connect(dynamic_cast<QObject *>(proxyModel), SIGNAL(playlistChanged()),
           control, SLOT(onPlayListChange()));
-  connect(control, &PlayerControlModel::indexChange, this, [=]() {
+  connect(control, &PlayerControlModel::indexChange, this, [this]() {
     mediaPlayer->setSource(control->getCurrentUrl());
     mediaPlayer->play();
     auto [data, size] = parser->parseSongCover(control->getCurrentUrl());

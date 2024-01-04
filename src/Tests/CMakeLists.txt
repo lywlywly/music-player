@@ -13,4 +13,5 @@ SETUP_TESTS(
    parser
    # playercontrol0
    playercontrol
+   lyrics
 )
