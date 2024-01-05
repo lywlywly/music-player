@@ -14,4 +14,6 @@ SETUP_TESTS(
    # playercontrol0
    playercontrol
    lyrics
+   checksum
+   fsmonitor
 )

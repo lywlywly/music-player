@@ -36,6 +36,9 @@ MainWindow::MainWindow(QWidget *parent)
   lyricsLoader = new LyricsLoader(this);
   lyricsManager = new LyricsManager(this);
   ui->textEdit->setReadOnly(true);
+
+  connect(ui->actionSave, &QAction::triggered, model, &SongTableModel::load);
+
   // have to use old style signal and slot here
   connect(model, SIGNAL(playlistChanged()), dynamic_cast<QObject *>(proxyModel),
           SIGNAL(playlistChanged()));

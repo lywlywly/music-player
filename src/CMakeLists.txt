@@ -13,6 +13,7 @@ find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Sql Test
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavcodec libavformat
                   libavutil)
+pkg_check_modules(OPENSSL REQUIRED IMPORTED_TARGET openssl)
 
 set(PROJECT_SOURCES
     mainwindow.cpp
@@ -35,13 +36,17 @@ set(PROJECT_SOURCES
     lyricsloader.h
     lyricsloader.cpp
     lyricsmanager.h
-    lyricsmanager.cpp)
+    lyricsmanager.cpp
+    checksumcalculator.h
+    checksumcalculator.cpp
+    filesystemmonitor.h
+    filesystemmonitor.cpp)
 
 add_library(MYLib ${PROJECT_SOURCES})
 
 target_link_libraries(
   MYLib Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Sql
-  Qt${QT_VERSION_MAJOR}::Multimedia PkgConfig::FFMPEG)
+  Qt${QT_VERSION_MAJOR}::Multimedia PkgConfig::FFMPEG PkgConfig::OPENSSL)
 
 add_executable(EXEC main.cpp)
 target_link_libraries(EXEC MYLib)

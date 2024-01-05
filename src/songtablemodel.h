@@ -24,6 +24,7 @@ class SongTableModel : public QAbstractTableModel {
   QVariant data(const QModelIndex &index,
                 int role = Qt::DisplayRole) const override;
   void save();
+  void load();
   // not used
   QVariant headerData(int section, Qt::Orientation orientation,
                       int role) const override;
