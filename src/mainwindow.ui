@@ -108,7 +108,7 @@
                <property name="orientation">
                 <enum>Qt::Vertical</enum>
                </property>
-               <widget class="QPlainTextEdit" name="plainTextEdit">
+               <widget class="QTextEdit" name="textEdit">
                 <property name="maximumSize">
                  <size>
                   <width>600</width>

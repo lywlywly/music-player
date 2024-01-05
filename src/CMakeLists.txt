@@ -32,9 +32,10 @@ set(PROJECT_SOURCES
     songparser.h
     songparser.cpp
     iplaylist.h
-    lyricshandler.h
-    lyricshandler.cpp
-)
+    lyricsloader.h
+    lyricsloader.cpp
+    lyricsmanager.h
+    lyricsmanager.cpp)
 
 add_library(MYLib ${PROJECT_SOURCES})
 

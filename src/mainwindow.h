@@ -3,7 +3,8 @@
 
 #include <QMainWindow>
 
-#include "lyricshandler.h"
+#include "lyricsloader.h"
+#include "lyricsmanager.h"
 #include "myproxymodel.h"
 #include "mytableheader.h"
 #include "playercontrolmodel.h"
@@ -37,15 +38,22 @@ class MainWindow : public QMainWindow {
   void durationChanged(qint64 duration);
   void statusChanged(QMediaPlayer::MediaStatus status);
   void updateImageSize();
+  void setUpLyricsPanel();
+  void updateLyricsPanel(int index);
   Ui::MainWindow *ui;
   SongTableModel *model;
   MyProxyModel *proxyModel;
   MyTableHeader *tableHeader;
   QMediaPlayer *mediaPlayer;
   PlayerControlModel *control;
-  LyricsHandler *lyricsHandler;
+  // TODO: do not inherit QObject, this is a whole utility class outside Qt
+  // framework LyricsManager is responsible for providing the right line of
+  // lyrics instead
+  LyricsLoader *lyricsLoader;
+  LyricsManager *lyricsManager;
   QPixmap pixmap;
   qint64 duration;
+  int currentLine = -1;
   std::unique_ptr<SongParser> parser{new SongParser()};
 };
 #endif  // MAINWINDOW_H

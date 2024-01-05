@@ -11,8 +11,10 @@
 #include <QMediaPlayer>
 #include <QMessageBox>
 #include <QProcess>
+#include <QScrollBar>
 #include <QSortFilterProxyModel>
 #include <QStandardItem>
+#include <QTextBlock>
 #include <QTextStream>
 
 #include "./ui_mainwindow.h"
@@ -31,7 +33,9 @@ MainWindow::MainWindow(QWidget *parent)
   proxyModel->setSourceModel(model);
   // initialize player control
   control = new PlayerControlModel(proxyModel);
-  lyricsHandler = new LyricsHandler(this);
+  lyricsLoader = new LyricsLoader(this);
+  lyricsManager = new LyricsManager(this);
+  ui->textEdit->setReadOnly(true);
   // have to use old style signal and slot here
   connect(model, SIGNAL(playlistChanged()), dynamic_cast<QObject *>(proxyModel),
           SIGNAL(playlistChanged()));
@@ -40,6 +44,9 @@ MainWindow::MainWindow(QWidget *parent)
   connect(control, &PlayerControlModel::indexChange, this, [this]() {
     mediaPlayer->setSource(control->getCurrentUrl());
     mediaPlayer->play();
+    Song song = parser->parseFile(control->getCurrentUrl());
+    lyricsManager->setCurrentLyricsMap(
+        lyricsLoader->getLyrics(song.title, song.artist));
     auto [data, size] = parser->parseSongCover(control->getCurrentUrl());
     if (size > 0) {
       pixmap.loadFromData(data.get(), size);
@@ -49,7 +56,13 @@ MainWindow::MainWindow(QWidget *parent)
     } else {
       ui->label->setText("No cover");
     }
+    setUpLyricsPanel();
   });
+  connect(control, &PlayerControlModel::indexChange, this,
+          [myUI = ui, ctrl = control, md = proxyModel](int idx) {
+            md->onPlayListQueueChange(ctrl->getQueue());
+            myUI->tableView->selectRow(idx);
+          });
 
   // intialize tableview
   ui->tableView->setModel(proxyModel);
@@ -76,6 +89,10 @@ MainWindow::MainWindow(QWidget *parent)
           &MainWindow::durationChanged);
   connect(mediaPlayer, &QMediaPlayer::positionChanged, this,
           &MainWindow::positionChanged);
+  connect(mediaPlayer, &QMediaPlayer::positionChanged, lyricsManager,
+          &LyricsManager::onPlayerProgressChange);
+  connect(lyricsManager, &LyricsManager::newLyricsLineIndex, this,
+          &MainWindow::updateLyricsPanel);
   // initialize ui actions
   connect(ui->actionAdd, &QAction::triggered, this, &MainWindow::addEntry);
   connect(ui->tableView, &QTableView::clicked,
@@ -99,16 +116,53 @@ MainWindow::MainWindow(QWidget *parent)
           &PlayerControlModel::previous);
   connect(ui->random_button, &QAbstractButton::clicked, control,
           &PlayerControlModel::shuffle);
-  connect(control, &PlayerControlModel::indexChange, this,
-          [myUI = ui, ctrl = control, md = proxyModel](int idx) {
-            md->onPlayListQueueChange(ctrl->getQueue());
-            myUI->tableView->selectRow(idx);
-          });
   // setting up splitter
   connect(ui->splitter, &QSplitter::splitterMoved, this,
           &MainWindow::updateImageSize);
   connect(ui->splitter_2, &QSplitter::splitterMoved, this,
           &MainWindow::updateImageSize);
+}
+
+void MainWindow::setUpLyricsPanel() {
+  ui->textEdit->clear();
+  const QMap<int, QString> &map = lyricsManager->getCurrentLyricsMap();
+  for (auto value : map.values()) {
+    ui->textEdit->append(value);
+  }
+}
+
+void getVisibleTextRange(QTextEdit *textEdit) {
+  QTextCursor cursor = textEdit->textCursor();
+  int cursorPosition = cursor.position();
+
+  QScrollBar *verticalScrollBar = textEdit->verticalScrollBar();
+  qDebug() << verticalScrollBar->value();
+
+  qDebug() << cursor.blockNumber() << cursorPosition;
+}
+
+void MainWindow::updateLyricsPanel(int index) {
+  // Get the text cursor of the QTextEdit
+  QTextCursor cursor = ui->textEdit->textCursor();
+  QTextBlockFormat format = cursor.blockFormat();
+
+  cursor.movePosition(QTextCursor::Start);
+  cursor.movePosition(QTextCursor::Down, QTextCursor::MoveAnchor, index);
+  format = cursor.blockFormat();
+  format.setBackground(QColor(Qt::blue));
+  cursor.setBlockFormat(format);
+
+  cursor.movePosition(QTextCursor::Start);
+  cursor.movePosition(QTextCursor::Down, QTextCursor::MoveAnchor, index - 1);
+  format = cursor.blockFormat();
+  format.setBackground(QColor(Qt::transparent));
+  cursor.setBlockFormat(format);
+  cursor.movePosition(QTextCursor::Down, QTextCursor::MoveAnchor, 1);
+
+  ui->textEdit->setTextCursor(cursor);
+  ui->textEdit->ensureCursorVisible();
+
+  // getVisibleTextRange(ui->textEdit);
 }
 
 void MainWindow::resizeEvent(QResizeEvent *event) {
@@ -148,7 +202,6 @@ void MainWindow::durationChanged(qint64 newDuration) {
 }
 
 void MainWindow::positionChanged(qint64 progress) {
-  // qDebug() << "new position" << progress;
   if (!ui->horizontalSlider->isSliderDown())
     ui->horizontalSlider->setValue(progress);
   // updateDurationInfo(progress / 1000);
