@@ -1,6 +1,7 @@
-#ifndef FILESYSTEMMONITOR_H
-#define FILESYSTEMMONITOR_H
+#ifndef FILESYSTEMCOMPARER_H
+#define FILESYSTEMCOMPARER_H
 
+#include <QFileSystemWatcher>
 #include <map>
 #include <vector>
 
@@ -8,9 +9,9 @@
 
 using StateDict = std::map<std::string, std::string>;
 using FilePathList = std::vector<std::string>;
-class FileSystemMonitor {
+class FileSystemComparer {
  public:
-  FileSystemMonitor();
+  FileSystemComparer();
 
   StateDict getDirectoryState(std::string);
   std::tuple<FilePathList, FilePathList, FilePathList> compareTwoStates(
@@ -20,4 +21,4 @@ class FileSystemMonitor {
   ChecksumCalculator checksumCalc;
 };
 
-#endif  // FILESYSTEMMONITOR_H
+#endif  // FILESYSTEMCOMPARER_H

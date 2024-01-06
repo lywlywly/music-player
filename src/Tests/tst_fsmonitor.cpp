@@ -3,26 +3,27 @@
 #include <cstdio>
 #include <fstream>
 
-#include "../filesystemmonitor.h"
+#include "../efswfilesystemmonitor.h"
+#include "../filesystemcomparer.h"
+#include "../qfilesystemmonitor.h"
+#include "qsignalspy.h"
 
 class TestFSMonitor : public QObject {
   Q_OBJECT
  public:
   explicit TestFSMonitor(QObject* parent = nullptr);
-  FileSystemMonitor fsMonitor;
-
+  FileSystemComparer fsComparer;
+  IFileSystemMonitor* qFSMonitor = new QFileSystemMonitor{};
+  IFileSystemMonitor* efswFSMonitor = new EFSWFileSystemMonitor{};
  signals:
  private slots:
-  void toUpper();
   void testCompareTwoStates();
   void testFileSystemChange();
+  void testQFSMonitor();
+  void testEFSWFSMonitor();
 };
 
 TestFSMonitor::TestFSMonitor(QObject* parent) : QObject{parent} {}
-void TestFSMonitor::toUpper() {
-  QString str = "Hello";
-  QVERIFY(str.toUpper() == "HELLO");
-}
 
 void TestFSMonitor::testCompareTwoStates() {
   std::map<std::string, std::string> stateDict1 = {
@@ -31,7 +32,7 @@ void TestFSMonitor::testCompareTwoStates() {
       {"file1", "1"}, {"file2", "2"}, {"file4", "1"}};
 
   auto [removed, added, changed] =
-      fsMonitor.compareTwoStates(stateDict1, stateDict2);
+      fsComparer.compareTwoStates(stateDict1, stateDict2);
   QVERIFY(removed == std::vector<std::string>{"file3"});
   QVERIFY(added == std::vector<std::string>{"file4"});
   QVERIFY(changed == std::vector<std::string>{"file2"});
@@ -51,7 +52,7 @@ void TestFSMonitor::testFileSystemChange() {
   }
 
   std::map<std::string, std::string> stateDict1 =
-      fsMonitor.getDirectoryState("/home/luyao/Documents/test/");
+      fsComparer.getDirectoryState("/home/luyao/Documents/test/");
 
   std::ofstream outputFile(toBeAddedFilename);
   if (outputFile.is_open()) {
@@ -68,13 +69,53 @@ void TestFSMonitor::testFileSystemChange() {
   std::remove(toBeDeletedFilename.c_str());
 
   std::map<std::string, std::string> stateDict2 =
-      fsMonitor.getDirectoryState("/home/luyao/Documents/test/");
+      fsComparer.getDirectoryState("/home/luyao/Documents/test/");
 
   auto [removed, added, changed] =
-      fsMonitor.compareTwoStates(stateDict1, stateDict2);
+      fsComparer.compareTwoStates(stateDict1, stateDict2);
   QCOMPARE(removed, std::vector<std::string>{"exampledelete.txt"});
   QCOMPARE(added, std::vector<std::string>{"exampleadd.txt"});
   QCOMPARE(changed, std::vector<std::string>{"examplemodify.txt"});
+}
+
+void TestFSMonitor::testQFSMonitor() {
+  QSignalSpy spy(dynamic_cast<QObject*>(qFSMonitor),
+                 SIGNAL(directoryChanged(const QString&)));
+
+  qFSMonitor->addWatchingPath("/home/luyao/Documents/test/");
+
+  std::string toBeAddedFilename = "/home/luyao/Documents/test/exampleadd.txt";
+  std::remove(toBeAddedFilename.c_str());
+  std::ofstream outputFile(toBeAddedFilename);
+  if (outputFile.is_open()) {
+    outputFile << "This is some text written to the file." << std::endl;
+    outputFile.close();
+  }
+
+  QTest::qWait(100);
+
+  qDebug() << spy.count();
+  QCOMPARE(spy.takeLast().at(0).toString(), "/home/luyao/Documents/test/");
+}
+
+void TestFSMonitor::testEFSWFSMonitor() {
+  QSignalSpy spy(dynamic_cast<QObject*>(efswFSMonitor),
+                 SIGNAL(fileChanged(const QString&)));
+
+  efswFSMonitor->addWatchingPath("/home/luyao/Documents/test/");
+
+  std::string toBeAddedFilename = "/home/luyao/Documents/test/exampleadd.txt";
+  std::remove(toBeAddedFilename.c_str());
+  std::ofstream outputFile(toBeAddedFilename);
+  if (outputFile.is_open()) {
+    outputFile << "This is some text written to the file." << std::endl;
+    outputFile.close();
+  }
+
+  QTest::qWait(100);
+
+  qDebug() << spy.count();
+  QCOMPARE(spy.takeLast().at(0).toString(), "exampleadd.txt");
 }
 
 QTEST_MAIN(TestFSMonitor)

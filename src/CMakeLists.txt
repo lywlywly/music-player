@@ -14,6 +14,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavcodec libavformat
                   libavutil)
 pkg_check_modules(OPENSSL REQUIRED IMPORTED_TARGET openssl)
+include_directories(include)
 
 set(PROJECT_SOURCES
     mainwindow.cpp
@@ -39,14 +40,24 @@ set(PROJECT_SOURCES
     lyricsmanager.cpp
     checksumcalculator.h
     checksumcalculator.cpp
-    filesystemmonitor.h
-    filesystemmonitor.cpp)
+    filesystemcomparer.h
+    filesystemcomparer.cpp
+    ifilesystemmonitor.h
+    qfilesystemmonitor.h
+    qfilesystemmonitor.cpp
+    efswfilesystemmonitor.h
+    efswfilesystemmonitor.cpp)
 
 add_library(MYLib ${PROJECT_SOURCES})
 
 target_link_libraries(
-  MYLib Qt${QT_VERSION_MAJOR}::Widgets Qt${QT_VERSION_MAJOR}::Sql
-  Qt${QT_VERSION_MAJOR}::Multimedia PkgConfig::FFMPEG PkgConfig::OPENSSL)
+  MYLib
+  Qt${QT_VERSION_MAJOR}::Widgets
+  Qt${QT_VERSION_MAJOR}::Sql
+  Qt${QT_VERSION_MAJOR}::Multimedia
+  PkgConfig::FFMPEG
+  PkgConfig::OPENSSL
+  ${CMAKE_SOURCE_DIR}/lib/libefsw.so)
 
 add_executable(EXEC main.cpp)
 target_link_libraries(EXEC MYLib)
