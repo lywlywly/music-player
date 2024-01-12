@@ -18,8 +18,8 @@ class AddEntryDialog : public QDialog {
   void entryStringEntered(const QString &text);
 
  private:
-  Ui::AddEntryDialog *ui;
   void emitEntryString();
+  Ui::AddEntryDialog *ui;
 };
 
 #endif  // ADDENTRYDIALOG_H

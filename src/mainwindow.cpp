@@ -22,24 +22,86 @@
 #include "myproxymodel.h"
 #include "mytableheader.h"
 #include "qevent.h"
+#include "searchdialog.h"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), ui(new Ui::MainWindow) {
   ui->setupUi(this);
 
-  // initialize models
+  createModels();
+  setUpPlaylist();
+  setUpPlaybackControl();
+  setUpTableView();
+  setUpPlayer();
+  setUpSlider();
+  setUpLyricsPanel();
+  setUpPlaybackActions();
+  setUpSplitter();
+}
+
+void MainWindow::setUpSplitter() {
+  connect(ui->splitter, &QSplitter::splitterMoved, this,
+          &MainWindow::updateImageSize);
+  connect(ui->splitter_2, &QSplitter::splitterMoved, this,
+          &MainWindow::updateImageSize);
+}
+
+void MainWindow::setUpPlaybackActions() {
+  connect(ui->actionPlay, &QAction::triggered, this, &MainWindow::playSong);
+  connect(ui->actionPlay, &QAction::triggered, this, &MainWindow::playSong);
+  connect(ui->play_button, &QAbstractButton::clicked, this,
+          &MainWindow::playSong);
+  connect(ui->actionPause, &QAction::triggered, this, &MainWindow::pauseSong);
+  connect(ui->pause_button, &QAbstractButton::clicked, this,
+          &MainWindow::pauseSong);
+  connect(ui->next_button, &QAbstractButton::clicked, control,
+          &PlayerControlModel::next);
+  connect(ui->prev_button, &QAbstractButton::clicked, control,
+          &PlayerControlModel::previous);
+  connect(ui->random_button, &QAbstractButton::clicked, control,
+          &PlayerControlModel::shuffle);
+}
+
+void MainWindow::setUpSlider() {
+  ui->horizontalSlider->setRange(0, mediaPlayer->duration());
+  connect(ui->horizontalSlider, &QSlider::sliderMoved, this, &MainWindow::seek);
+  connect(mediaPlayer, &QMediaPlayer::durationChanged, this,
+          &MainWindow::durationChanged);
+  connect(mediaPlayer, &QMediaPlayer::positionChanged, this,
+          &MainWindow::positionChanged);
+}
+
+void MainWindow::setUpLyricsPanel() {
+  lyricsLoader = new LyricsLoader(this);
+  lyricsManager = new LyricsManager(this);
+  connect(mediaPlayer, &QMediaPlayer::positionChanged, lyricsManager,
+          &LyricsManager::onPlayerProgressChange);
+  connect(lyricsManager, &LyricsManager::newLyricsLineIndex, this,
+          &MainWindow::updateLyricsPanel);
+}
+
+void MainWindow::setUpTableView() {
+  ui->textEdit->setReadOnly(true);
+  ui->tableView->setModel(proxyModel);
+  ui->tableView->setSortingEnabled(true);
+  ui->tableView->setEditTriggers(QAbstractItemView::NoEditTriggers);
+  ui->tableView->setSelectionBehavior(QAbstractItemView::SelectRows);
+  tableHeader = new MyTableHeader(Qt::Orientation::Horizontal, this);
+  ui->tableView->setHorizontalHeader(tableHeader);
+  tableHeader->setSectionsClickable(true);
+  QObject::connect(
+      tableHeader, &QHeaderView::sectionClicked, this,
+      [this](int logicalIndex) { proxyModel->toogleSortOrder(logicalIndex); });
+}
+
+void MainWindow::createModels() {
   model = new SongTableModel(this);
   proxyModel = new MyProxyModel(this);
   proxyModel->setSourceModel(model);
-  // initialize player control
+}
+
+void MainWindow::setUpPlaybackControl() {
   control = new PlayerControlModel(proxyModel);
-  lyricsLoader = new LyricsLoader(this);
-  lyricsManager = new LyricsManager(this);
-  ui->textEdit->setReadOnly(true);
-
-  connect(ui->actionSave, &QAction::triggered, model, &SongTableModel::load);
-
-  // have to use old style signal and slot here
   connect(model, SIGNAL(playlistChanged()), dynamic_cast<QObject *>(proxyModel),
           SIGNAL(playlistChanged()));
   connect(dynamic_cast<QObject *>(proxyModel), SIGNAL(playlistChanged()),
@@ -59,45 +121,13 @@ MainWindow::MainWindow(QWidget *parent)
     } else {
       ui->label->setText("No cover");
     }
-    setUpLyricsPanel();
+    resetLyricsPanel();
   });
   connect(control, &PlayerControlModel::indexChange, this,
           [myUI = ui, ctrl = control, md = proxyModel](int idx) {
             md->onPlayListQueueChange(ctrl->getQueue());
             myUI->tableView->selectRow(idx);
           });
-
-  // intialize tableview
-  ui->tableView->setModel(proxyModel);
-  ui->tableView->setSortingEnabled(true);
-  ui->tableView->setEditTriggers(QAbstractItemView::NoEditTriggers);
-  ui->tableView->setSelectionBehavior(QAbstractItemView::SelectRows);
-  tableHeader = new MyTableHeader(Qt::Orientation::Horizontal, this);
-  ui->tableView->setHorizontalHeader(tableHeader);
-  tableHeader->setSectionsClickable(true);
-  QObject::connect(
-      tableHeader, &QHeaderView::sectionClicked, this,
-      [this](int logicalIndex) { proxyModel->toogleSortOrder(logicalIndex); });
-  // initialize player
-  mediaPlayer = new QMediaPlayer(this);
-  auto audioOutput = new QAudioOutput;
-  mediaPlayer->setAudioOutput(audioOutput);
-  // audioOutput->setVolume(50);
-  connect(mediaPlayer, &QMediaPlayer::mediaStatusChanged, this,
-          &MainWindow::statusChanged);
-  // initialize slider
-  ui->horizontalSlider->setRange(0, mediaPlayer->duration());
-  connect(ui->horizontalSlider, &QSlider::sliderMoved, this, &MainWindow::seek);
-  connect(mediaPlayer, &QMediaPlayer::durationChanged, this,
-          &MainWindow::durationChanged);
-  connect(mediaPlayer, &QMediaPlayer::positionChanged, this,
-          &MainWindow::positionChanged);
-  connect(mediaPlayer, &QMediaPlayer::positionChanged, lyricsManager,
-          &LyricsManager::onPlayerProgressChange);
-  connect(lyricsManager, &LyricsManager::newLyricsLineIndex, this,
-          &MainWindow::updateLyricsPanel);
-  // initialize ui actions
-  connect(ui->actionAdd, &QAction::triggered, this, &MainWindow::addEntry);
   connect(ui->tableView, &QTableView::clicked,
           [this](QModelIndex i) { control->setNext(i.row()); });
   // doubleClicked will also trigger clicked, here set next to -1
@@ -105,28 +135,28 @@ MainWindow::MainWindow(QWidget *parent)
     control->setNext(-1);
     selectEntry(i);
   });
-  connect(ui->actionOpen, &QAction::triggered, this, &MainWindow::open);
-  connect(ui->actionPlay, &QAction::triggered, this, &MainWindow::playSong);
-  connect(ui->actionPlay, &QAction::triggered, this, &MainWindow::playSong);
-  connect(ui->play_button, &QAbstractButton::clicked, this,
-          &MainWindow::playSong);
-  connect(ui->actionPause, &QAction::triggered, this, &MainWindow::pauseSong);
-  connect(ui->pause_button, &QAbstractButton::clicked, this,
-          &MainWindow::pauseSong);
-  connect(ui->next_button, &QAbstractButton::clicked, control,
-          &PlayerControlModel::next);
-  connect(ui->prev_button, &QAbstractButton::clicked, control,
-          &PlayerControlModel::previous);
-  connect(ui->random_button, &QAbstractButton::clicked, control,
-          &PlayerControlModel::shuffle);
-  // setting up splitter
-  connect(ui->splitter, &QSplitter::splitterMoved, this,
-          &MainWindow::updateImageSize);
-  connect(ui->splitter_2, &QSplitter::splitterMoved, this,
-          &MainWindow::updateImageSize);
 }
 
-void MainWindow::setUpLyricsPanel() {
+void MainWindow::setUpPlaylist() {
+  connect(ui->actionOpen, &QAction::triggered, this, &MainWindow::open);
+  connect(ui->actionSave, &QAction::triggered, model, &SongTableModel::save);
+  connect(ui->actionLoad_playlist, &QAction::triggered, model,
+          &SongTableModel::loadFromUrls);
+  connect(ui->actionAdd, &QAction::triggered, this, &MainWindow::addEntry);
+  connect(ui->actionSearch, &QAction::triggered, this,
+          &MainWindow::newSearchDialog);
+}
+
+void MainWindow::setUpPlayer() {
+  mediaPlayer = new QMediaPlayer(this);
+  auto audioOutput = new QAudioOutput;
+  mediaPlayer->setAudioOutput(audioOutput);
+  // audioOutput->setVolume(50);
+  connect(mediaPlayer, &QMediaPlayer::mediaStatusChanged, this,
+          &MainWindow::statusChanged);
+}
+
+void MainWindow::resetLyricsPanel() {
   ui->textEdit->clear();
   const QMap<int, QString> &map = lyricsManager->getCurrentLyricsMap();
   for (auto value : map.values()) {
@@ -194,6 +224,15 @@ void MainWindow::addEntry() {
                    [this](const QString &text) { model->appendSong(text); });
 }
 
+void MainWindow::newSearchDialog() {
+  SearchDialog *searchDialog = new SearchDialog(this);
+  searchDialog->show();
+  // also disconnect all connections with searchDialog, every time search dialog
+  // is a new one
+  searchDialog->setAttribute(Qt::WA_DeleteOnClose);
+  connect(searchDialog, &SearchDialog::newSongs, this, &MainWindow::addSongs);
+}
+
 void MainWindow::playSong() { mediaPlayer->play(); }
 
 void MainWindow::pauseSong() { mediaPlayer->pause(); }
@@ -248,6 +287,12 @@ void MainWindow::open() {
       this, "Open the file", QDir::homePath() + "/Music");
   qDebug() << "opening file" << fileName;
   for (QString s : fileName) {
+    model->appendSong(s);
+  }
+}
+
+void MainWindow::addSongs(QList<Song> songs) {
+  for (Song s : songs) {
     model->appendSong(s);
   }
 }

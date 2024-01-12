@@ -17,6 +17,7 @@ class TestFSMonitor : public QObject {
   IFileSystemMonitor* efswFSMonitor = new EFSWFileSystemMonitor{};
  signals:
  private slots:
+  void testState();
   void testCompareTwoStates();
   void testFileSystemChange();
   void testQFSMonitor();
@@ -24,6 +25,12 @@ class TestFSMonitor : public QObject {
 };
 
 TestFSMonitor::TestFSMonitor(QObject* parent) : QObject{parent} {}
+
+void TestFSMonitor::testState()
+{
+  std::map<std::string, std::string> stateDict2 =
+      fsComparer.getDirectoryState("/home/luyao/Documents/test/");
+}
 
 void TestFSMonitor::testCompareTwoStates() {
   std::map<std::string, std::string> stateDict1 = {
@@ -39,11 +46,11 @@ void TestFSMonitor::testCompareTwoStates() {
 }
 
 void TestFSMonitor::testFileSystemChange() {
-  std::string toBeAddedFilename = "/home/luyao/Documents/test/exampleadd.txt";
+  std::string toBeAddedFilename = "/home/luyao/Documents/test/exampleadd.mp3";
   std::string toBeModifiedFilename =
-      "/home/luyao/Documents/test/examplemodify.txt";
+      "/home/luyao/Documents/test/examplemodify.mp3";
   std::string toBeDeletedFilename =
-      "/home/luyao/Documents/test/exampledelete.txt";
+      "/home/luyao/Documents/test/exampledelete.mp3";
   std::remove(toBeAddedFilename.c_str());
   std::ofstream outputFile0(toBeDeletedFilename);
   if (outputFile0.is_open()) {
@@ -73,9 +80,9 @@ void TestFSMonitor::testFileSystemChange() {
 
   auto [removed, added, changed] =
       fsComparer.compareTwoStates(stateDict1, stateDict2);
-  QCOMPARE(removed, std::vector<std::string>{"exampledelete.txt"});
-  QCOMPARE(added, std::vector<std::string>{"exampleadd.txt"});
-  QCOMPARE(changed, std::vector<std::string>{"examplemodify.txt"});
+  QCOMPARE(removed, std::vector<std::string>{"/home/luyao/Documents/test/exampledelete.mp3"});
+  QCOMPARE(added, std::vector<std::string>{"/home/luyao/Documents/test/exampleadd.mp3"});
+  QCOMPARE(changed, std::vector<std::string>{"/home/luyao/Documents/test/examplemodify.mp3"});
 }
 
 void TestFSMonitor::testQFSMonitor() {

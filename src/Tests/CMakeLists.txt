@@ -16,4 +16,5 @@ SETUP_TESTS(
    lyrics
    checksum
    fsmonitor
+   songtablemodel
 )

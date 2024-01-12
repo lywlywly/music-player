@@ -174,16 +174,16 @@ Song SongParser::parseFile(QUrl songPath) {
   while ((metadata = av_dict_get(formatContext->metadata, "", metadata,
                                  AV_DICT_IGNORE_SUFFIX))) {
     map.insert(metadata->key, metadata->value);
-    qDebug() << metadata->key << ": " << metadata->value;
+    // qDebug() << metadata->key << ": " << metadata->value;
   }
 
   if (0 == (std::strcmp(formatContext->iformat->name, "ogg"))) {
-    qDebug() << "ogg";
+    // qDebug() << "ogg";
     AVStream* st = formatContext->streams[0];
     AVDictionaryEntry* entry = NULL;
     while ((entry = av_dict_get(st->metadata, "", entry,
                                 AV_DICT_IGNORE_SUFFIX)) != NULL) {
-      qDebug() << entry->key << ": " << entry->value;
+      // qDebug() << entry->key << ": " << entry->value;
       map.insert(entry->key, entry->value);
     }
   }

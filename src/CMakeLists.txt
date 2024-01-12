@@ -46,7 +46,13 @@ set(PROJECT_SOURCES
     qfilesystemmonitor.h
     qfilesystemmonitor.cpp
     efswfilesystemmonitor.h
-    efswfilesystemmonitor.cpp)
+    efswfilesystemmonitor.cpp
+    songloader.h
+    songloader.cpp
+    searchdialog.h
+    searchdialog.cpp
+    searchdialog.ui
+)
 
 add_library(MYLib ${PROJECT_SOURCES})
 

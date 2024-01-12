@@ -5,7 +5,10 @@
 #include <QSqlQuery>
 #include <QStandardItemModel>
 #include <algorithm>
+#include <filesystem>
+#include <vector>
 
+namespace fs = std::filesystem;
 #include "qurl.h"
 
 std::map<Field, QString> fieldToStringMap = {
@@ -28,6 +31,7 @@ SongTableModel::SongTableModel(QObject* parent) {
   std::transform(fields.begin(), fields.end(),
                  std::back_inserter(fieldStringList),
                  [](Field field) { return fieldToStringMap[field]; });
+  loader.renewHash();
 }
 
 int SongTableModel::rowCount(const QModelIndex& /*parent*/) const {
@@ -51,10 +55,22 @@ QVariant SongTableModel::data(const QModelIndex& index, int role) const {
   return QVariant();
 }
 
-void SongTableModel::save() {}
-
 void SongTableModel::load() {
-  qDebug() << "/home/luyao/testdb/mydatabase.db";
+  std::vector<std::string> files;
+
+  std::string directoryPath = "/home/luyao/data/Music/New/";
+
+  for (const auto& entry : fs::directory_iterator(directoryPath)) {
+    if (fs::is_regular_file(entry.path())) {
+      files.push_back(entry.path().string());
+    }
+  }
+  qDebug() << files.size();
+  // Print the files
+  for (const auto& file : files) {
+    qDebug() << file;
+  }
+
   QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE");
   db.setDatabaseName("/home/luyao/testdb/mydatabase.db");
   // Open the database
@@ -63,41 +79,39 @@ void SongTableModel::load() {
     // return 1;
   }
 
-  qDebug() << "succefusslly open";
-
-  QSqlQuery query0("SELECT name FROM sqlite_master WHERE type='table'");
-  while (query0.next()) {
-    QString tableName = query0.value(0).toString();
-    qDebug() << "Table name:" << tableName;
-  }
-
-  // Perform a query to open the table
   QSqlQuery query;
-  if (!query.exec("SELECT * FROM songs")) {
-    qDebug() << "Error executing query:" << query.lastError().text();
-    // return 1;
+  QSqlQuery query0("DELETE FROM songs_full");
+  for (const auto& file : files) {
+    qDebug() << file;
+    Song song = parser->parseFile(QString::fromStdString(file));
+    query.exec(QString("INSERT INTO songs_full (artist, genre, rating, path) "
+                       "VALUES('%1', '%2', '%3', '%4')")
+                   .arg(song.artist)
+                   .arg(song.genre)
+                   .arg(song.rating)
+                   .arg(song.filePath));
   }
+}
 
-  // Process the query results
-  QList<QUrl> urls;
-  while (query.next()) {
-    // Retrieve data from each row
-    QString value1 = query.value(0).toString();
-    QString value2 = query.value(1).toString();
+void SongTableModel::save() { loader.saveUrlsToDB(songs); }
 
-    // Process the retrieved data
-    qDebug() << "Value 1:" << value1;
-    qDebug() << "Value 2:" << value2;
-    urls.append(value2);
-  }
-
+void SongTableModel::loadFromUrls() {
+  QList<QString> urls = loader.loadUrlsFromDB();
+  qDebug() << "get urls from DB";
   for (auto url : urls) {
     qDebug() << url;
     appendSong(url);
   }
+  qDebug() << "done";
 }
 
-void SongTableModel::appendSong(const QUrl songPath) {
+void SongTableModel::clear() {
+  beginRemoveRows(QModelIndex(), 0, songs.size() - 1);
+  songs.clear();
+  endRemoveRows();
+}
+
+void SongTableModel::appendSong(const QUrl& songPath) {
   Song song = parser->parseFile(songPath);
   int newRow = rowCount();
   beginInsertRows(QModelIndex(), newRow, newRow);
@@ -105,6 +119,14 @@ void SongTableModel::appendSong(const QUrl songPath) {
   endInsertRows();
   emit playlistChanged();
 };
+
+void SongTableModel::appendSong(const Song& song) {
+  int newRow = rowCount();
+  beginInsertRows(QModelIndex(), newRow, newRow);
+  songs.append(song);
+  endInsertRows();
+  emit playlistChanged();
+}
 
 QVariant SongTableModel::headerData(int section, Qt::Orientation orientation,
                                     int role) const {

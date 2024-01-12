@@ -101,7 +101,7 @@
               <widget class="QSplitter" name="splitter_2">
                <property name="maximumSize">
                 <size>
-                 <width>6000</width>
+                 <width>600</width>
                  <height>16777215</height>
                 </size>
                </property>
@@ -163,6 +163,7 @@
     <addaction name="actionOpen"/>
     <addaction name="separator"/>
     <addaction name="actionAdd_folder"/>
+    <addaction name="actionLoad_playlist"/>
    </widget>
    <widget class="QMenu" name="menuEdit">
     <property name="title">
@@ -191,10 +192,17 @@
     <addaction name="actionPlayback_follows_cursor"/>
     <addaction name="actionCursor_follows_playback"/>
    </widget>
+   <widget class="QMenu" name="menuLibrary">
+    <property name="title">
+     <string>Library</string>
+    </property>
+    <addaction name="actionSearch"/>
+   </widget>
    <addaction name="menuFile"/>
    <addaction name="menuEdit"/>
    <addaction name="menuView"/>
    <addaction name="menuPlayback"/>
+   <addaction name="menuLibrary"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
   <action name="actionOpen">
@@ -260,6 +268,16 @@
   <action name="actionCursor_follows_playback">
    <property name="text">
     <string>Cursor follows playback</string>
+   </property>
+  </action>
+  <action name="actionSearch">
+   <property name="text">
+    <string>Search</string>
+   </property>
+  </action>
+  <action name="actionLoad_playlist">
+   <property name="text">
+    <string>Load playlist...</string>
    </property>
   </action>
  </widget>

@@ -29,6 +29,7 @@ class MainWindow : public QMainWindow {
   void playSong();
   void pauseSong();
   void seek(int mseconds);
+  void newSearchDialog();
 
  protected:
   void resizeEvent(QResizeEvent *event) override;
@@ -38,8 +39,9 @@ class MainWindow : public QMainWindow {
   void durationChanged(qint64 duration);
   void statusChanged(QMediaPlayer::MediaStatus status);
   void updateImageSize();
-  void setUpLyricsPanel();
+  void resetLyricsPanel();
   void updateLyricsPanel(int index);
+  void addSongs(QList<Song> songs);
   Ui::MainWindow *ui;
   SongTableModel *model;
   MyProxyModel *proxyModel;
@@ -55,5 +57,14 @@ class MainWindow : public QMainWindow {
   qint64 duration;
   int currentLine = -1;
   std::unique_ptr<SongParser> parser{new SongParser()};
+  void setUpSplitter();
+  void setUpPlaybackActions();
+  void setUpSlider();
+  void setUpLyricsPanel();
+  void setUpTableView();
+  void createModels();
+  void setUpPlaybackControl();
+  void setUpPlaylist();
+  void setUpPlayer();
 };
 #endif  // MAINWINDOW_H

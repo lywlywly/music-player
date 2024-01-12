@@ -34,9 +34,9 @@ class SongParser {
   QJsonValue getValue(const QJsonObject &jsonObject, Field field);
   QVariant getValue(const QMap<QString, QString> &jsonObject, Field field);
   QMap<Field, QList<QString>> fieldMap = {
-      {Field::ARTIST, {"artist", "ARTIST"}},
-      {Field::TITLE, {"title", "TITLE"}},
-      {Field::GENRE, {"genre", "GENRE"}},
+      {Field::ARTIST, {"artist", "ARTIST", "Artist"}},
+      {Field::TITLE, {"title", "TITLE", "Title"}},
+      {Field::GENRE, {"genre", "GENRE", "Genre"}},
       {Field::BPM, {"TBPM"}},
       {Field::REPLAY_GAIN, {"replaygain_track_gain"}},
       {Field::RATING, {"Rating"}},

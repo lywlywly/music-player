@@ -4,6 +4,7 @@
 #include <QStandardItemModel>
 
 #include "qurl.h"
+#include "songloader.h"
 #include "songparser.h"
 
 extern std::map<Field, QString> fieldToStringMap;
@@ -18,7 +19,8 @@ class SongTableModel : public QAbstractTableModel {
   QUrl getEntryUrl(const QModelIndex &);
   // not used
   QUrl getEntryUrl(int);
-  void appendSong(const QUrl songPath);
+  void appendSong(const QUrl &songPath);
+  void appendSong(const Song &song);
   int rowCount(const QModelIndex &parent = QModelIndex()) const override;
   int columnCount(const QModelIndex &parent = QModelIndex()) const override;
   QVariant data(const QModelIndex &index,
@@ -28,7 +30,9 @@ class SongTableModel : public QAbstractTableModel {
   // not used
   QVariant headerData(int section, Qt::Orientation orientation,
                       int role) const override;
- signals:
+  void loadFromUrls();
+  void clear();
+signals:
   void playlistChanged();
 
  private:
@@ -37,6 +41,7 @@ class SongTableModel : public QAbstractTableModel {
   std::unique_ptr<SongParser> parser{new SongParser()};
   QVector<Song> songs;
   int columnSize;
+  SongLoader loader;
 };
 
 #endif  // SONGTABLEMODEL_H
