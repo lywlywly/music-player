@@ -20,12 +20,13 @@ void LyricsManager::onPlayerProgressChange(qint64 progress) {
 
   int index = keys.size() - 1 - std::distance(keys.rbegin(), it0);
 
-  if (lyricsMap.isEmpty()) return;
+  if (lyricsMap.isEmpty())
+    return;
 
   if (index != currentLineIndex) {
     // qDebug() << "value" << *it0;
     // qDebug() << index;
-    qDebug() << lyricsMap.values()[index];
+    // qDebug() << lyricsMap.values()[index];
     currentLineIndex = index;
     emit newLyricsLineIndex(currentLineIndex);
   }

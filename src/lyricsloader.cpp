@@ -13,14 +13,13 @@ void testTmp(const std::string &&) = delete;
 QMap<int, QString> LyricsLoader::getLyrics(QString title, QString artist) {
   QFile file =
       findFileByTitleAndArtist(title.toStdString(), artist.toStdString());
-  QString filename = "/home/luyao/Music/茅原実里 - みちしるべ.lrc";
   QMap<int, QString> map;
   QMap<QString, QString> metadata;
   if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
     qDebug() << "Could not open file: " << file.errorString();
   }
 
-  std::regex patternMetadata{R"(\[([a-zA-Z]+):(.*)])"};
+  std::regex patternMetadata{R"(\[([a-zA-Z]+):(.*)\])"};
   std::regex patternTime{R"(\[(.*?)\])"};
   std::regex patternText{R"(\]([^\[\]]*)$)"};
 
@@ -62,7 +61,7 @@ QMap<int, QString> LyricsLoader::getLyrics(QString title, QString artist) {
   }
   file.close();
 
-  qDebug() << metadata;
+  // qDebug() << metadata;
 
   return map;
 }
@@ -70,9 +69,7 @@ QMap<int, QString> LyricsLoader::getLyrics(QString title, QString artist) {
 QFile LyricsLoader::findFileByTitleAndArtist(std::string title,
                                              std::string artist) {
   std::string path =
-      std::format("/home/luyao/Music/{} - {}.lrc", artist, title);
-  // std::string path1 = "123Ab张顺飞c";
-  // qDebug() << path1;
+      std::format("/Users/wangluyao/Music/{} - {}.lrc", artist, title);
   qDebug() << QString::fromStdString(path);
   return QFile{QString::fromStdString(path)};
 }

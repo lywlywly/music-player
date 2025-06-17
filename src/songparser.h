@@ -2,6 +2,8 @@
 #define SONGPARSER_H
 
 #include "qjsonobject.h"
+#include "songlibrary.h"
+
 enum class Field {
   ARTIST,
   TITLE,
@@ -13,6 +15,7 @@ enum class Field {
   FILE_PATH,
   STATUS,
 };
+
 struct Song {
   QString artist;
   QString title;
@@ -23,14 +26,16 @@ struct Song {
   QString comment;
   QString filePath;
 };
+
 class SongParser {
- public:
+public:
   SongParser();
   Song parseFile(QUrl);
+  MSong parse(QUrl);
   QT_DEPRECATED Song parseFileLegacy(QUrl);
   std::tuple<std::unique_ptr<uchar[]>, int> parseSongCover(QUrl);
 
- private:
+private:
   QJsonValue getValue(const QJsonObject &jsonObject, Field field);
   QVariant getValue(const QMap<QString, QString> &jsonObject, Field field);
   QMap<Field, QList<QString>> fieldMap = {
@@ -44,4 +49,4 @@ class SongParser {
   int idx = 0;
 };
 
-#endif  // SONGPARSER_H
+#endif // SONGPARSER_H

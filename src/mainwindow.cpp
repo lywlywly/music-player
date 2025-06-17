@@ -1,5 +1,8 @@
 #include "mainwindow.h"
 
+#include "./ui_mainwindow.h"
+#include "addentrydialog.h"
+#include "qevent.h"
 #include <QAudioOutput>
 #include <QDebug>
 #include <QFile>
@@ -17,17 +20,12 @@
 #include <QTextBlock>
 #include <QTextStream>
 
-#include "./ui_mainwindow.h"
-#include "addentrydialog.h"
-#include "myproxymodel.h"
-#include "mytableheader.h"
-#include "qevent.h"
-#include "searchdialog.h"
-
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent), ui(new Ui::MainWindow) {
+    : QMainWindow(parent), ui(new Ui::MainWindow), control{playbackQueue},
+      playlist{SongStore{songLibrary}, playbackQueue} {
   ui->setupUi(this);
-
+  playlist.registerStatusUpdateCallback();
+  control.setView(&playlist);
   createModels();
   setUpPlaylist();
   setUpPlaybackControl();
@@ -37,6 +35,35 @@ MainWindow::MainWindow(QWidget *parent)
   setUpLyricsPanel();
   setUpPlaybackActions();
   setUpSplitter();
+
+  orderGroup = new QActionGroup(this);
+  orderGroup->setExclusive(true);
+  for (QAction *act : {ui->actionDefault, ui->actionShuffle_tracks}) {
+    act->setCheckable(true);
+    orderGroup->addAction(act);
+  }
+
+  ui->actionDefault->setChecked(true); // Set default
+  QAction *checked = orderGroup->checkedAction();
+  QString selectedText = checked->text();
+  control.setPolicy(string2Policy(selectedText));
+
+  connect(orderGroup, &QActionGroup::triggered, this, [this](QAction *action) {
+    QAction *checked = orderGroup->checkedAction();
+    QString selectedText = checked->text();
+    control.setPolicy(string2Policy(selectedText));
+  });
+
+  playNextAction = contextMenu.addAction("Play Next");
+  playEndAction = contextMenu.addAction("Add to Playback Queue");
+  connect(playNextAction, &QAction::triggered, this, [&]() {
+    QModelIndex index = playNextAction->data().value<QModelIndex>();
+    control.queueStart(index.row());
+  });
+  connect(playEndAction, &QAction::triggered, this, [&]() {
+    QModelIndex index = playNextAction->data().value<QModelIndex>();
+    control.queueEnd(index.row());
+  });
 }
 
 void MainWindow::setUpSplitter() {
@@ -48,111 +75,160 @@ void MainWindow::setUpSplitter() {
 
 void MainWindow::setUpPlaybackActions() {
   connect(ui->actionPlay, &QAction::triggered, this, &MainWindow::playSong);
-  connect(ui->actionPlay, &QAction::triggered, this, &MainWindow::playSong);
   connect(ui->play_button, &QAbstractButton::clicked, this,
           &MainWindow::playSong);
   connect(ui->actionPause, &QAction::triggered, this, &MainWindow::pauseSong);
   connect(ui->pause_button, &QAbstractButton::clicked, this,
           &MainWindow::pauseSong);
-  connect(ui->next_button, &QAbstractButton::clicked, control,
-          &PlayerControlModel::next);
-  connect(ui->prev_button, &QAbstractButton::clicked, control,
-          &PlayerControlModel::previous);
-  connect(ui->random_button, &QAbstractButton::clicked, control,
-          &PlayerControlModel::shuffle);
+  connect(ui->next_button, &QAbstractButton::clicked, this, &MainWindow::next);
+  connect(ui->prev_button, &QAbstractButton::clicked, this, &MainWindow::prev);
+  // connect(ui->random_button, &QAbstractButton::clicked, &pb,
+  //         &PlaybackState::shuffle);
+}
+
+void MainWindow::next() {
+  auto [song, row] = control.next();
+  if (row < 0) {
+    // empty playlist, do nothing
+    qDebug() << "next" << "empty playlist, do nothing";
+    return;
+  }
+  QUrl url = QString::fromUtf8(song.at("path"));
+  mediaPlayer.setSource(url);
+  mediaPlayer.play();
+  QModelIndex index =
+      ui->tableView->model()->index(row, 0); // column 0 is enough
+  ui->tableView->selectionModel()->select(index, QItemSelectionModel::Select |
+                                                     QItemSelectionModel::Rows);
+  // Optional: set focus and scroll to it
+  ui->tableView->setCurrentIndex(index);
+  ui->tableView->scrollTo(index);
+  setUpImage(song);
+}
+
+void MainWindow::prev() {
+  auto [song, row] = control.prev();
+  if (row < 0) {
+    // empty playlist, do nothing
+    qDebug() << "prev" << "empty playlist, do nothing";
+    return;
+  }
+  QUrl url = QString::fromUtf8(song.at("path"));
+  mediaPlayer.setSource(url);
+  mediaPlayer.play();
+  QModelIndex index =
+      ui->tableView->model()->index(row, 0); // column 0 is enough
+  ui->tableView->selectionModel()->select(index, QItemSelectionModel::Select |
+                                                     QItemSelectionModel::Rows);
+  // Optional: set focus and scroll to it
+  ui->tableView->setCurrentIndex(index);
+  ui->tableView->scrollTo(index);
+  setUpImage(song);
 }
 
 void MainWindow::setUpSlider() {
-  ui->horizontalSlider->setRange(0, mediaPlayer->duration());
+  ui->horizontalSlider->setRange(0, mediaPlayer.duration());
   connect(ui->horizontalSlider, &QSlider::sliderMoved, this, &MainWindow::seek);
-  connect(mediaPlayer, &QMediaPlayer::durationChanged, this,
+  connect(&mediaPlayer, &QMediaPlayer::durationChanged, this,
           &MainWindow::durationChanged);
-  connect(mediaPlayer, &QMediaPlayer::positionChanged, this,
+  connect(&mediaPlayer, &QMediaPlayer::positionChanged, this,
           &MainWindow::positionChanged);
 }
 
 void MainWindow::setUpLyricsPanel() {
   lyricsLoader = new LyricsLoader(this);
   lyricsManager = new LyricsManager(this);
-  connect(mediaPlayer, &QMediaPlayer::positionChanged, lyricsManager,
+  connect(&mediaPlayer, &QMediaPlayer::positionChanged, lyricsManager,
           &LyricsManager::onPlayerProgressChange);
   connect(lyricsManager, &LyricsManager::newLyricsLineIndex, this,
           &MainWindow::updateLyricsPanel);
 }
 
+bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
+  if (obj == ui->tableView && event->type() == QEvent::KeyPress) {
+    QKeyEvent *keyEvent = static_cast<QKeyEvent *>(event);
+    if (keyEvent->key() == Qt::Key_Backspace) {
+      QModelIndex index = ui->tableView->currentIndex();
+      if (index.isValid()) {
+        playlist.removeSong(index.row());
+      }
+      return true;
+    }
+  }
+  return QObject::eventFilter(obj, event);
+}
+
+Policy MainWindow::string2Policy(QString s) {
+  if (s == "Default")
+    return Policy::Sequential;
+  else if (s == "Shuffle (tracks)")
+    return Policy::Shuffle;
+  throw std::logic_error("Never");
+}
+
 void MainWindow::setUpTableView() {
   ui->textEdit->setReadOnly(true);
-  ui->tableView->setModel(proxyModel);
+  ui->tableView->setModel(&playlist);
   ui->tableView->setSortingEnabled(true);
   ui->tableView->setEditTriggers(QAbstractItemView::NoEditTriggers);
   ui->tableView->setSelectionBehavior(QAbstractItemView::SelectRows);
-  tableHeader = new MyTableHeader(Qt::Orientation::Horizontal, this);
-  ui->tableView->setHorizontalHeader(tableHeader);
-  tableHeader->setSectionsClickable(true);
-  QObject::connect(
-      tableHeader, &QHeaderView::sectionClicked, this,
-      [this](int logicalIndex) { proxyModel->toogleSortOrder(logicalIndex); });
+  ui->tableView->installEventFilter(this);
+  ui->tableView->setContextMenuPolicy(Qt::CustomContextMenu);
+  connect(ui->tableView, &QTableView::customContextMenuRequested, this,
+          &MainWindow::onCustomContextMenuRequested);
 }
 
-void MainWindow::createModels() {
-  model = new SongTableModel(this);
-  proxyModel = new MyProxyModel(this);
-  proxyModel->setSourceModel(model);
+void MainWindow::onCustomContextMenuRequested(const QPoint &pos) {
+  QModelIndex index = ui->tableView->indexAt(pos);
+  if (!index.isValid())
+    return;
+
+  playNextAction->setData(QVariant::fromValue(index));
+  playEndAction->setData(QVariant::fromValue(index));
+
+  contextMenu.exec(ui->tableView->viewport()->mapToGlobal(pos));
 }
+
+void MainWindow::createModels() {}
 
 void MainWindow::setUpPlaybackControl() {
-  control = new PlayerControlModel(proxyModel);
-  connect(model, SIGNAL(playlistChanged()), dynamic_cast<QObject *>(proxyModel),
-          SIGNAL(playlistChanged()));
-  connect(dynamic_cast<QObject *>(proxyModel), SIGNAL(playlistChanged()),
-          control, SLOT(onPlayListChange()));
-  connect(control, &PlayerControlModel::indexChange, this, [this]() {
-    mediaPlayer->setSource(control->getCurrentUrl());
-    mediaPlayer->play();
-    Song song = parser->parseFile(control->getCurrentUrl());
-    lyricsManager->setCurrentLyricsMap(
-        lyricsLoader->getLyrics(song.title, song.artist));
-    auto [data, size] = parser->parseSongCover(control->getCurrentUrl());
-    if (size > 0) {
-      pixmap.loadFromData(data.get(), size);
-      ui->label->setPixmap(pixmap.scaled(ui->splitter->sizes().first() - 10,
-                                         ui->splitter_2->sizes().last() - 10,
-                                         Qt::KeepAspectRatio));
-    } else {
-      ui->label->setText("No cover");
-    }
-    resetLyricsPanel();
-  });
-  connect(control, &PlayerControlModel::indexChange, this,
-          [myUI = ui, ctrl = control, md = proxyModel](int idx) {
-            md->onPlayListQueueChange(ctrl->getQueue());
-            myUI->tableView->selectRow(idx);
-          });
-  connect(ui->tableView, &QTableView::clicked,
-          [this](QModelIndex i) { control->setNext(i.row()); });
-  // doubleClicked will also trigger clicked, here set next to -1
   connect(ui->tableView, &QTableView::doubleClicked, [this](QModelIndex i) {
-    control->setNext(-1);
-    selectEntry(i);
+    MSong song = control.play(i.row());
+    mediaPlayer.setSource(QString::fromUtf8(song.at("path")));
+    mediaPlayer.play();
+    setUpImage(song);
   });
+}
+
+void MainWindow::setUpImage(MSong song) {
+  lyricsManager->setCurrentLyricsMap(
+      lyricsLoader->getLyrics(QString::fromUtf8(song.at("title")),
+                              QString::fromUtf8(song.at("artist"))));
+  auto [data, size] =
+      parser->parseSongCover(QString::fromUtf8(song.at("path")));
+  if (size > 0) {
+    pixmap.loadFromData(data.get(), size);
+    ui->label->setPixmap(pixmap.scaled(ui->splitter->sizes().first() - 10,
+                                       ui->splitter_2->sizes().last() - 10,
+                                       Qt::KeepAspectRatio));
+  } else {
+    ui->label->setText("No cover");
+  }
+  resetLyricsPanel();
 }
 
 void MainWindow::setUpPlaylist() {
   connect(ui->actionOpen, &QAction::triggered, this, &MainWindow::open);
-  connect(ui->actionSave, &QAction::triggered, model, &SongTableModel::save);
-  connect(ui->actionLoad_playlist, &QAction::triggered, model,
-          &SongTableModel::loadFromUrls);
   connect(ui->actionAdd, &QAction::triggered, this, &MainWindow::addEntry);
-  connect(ui->actionSearch, &QAction::triggered, this,
-          &MainWindow::newSearchDialog);
+  connect(ui->actionClear_Playlist, &QAction::triggered, &playlist,
+          &Playlist::clear);
 }
 
 void MainWindow::setUpPlayer() {
-  mediaPlayer = new QMediaPlayer(this);
   auto audioOutput = new QAudioOutput;
-  mediaPlayer->setAudioOutput(audioOutput);
+  mediaPlayer.setAudioOutput(audioOutput);
   // audioOutput->setVolume(50);
-  connect(mediaPlayer, &QMediaPlayer::mediaStatusChanged, this,
+  connect(&mediaPlayer, &QMediaPlayer::mediaStatusChanged, this,
           &MainWindow::statusChanged);
 }
 
@@ -210,75 +286,54 @@ void MainWindow::updateImageSize() {
   ui->label->setPixmap(scaledPixmap);
 }
 
-void MainWindow::selectEntry(const QModelIndex &index) {
-  control->setCurrentIndex(index.row());
-  mediaPlayer->setSource(control->getCurrentUrl());
-  mediaPlayer->play();
-}
-
 void MainWindow::addEntry() {
   AddEntryDialog *addEntryDialog = new AddEntryDialog(this);
   addEntryDialog->show();
   addEntryDialog->setAttribute(Qt::WA_DeleteOnClose);
-  QObject::connect(addEntryDialog, &AddEntryDialog::entryStringEntered,
-                   [this](const QString &text) { model->appendSong(text); });
+  QObject::connect(
+      addEntryDialog, &AddEntryDialog::entryStringEntered,
+      [this](const QString &text) { playlist.addSong(parser->parse(text)); });
 }
 
-void MainWindow::newSearchDialog() {
-  SearchDialog *searchDialog = new SearchDialog(this);
-  searchDialog->show();
-  // also disconnect all connections with searchDialog, every time search dialog
-  // is a new one
-  searchDialog->setAttribute(Qt::WA_DeleteOnClose);
-  connect(searchDialog, &SearchDialog::newSongs, this, &MainWindow::addSongs);
-}
+void MainWindow::playSong() { mediaPlayer.play(); }
 
-void MainWindow::playSong() { mediaPlayer->play(); }
-
-void MainWindow::pauseSong() { mediaPlayer->pause(); }
+void MainWindow::pauseSong() { mediaPlayer.pause(); }
 
 void MainWindow::durationChanged(qint64 newDuration) {
   duration = newDuration;
-  // qDebug() << "new duration" << duration;
   ui->horizontalSlider->setMaximum(duration);
 }
 
 void MainWindow::positionChanged(qint64 progress) {
   if (!ui->horizontalSlider->isSliderDown())
     ui->horizontalSlider->setValue(progress);
-  // updateDurationInfo(progress / 1000);
 }
 
-void MainWindow::seek(int mseconds) {
-  // qDebug() << "seek" << mseconds;
-  mediaPlayer->setPosition(mseconds);
-}
+void MainWindow::seek(int mseconds) { mediaPlayer.setPosition(mseconds); }
 
 void MainWindow::statusChanged(QMediaPlayer::MediaStatus status) {
   // TODO
   // handleCursor(status);
   switch (status) {
-    case QMediaPlayer::NoMedia:
-      break;
-    case QMediaPlayer::LoadedMedia:
-      break;
-    case QMediaPlayer::LoadingMedia:
-      break;
-    case QMediaPlayer::BufferingMedia:
-      break;
-    case QMediaPlayer::BufferedMedia:
-      break;
-    case QMediaPlayer::StalledMedia:
-      break;
-    case QMediaPlayer::EndOfMedia:
-      QApplication::alert(this);
-      control->next();
-      mediaPlayer->setSource(control->getCurrentUrl());
-      mediaPlayer->play();
-      break;
-    case QMediaPlayer::InvalidMedia:
-      // displayErrorMessage();
-      break;
+  case QMediaPlayer::NoMedia:
+    break;
+  case QMediaPlayer::LoadedMedia:
+    break;
+  case QMediaPlayer::LoadingMedia:
+    break;
+  case QMediaPlayer::BufferingMedia:
+    break;
+  case QMediaPlayer::BufferedMedia:
+    break;
+  case QMediaPlayer::StalledMedia:
+    break;
+  case QMediaPlayer::EndOfMedia:
+    QApplication::alert(this);
+    this->next();
+    break;
+  case QMediaPlayer::InvalidMedia:
+    // displayErrorMessage();
+    break;
   }
 }
 
@@ -287,13 +342,7 @@ void MainWindow::open() {
       this, "Open the file", QDir::homePath() + "/Music");
   qDebug() << "opening file" << fileName;
   for (QString s : fileName) {
-    model->appendSong(s);
-  }
-}
-
-void MainWindow::addSongs(QList<Song> songs) {
-  for (Song s : songs) {
-    model->appendSong(s);
+    playlist.addSong(parser->parse(s));
   }
 }
 

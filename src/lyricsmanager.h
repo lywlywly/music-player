@@ -6,18 +6,18 @@
 
 class LyricsManager : public QObject {
   Q_OBJECT
- public:
+public:
   explicit LyricsManager(QObject *parent = nullptr);
   void setCurrentLyricsMap(QMap<int, QString>);
   const QMap<int, QString> &getCurrentLyricsMap() const;
- public slots:
+public slots:
   void onPlayerProgressChange(qint64 progress);
- signals:
+signals:
   void newLyricsLineIndex(int newIndex);
 
- private:
+private:
   QMap<int, QString> lyricsMap;
   int currentLineIndex = -1;
 };
 
-#endif  // LYRICSMANAGER_H
+#endif // LYRICSMANAGER_H

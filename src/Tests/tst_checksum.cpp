@@ -97,7 +97,7 @@ void TestChecksum::testSongHeader() {
 }
 
 void TestChecksum::testPerformance() {
-  std::string directoryPath = "/home/luyao/Videos/";
+  std::string directoryPath = "/Users/wangluyao/Music";
   std::vector<std::string> filenames;
   for (const auto& entry : fs::directory_iterator(directoryPath)) {
     if (entry.is_regular_file()) {

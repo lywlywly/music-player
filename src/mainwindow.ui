@@ -34,6 +34,13 @@
          </widget>
         </item>
         <item>
+         <widget class="QPushButton" name="stop_button">
+          <property name="text">
+           <string>Stop</string>
+          </property>
+         </widget>
+        </item>
+        <item>
          <widget class="QPushButton" name="prev_button">
           <property name="text">
            <string>Previous</string>
@@ -57,7 +64,7 @@
         <item>
          <widget class="QSlider" name="horizontalSlider">
           <property name="orientation">
-           <enum>Qt::Horizontal</enum>
+           <enum>Qt::Orientation::Horizontal</enum>
           </property>
          </widget>
         </item>
@@ -66,16 +73,16 @@
       <item>
        <widget class="QFrame" name="frame">
         <property name="frameShape">
-         <enum>QFrame::StyledPanel</enum>
+         <enum>QFrame::Shape::StyledPanel</enum>
         </property>
         <property name="frameShadow">
-         <enum>QFrame::Raised</enum>
+         <enum>QFrame::Shadow::Raised</enum>
         </property>
         <layout class="QHBoxLayout" name="horizontalLayout_2">
          <item>
           <widget class="QSplitter" name="splitter">
            <property name="orientation">
-            <enum>Qt::Horizontal</enum>
+            <enum>Qt::Orientation::Horizontal</enum>
            </property>
            <widget class="QFrame" name="frame_2">
             <property name="minimumSize">
@@ -91,10 +98,10 @@
              </size>
             </property>
             <property name="frameShape">
-             <enum>QFrame::StyledPanel</enum>
+             <enum>QFrame::Shape::StyledPanel</enum>
             </property>
             <property name="frameShadow">
-             <enum>QFrame::Raised</enum>
+             <enum>QFrame::Shadow::Raised</enum>
             </property>
             <layout class="QVBoxLayout" name="verticalLayout">
              <item>
@@ -106,7 +113,7 @@
                 </size>
                </property>
                <property name="orientation">
-                <enum>Qt::Vertical</enum>
+                <enum>Qt::Orientation::Vertical</enum>
                </property>
                <widget class="QTextEdit" name="textEdit">
                 <property name="maximumSize">
@@ -164,6 +171,7 @@
     <addaction name="separator"/>
     <addaction name="actionAdd_folder"/>
     <addaction name="actionLoad_playlist"/>
+    <addaction name="actionClear_Playlist"/>
    </widget>
    <widget class="QMenu" name="menuEdit">
     <property name="title">
@@ -181,6 +189,13 @@
     <property name="title">
      <string>Playback</string>
     </property>
+    <widget class="QMenu" name="menuOrder">
+     <property name="title">
+      <string>Order</string>
+     </property>
+     <addaction name="actionDefault"/>
+     <addaction name="actionShuffle_tracks"/>
+    </widget>
     <addaction name="actionStop"/>
     <addaction name="actionPause"/>
     <addaction name="actionPlay"/>
@@ -188,7 +203,7 @@
     <addaction name="actionNext"/>
     <addaction name="actionRandom"/>
     <addaction name="separator"/>
-    <addaction name="actionOrder"/>
+    <addaction name="menuOrder"/>
     <addaction name="actionPlayback_follows_cursor"/>
     <addaction name="actionCursor_follows_playback"/>
    </widget>
@@ -212,17 +227,12 @@
   </action>
   <action name="actionAdd_folder">
    <property name="text">
-    <string>Add folder...</string>
+    <string>Add Folder...</string>
    </property>
   </action>
   <action name="actionPause">
    <property name="text">
     <string>Pause</string>
-   </property>
-  </action>
-  <action name="actionOrder">
-   <property name="text">
-    <string>Order</string>
    </property>
   </action>
   <action name="actionSave">
@@ -277,7 +287,25 @@
   </action>
   <action name="actionLoad_playlist">
    <property name="text">
-    <string>Load playlist...</string>
+    <string>Load Playlist...</string>
+   </property>
+  </action>
+  <action name="actionClear_Playlist">
+   <property name="text">
+    <string>Clear Playlist</string>
+   </property>
+  </action>
+  <action name="actionDefault">
+   <property name="checkable">
+    <bool>false</bool>
+   </property>
+   <property name="text">
+    <string>Default</string>
+   </property>
+  </action>
+  <action name="actionShuffle_tracks">
+   <property name="text">
+    <string>Shuffle (tracks)</string>
    </property>
   </action>
  </widget>
