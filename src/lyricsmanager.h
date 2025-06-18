@@ -8,15 +8,15 @@ class LyricsManager : public QObject {
   Q_OBJECT
 public:
   explicit LyricsManager(QObject *parent = nullptr);
-  void setCurrentLyricsMap(QMap<int, QString>);
-  const QMap<int, QString> &getCurrentLyricsMap() const;
-public slots:
+  void setLyrics(std::map<int, std::string> &&);
+  const std::map<int, std::string> &getCurrentLyricsMap() const;
   void onPlayerProgressChange(qint64 progress);
 signals:
   void newLyricsLineIndex(int newIndex);
 
 private:
-  QMap<int, QString> lyricsMap;
+  std::map<int, std::string> lyricsMap;
+  std::vector<int> keys;
   int currentLineIndex = -1;
 };
 

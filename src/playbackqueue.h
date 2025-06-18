@@ -2,6 +2,7 @@
 #define PLAYBACKQUEUE_H
 
 #include <QObject>
+#include <deque>
 
 class PlaybackQueue : public QObject {
   Q_OBJECT

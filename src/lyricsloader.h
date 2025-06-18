@@ -1,21 +1,19 @@
 #ifndef LYRICSLOADER_H
 #define LYRICSLOADER_H
 
-#include <QFile>
-#include <QObject>
+#include <filesystem>
+#include <map>
+#include <string>
 
-// TODO: do not inherit QObject, this is a whole utility class outside Qt
-// framework LyricsManager is responsible for providing the right line of lyrics
-// instead
-class LyricsLoader : public QObject {
-  Q_OBJECT
+class LyricsLoader {
 public:
-  explicit LyricsLoader(QObject *parent = nullptr);
-  QMap<int, QString> getLyrics(QString title, QString artist);
-signals:
+  explicit LyricsLoader();
+  std::map<int, std::string> getLyrics(std::string_view title,
+                                       std::string_view artist);
 
 private:
-  QFile findFileByTitleAndArtist(std::string title, std::string artist);
+  std::filesystem::path findFileByTitleAndArtist(std::string_view title,
+                                                 std::string_view artist);
 };
 
 #endif // LYRICSLOADER_H

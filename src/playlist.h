@@ -7,6 +7,8 @@
 #include "songlibrary.h"
 #include "songstore.h"
 
+static QList<QString> fieldStringList = {"status", "artist", "title", "path"}; // TODO: per playlist
+
 class Playlist : public QAbstractTableModel {
   Q_OBJECT
 public:
@@ -32,13 +34,13 @@ public:
   void toogleSortOrder(int, int);
   // register queue update callback, use when active playlist
   void registerStatusUpdateCallback();
-  // unregister queue update callback, use when unregisterStatusUpdateCallback focus
+  // unregister queue update callback, use when unregisterStatusUpdateCallback
+  // focus
   void unregisterStatusUpdateCallback();
 
 private:
   SongStore store;
   PlaybackQueue &playbackQueue;
-  QList<QString> fieldStringList = {"status", "artist", "title", "path"};
   int lastPlayed;
 };
 

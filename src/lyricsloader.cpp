@@ -1,75 +1,77 @@
 #include "lyricsloader.h"
+#include "utils.h"
 
 #include <QDebug>
 #include <QTextStream>
 #include <format>
+#include <fstream>
+#include <iostream>
 #include <regex>
 
-LyricsLoader::LyricsLoader(QObject *parent) : QObject{parent} {}
+LyricsLoader::LyricsLoader() {}
 
 void testTmp(const std::string &) {}
 void testTmp(const std::string &&) = delete;
 
-QMap<int, QString> LyricsLoader::getLyrics(QString title, QString artist) {
-  QFile file =
-      findFileByTitleAndArtist(title.toStdString(), artist.toStdString());
-  QMap<int, QString> map;
-  QMap<QString, QString> metadata;
-  if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-    qDebug() << "Could not open file: " << file.errorString();
+std::map<int, std::string> LyricsLoader::getLyrics(std::string_view title,
+                                                   std::string_view artist) {
+  std::ifstream file(findFileByTitleAndArtist(title, artist));
+  std::map<int, std::string> lyricsMap;
+  std::map<std::string, std::string> metadata;
+
+  if (!file.is_open()) {
+    std::cerr << "Could not open file.\n";
+    return lyricsMap;
   }
 
-  std::regex patternMetadata{R"(\[([a-zA-Z]+):(.*)\])"};
-  std::regex patternTime{R"(\[(.*?)\])"};
-  std::regex patternText{R"(\]([^\[\]]*)$)"};
+  std::regex patternMetadata(R"(\[([a-zA-Z]+):(.*)\])");
+  std::regex patternTime(R"(\[(.*?)\])");
+  std::regex patternText(R"(\]([^\[\]]*)$)");
 
-  QTextStream in(&file);
-  while (!in.atEnd()) {
-    QString line = in.readLine();
-    std::string s = line.toStdString();
+  std::string line;
+  while (std::getline(file, line)) {
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back(); // Remove carriage return from CRLF lines
+    }
 
-    std::smatch matcheMetadata;
-    if (std::regex_search(s, matcheMetadata, patternMetadata)) {
-      std::string key = matcheMetadata.str(1);
-      std::string value = matcheMetadata.str(2);
-      metadata.insert(QString::fromStdString(key),
-                      QString::fromStdString(value));
+    std::smatch matchMetadata;
+    if (std::regex_search(line, matchMetadata, patternMetadata)) {
+      metadata[matchMetadata.str(1)] = matchMetadata.str(2);
       continue;
     }
 
-    std::smatch matches;
-    QList<int> values;
-    auto words_begin = std::sregex_iterator(s.begin(), s.end(), patternTime);
-    auto words_end = std::sregex_iterator();
-    for (std::sregex_iterator it = words_begin; it != words_end; ++it) {
-      std::smatch match = *it;
-      std::string timeString = match.str(1);
-      int minutes = std::stoi(timeString.substr(0, 2));
-      int seconds = std::stoi(timeString.substr(3, 2));
-      float milliseconds = std::stof(timeString.substr(6)) * 10;
-      int totalMilliseconds = (minutes * 60 + seconds) * 1000 + milliseconds;
-      values.append(totalMilliseconds);
+    std::vector<int> timeStamps;
+    for (auto it = std::sregex_iterator(line.begin(), line.end(), patternTime);
+         it != std::sregex_iterator(); ++it) {
+      std::string t = (*it).str(1); // e.g., "01:23.45"
+      try {
+        int minutes = std::stoi(t.substr(0, 2));
+        int seconds = std::stoi(t.substr(3, 2));
+        float fraction = std::stof(t.substr(6));
+        int totalMs =
+            (minutes * 60 + seconds) * 1000 + static_cast<int>(fraction * 10);
+        timeStamps.push_back(totalMs);
+      } catch (...) {
+        // Handle malformed timestamps gracefully
+        continue;
+      }
     }
 
     std::smatch textMatch;
-    if (std::regex_search(s, textMatch, patternText)) {
-      std::string last_text = textMatch.str(1);
-      for (int ms : values) {
-        map.insert(ms, QString::fromStdString(last_text));
+    if (std::regex_search(line, textMatch, patternText)) {
+      const std::string &lyricText = textMatch.str(1);
+      for (int ms : timeStamps) {
+        lyricsMap[ms] = lyricText;
       }
     }
   }
-  file.close();
 
-  // qDebug() << metadata;
-
-  return map;
+  return lyricsMap;
 }
 
-QFile LyricsLoader::findFileByTitleAndArtist(std::string title,
-                                             std::string artist) {
-  std::string path =
-      std::format("/Users/wangluyao/Music/{} - {}.lrc", artist, title);
-  qDebug() << QString::fromStdString(path);
-  return QFile{QString::fromStdString(path)};
+std::filesystem::path
+LyricsLoader::findFileByTitleAndArtist(std::string_view title,
+                                       std::string_view artist) {
+  std::string filename = std::format("{} - {}.lrc", artist, title);
+  return util::getHomePath() / "Music" / filename;
 }

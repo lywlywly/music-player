@@ -5,12 +5,12 @@
 
 class TestLyrics : public QObject {
   Q_OBJECT
- public:
+public:
   explicit TestLyrics(QObject *parent = nullptr);
   LyricsLoader lyricsHandler;
 
- signals:
- private slots:
+signals:
+private slots:
   void testLoadLyricsFile1();
   void testLoadLyricsFile2();
   void testLoadLyricsFile3();
@@ -20,15 +20,24 @@ class TestLyrics : public QObject {
 TestLyrics::TestLyrics(QObject *parent) : QObject{parent} {}
 
 void TestLyrics::testLoadLyricsFile1() {
-  QMap<int, QString> lyricsMap =
+  std::map<int, std::string> lyricsMap =
       lyricsHandler.getLyrics("みちしるべ", "茅原実里");
-  QCOMPARE(lyricsMap.keys()[0], 0);
-  QCOMPARE(lyricsMap.keys()[1], 780);
-  QCOMPARE(lyricsMap.keys()[10], 78070);
-  QCOMPARE(lyricsMap.values()[0], " 作词 : 茅原実里");
+  auto it = lyricsMap.begin();
+  std::advance(it, 0);
+  QCOMPARE(it->first, 0);
+  QCOMPARE(it->second, " 作词 : 茅原実里");
+  it = lyricsMap.begin();
+  std::advance(it, 1);
+  QCOMPARE(it->first, 780);
+  it = lyricsMap.begin();
+  std::advance(it, 10);
+  QCOMPARE(it->first, 78070);
   qDebug() << lyricsMap;
 
-  QList<int> keys = lyricsMap.keys();
+  std::vector<int> keys;
+  for (auto &[key, value] : lyricsMap) {
+    keys.push_back(key);
+  }
 
   qint64 progress = 12323;
 
@@ -40,18 +49,24 @@ void TestLyrics::testLoadLyricsFile1() {
 }
 
 void TestLyrics::testLoadLyricsFile2() {
-  QMap<int, QString> lyricsMap =
+  std::map<int, std::string> lyricsMap =
       lyricsHandler.getLyrics("社会距離", "40mP feat. 可不");
-  QCOMPARE(lyricsMap.keys()[10], 37350);
-  QCOMPARE(lyricsMap.values()[0], " 作词 : 40mP");
+  auto it = lyricsMap.begin();
+  std::advance(it, 0);
+  QCOMPARE(it->second, " 作词 : 40mP");
+  std::advance(it, 10);
+  QCOMPARE(it->first, 37350);
 }
 
-void TestLyrics::testLoadLyricsFile3()
-{
-  QMap<int, QString> lyricsMap =
+void TestLyrics::testLoadLyricsFile3() {
+  std::map<int, std::string> lyricsMap =
       lyricsHandler.getLyrics("海阔天空", "BEYOND");
-  QCOMPARE(lyricsMap.keys()[20], 59310);
-  QCOMPARE(lyricsMap.values()[1], "词：黄家驹");
+  auto it = lyricsMap.begin();
+  std::advance(it, 1);
+  QCOMPARE(it->second, "词：黄家驹");
+  it = lyricsMap.begin();
+  std::advance(it, 20);
+  QCOMPARE(it->first, 59310);
 }
 
 void TestLyrics::testMap() {

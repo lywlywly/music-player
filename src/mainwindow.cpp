@@ -136,7 +136,7 @@ void MainWindow::setUpSlider() {
 }
 
 void MainWindow::setUpLyricsPanel() {
-  lyricsLoader = new LyricsLoader(this);
+  lyricsLoader = new LyricsLoader;
   lyricsManager = new LyricsManager(this);
   connect(&mediaPlayer, &QMediaPlayer::positionChanged, lyricsManager,
           &LyricsManager::onPlayerProgressChange);
@@ -176,6 +176,15 @@ void MainWindow::setUpTableView() {
   ui->tableView->setContextMenuPolicy(Qt::CustomContextMenu);
   connect(ui->tableView, &QTableView::customContextMenuRequested, this,
           &MainWindow::onCustomContextMenuRequested);
+  ui->tableView->horizontalHeader()->setSortIndicatorShown(false);
+  QObject::connect(
+      ui->tableView->horizontalHeader(), &QHeaderView::sectionClicked, this,
+      [this](int idx) {
+        ui->tableView->horizontalHeader()->setSortIndicatorShown(true);
+        playlist.sortByField(
+            fieldStringList[idx].toStdString(),
+            ui->tableView->horizontalHeader()->sortIndicatorOrder());
+      });
 }
 
 void MainWindow::onCustomContextMenuRequested(const QPoint &pos) {
@@ -201,9 +210,8 @@ void MainWindow::setUpPlaybackControl() {
 }
 
 void MainWindow::setUpImage(MSong song) {
-  lyricsManager->setCurrentLyricsMap(
-      lyricsLoader->getLyrics(QString::fromUtf8(song.at("title")),
-                              QString::fromUtf8(song.at("artist"))));
+  lyricsManager->setLyrics(
+      lyricsLoader->getLyrics(song.at("title"), song.at("artist")));
   auto [data, size] =
       parser->parseSongCover(QString::fromUtf8(song.at("path")));
   if (size > 0) {
@@ -234,9 +242,9 @@ void MainWindow::setUpPlayer() {
 
 void MainWindow::resetLyricsPanel() {
   ui->textEdit->clear();
-  const QMap<int, QString> &map = lyricsManager->getCurrentLyricsMap();
-  for (auto value : map.values()) {
-    ui->textEdit->append(value);
+  const std::map<int, std::string> &map = lyricsManager->getCurrentLyricsMap();
+  for (const auto &[key, value] : map) {
+    ui->textEdit->append(QString::fromUtf8(value));
   }
 }
 

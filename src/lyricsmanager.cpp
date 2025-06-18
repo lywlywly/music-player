@@ -4,23 +4,29 @@
 
 LyricsManager::LyricsManager(QObject *parent) : QObject{parent} {}
 
-void LyricsManager::setCurrentLyricsMap(QMap<int, QString> map) {
-  lyricsMap = map;
+void LyricsManager::setLyrics(std::map<int, std::string> &&map) {
+  lyricsMap = std::move(map);
+  QMap<int, QString> qmap;
+  std::vector<int> _keys;
+  for (const auto &[key, value] : lyricsMap) {
+    qmap.insert(key, QString::fromUtf8(value));
+    _keys.push_back(key);
+  }
+  keys = std::move(_keys);
 }
 
-const QMap<int, QString> &LyricsManager::getCurrentLyricsMap() const {
+const std::map<int, std::string> &LyricsManager::getCurrentLyricsMap() const {
   return lyricsMap;
 }
 
 void LyricsManager::onPlayerProgressChange(qint64 progress) {
-  QList<int> keys = lyricsMap.keys();
   auto it0 = std::find_if(keys.rbegin(), keys.rend(), [progress](int num) {
     return num <= static_cast<int>(progress);
   });
 
   int index = keys.size() - 1 - std::distance(keys.rbegin(), it0);
 
-  if (lyricsMap.isEmpty())
+  if (lyricsMap.empty())
     return;
 
   if (index != currentLineIndex) {

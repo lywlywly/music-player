@@ -10,13 +10,14 @@ find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Sql Test Multimedia)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Sql Test
   Multimedia)
 find_package(PkgConfig REQUIRED)
-set(ICU_ROOT "/opt/homebrew/opt/icu4c@77")
-set(ICU_INCLUDE_DIR "/opt/homebrew/opt/icu4c@77/include")
-set(ICU_LIBRARIES
-  /opt/homebrew/opt/icu4c@77/lib/libicui18n.dylib
-  /opt/homebrew/opt/icu4c@77/lib/libicuuc.dylib
-  /opt/homebrew/opt/icu4c@77/lib/libicudata.dylib
-)
+if(APPLE)
+  set(ICU_ROOT "/opt/homebrew/opt/icu4c")
+  set(ICU_INCLUDE_DIR "/opt/homebrew/opt/icu4c/include")
+  set(ICU_LIBRARIES
+    /opt/homebrew/opt/icu4c@77/lib/libicui18n.dylib
+    /opt/homebrew/opt/icu4c@77/lib/libicuuc.dylib
+    /opt/homebrew/opt/icu4c@77/lib/libicudata.dylib)
+endif()
 find_package(ICU REQUIRED COMPONENTS i18n uc data)
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavcodec libavformat
   libavutil)
@@ -64,20 +65,34 @@ set(PROJECT_SOURCES
   playbackpolicysequential.cpp
   playbackpolicyshuffle.h
   playbackpolicyshuffle.cpp
+  utils.h
 )
 
 add_library(MYLib ${PROJECT_SOURCES})
 
-target_link_libraries(
-  MYLib
-  Qt${QT_VERSION_MAJOR}::Widgets
-  Qt${QT_VERSION_MAJOR}::Sql
-  Qt${QT_VERSION_MAJOR}::Multimedia
-  PkgConfig::FFMPEG
-  PkgConfig::OPENSSL
-  ${ICU_LIBRARIES}
-  ${CMAKE_SOURCE_DIR}/lib/libefsw-static-debug.a
-)
+if(APPLE)
+  target_link_libraries(
+    MYLib
+    Qt${QT_VERSION_MAJOR}::Widgets
+    Qt${QT_VERSION_MAJOR}::Sql
+    Qt${QT_VERSION_MAJOR}::Multimedia
+    PkgConfig::FFMPEG
+    PkgConfig::OPENSSL
+    ${ICU_LIBRARIES}
+    ${CMAKE_SOURCE_DIR}/lib/libefsw-static-debug.a
+  )
+else()
+  target_link_libraries(
+    MYLib
+    Qt${QT_VERSION_MAJOR}::Widgets
+    Qt${QT_VERSION_MAJOR}::Sql
+    Qt${QT_VERSION_MAJOR}::Multimedia
+    PkgConfig::FFMPEG
+    PkgConfig::OPENSSL
+    ${ICU_LIBRARIES}
+    ${CMAKE_SOURCE_DIR}/lib/libefsw.so
+  )
+endif()
 
 add_executable(EXEC main.cpp)
 target_link_libraries(EXEC MYLib)
