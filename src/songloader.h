@@ -24,7 +24,6 @@ signals:
  private:
   std::string escapeSingleQuote(const std::string& input);
   QString escapeSingleQuote(const QString& input);
-  SongParser parser;
 };
 
 #endif  // SONGLOADER_H

@@ -1,14 +1,27 @@
 #include "songparser.h"
 #include "qjsondocument.h"
 #include "qprocess.h"
+#include <QMap>
+#include <qjsonobject.h>
 #include <regex>
+#include <taglib/fileref.h>
+#include <taglib/tag.h>
+
 extern "C" {
 #include "libavformat/avformat.h"
 }
 
-SongParser::SongParser() {}
+namespace {
+const QMap<Field, QList<QString>> fieldMap = {
+    {Field::ARTIST, {"artist", "ARTIST", "Artist"}},
+    {Field::TITLE, {"title", "TITLE", "Title"}},
+    {Field::GENRE, {"genre", "GENRE", "Genre"}},
+    {Field::BPM, {"TBPM"}},
+    {Field::REPLAY_GAIN, {"replaygain_track_gain"}},
+    {Field::RATING, {"Rating"}},
+};
 
-QJsonValue SongParser::getValue(const QJsonObject &jsonObject, Field field) {
+QJsonValue getValue(const QJsonObject &jsonObject, Field field) {
   QJsonValue value;
   for (const QString key : fieldMap[field]) {
     value = jsonObject[key];
@@ -34,8 +47,7 @@ QJsonValue SongParser::getValue(const QJsonObject &jsonObject, Field field) {
   return value;
 }
 
-QVariant SongParser::getValue(const QMap<QString, QString> &metaDataMap,
-                              Field field) {
+QVariant getValue(const QMap<QString, QString> &metaDataMap, Field field) {
   QVariant value;
 
   for (const QString key : fieldMap[field]) {
@@ -62,6 +74,72 @@ QVariant SongParser::getValue(const QMap<QString, QString> &metaDataMap,
   }
 
   return value;
+}
+} // namespace
+
+Song SongParser::parseFile(QUrl songPath) {
+  avformat_network_init();
+  AVFormatContext *formatContext = nullptr;
+  if (avformat_open_input(&formatContext, songPath.toString().toUtf8().data(),
+                          nullptr, nullptr) != 0) {
+    qDebug() << "Failed to open file";
+  }
+
+  if (avformat_find_stream_info(formatContext, nullptr) < 0) {
+    qDebug() << "Failed to find stream information";
+    avformat_close_input(&formatContext);
+  }
+
+  AVDictionaryEntry *metadata = nullptr;
+  QMap<QString, QString> map;
+  while ((metadata = av_dict_get(formatContext->metadata, "", metadata,
+                                 AV_DICT_IGNORE_SUFFIX))) {
+    map.insert(metadata->key, metadata->value);
+    // qDebug() << metadata->key << ": " << metadata->value;
+  }
+
+  if (0 == (std::strcmp(formatContext->iformat->name, "ogg"))) {
+    // qDebug() << "ogg";
+    AVStream *st = formatContext->streams[0];
+    AVDictionaryEntry *entry = NULL;
+    while ((entry = av_dict_get(st->metadata, "", entry,
+                                AV_DICT_IGNORE_SUFFIX)) != NULL) {
+      // qDebug() << entry->key << ": " << entry->value;
+      map.insert(entry->key, entry->value);
+    }
+  }
+
+  avformat_close_input(&formatContext);
+
+  Song song;
+  song.artist = getValue(map, Field::ARTIST).toString();
+  song.title = getValue(map, Field::TITLE).toString();
+  song.genre = getValue(map, Field::GENRE).toString();
+  song.bpm = getValue(map, Field::BPM).toInt();
+  song.replaygain = getValue(map, Field::REPLAY_GAIN).toDouble();
+  song.rating = getValue(map, Field::RATING).toInt();
+  song.filePath = songPath.toString();
+  return song;
+}
+
+MSong SongParser::parse(const std::string &filepath) {
+  TagLib::FileRef file(filepath.c_str());
+  MSong tags;
+
+  if (!file.isNull() && file.tag()) {
+    TagLib::Tag *tag = file.tag();
+
+    tags["title"] = tag->title().to8Bit(true);
+    tags["artist"] = tag->artist().to8Bit(true);
+    tags["album"] = tag->album().to8Bit(true);
+    tags["genre"] = tag->genre().to8Bit(true);
+    tags["comment"] = tag->comment().to8Bit(true);
+    tags["year"] = std::to_string(tag->year());
+    tags["track"] = std::to_string(tag->track());
+  }
+  tags["path"] = filepath;
+
+  return tags;
 }
 
 Song SongParser::parseFileLegacy(QUrl songPath) {
@@ -153,92 +231,29 @@ std::tuple<std::unique_ptr<uchar[]>, int> SongParser::parseSongCover(QUrl url) {
   return std::make_tuple(std::move(data), size);
 }
 
-Song SongParser::parseFile(QUrl songPath) {
-  avformat_network_init();
-  AVFormatContext *formatContext = nullptr;
-  if (avformat_open_input(&formatContext, songPath.toString().toUtf8().data(),
-                          nullptr, nullptr) != 0) {
-    qDebug() << "Failed to open file";
+std::pair<std::vector<uint8_t>, size_t>
+SongParser::extractCoverImage(const std::string &filepath) {
+  AVFormatContext *fmt_ctx = nullptr;
+
+  if (avformat_open_input(&fmt_ctx, filepath.c_str(), nullptr, nullptr) < 0) {
+    throw std::runtime_error("Failed to open input file");
   }
 
-  if (avformat_find_stream_info(formatContext, nullptr) < 0) {
-    qDebug() << "Failed to find stream information";
-    avformat_close_input(&formatContext);
+  if (avformat_find_stream_info(fmt_ctx, nullptr) < 0) {
+    avformat_close_input(&fmt_ctx);
+    throw std::runtime_error("Failed to find stream info");
   }
 
-  AVDictionaryEntry *metadata = nullptr;
-  QMap<QString, QString> map;
-  while ((metadata = av_dict_get(formatContext->metadata, "", metadata,
-                                 AV_DICT_IGNORE_SUFFIX))) {
-    map.insert(metadata->key, metadata->value);
-    // qDebug() << metadata->key << ": " << metadata->value;
-  }
-
-  if (0 == (std::strcmp(formatContext->iformat->name, "ogg"))) {
-    // qDebug() << "ogg";
-    AVStream *st = formatContext->streams[0];
-    AVDictionaryEntry *entry = NULL;
-    while ((entry = av_dict_get(st->metadata, "", entry,
-                                AV_DICT_IGNORE_SUFFIX)) != NULL) {
-      // qDebug() << entry->key << ": " << entry->value;
-      map.insert(entry->key, entry->value);
+  for (unsigned int i = 0; i < fmt_ctx->nb_streams; ++i) {
+    AVStream *stream = fmt_ctx->streams[i];
+    if (stream->disposition & AV_DISPOSITION_ATTACHED_PIC) {
+      AVPacket &pkt = stream->attached_pic;
+      std::vector<uint8_t> image(pkt.data, pkt.data + pkt.size);
+      avformat_close_input(&fmt_ctx);
+      return {std::move(image), image.size()};
     }
   }
 
-  avformat_close_input(&formatContext);
-
-  Song song;
-  song.artist = getValue(map, Field::ARTIST).toString();
-  song.title = getValue(map, Field::TITLE).toString();
-  song.genre = getValue(map, Field::GENRE).toString();
-  song.bpm = getValue(map, Field::BPM).toInt();
-  song.replaygain = getValue(map, Field::REPLAY_GAIN).toDouble();
-  song.rating = getValue(map, Field::RATING).toInt();
-  song.filePath = songPath.toString();
-  return song;
-}
-
-MSong SongParser::parse(QUrl songPath) {
-  avformat_network_init();
-  AVFormatContext *formatContext = nullptr;
-  if (avformat_open_input(&formatContext, songPath.toString().toUtf8().data(),
-                          nullptr, nullptr) != 0) {
-    qDebug() << "Failed to open file";
-  }
-
-  if (avformat_find_stream_info(formatContext, nullptr) < 0) {
-    qDebug() << "Failed to find stream information";
-    avformat_close_input(&formatContext);
-  }
-
-  AVDictionaryEntry *metadata = nullptr;
-  QMap<QString, QString> map;
-  while ((metadata = av_dict_get(formatContext->metadata, "", metadata,
-                                 AV_DICT_IGNORE_SUFFIX))) {
-    map.insert(metadata->key, metadata->value);
-    // qDebug() << metadata->key << ": " << metadata->value;
-  }
-
-  if (0 == (std::strcmp(formatContext->iformat->name, "ogg"))) {
-    // qDebug() << "ogg";
-    AVStream *st = formatContext->streams[0];
-    AVDictionaryEntry *entry = NULL;
-    while ((entry = av_dict_get(st->metadata, "", entry,
-                                AV_DICT_IGNORE_SUFFIX)) != NULL) {
-      // qDebug() << entry->key << ": " << entry->value;
-      map.insert(entry->key, entry->value);
-    }
-  }
-
-  avformat_close_input(&formatContext);
-
-  MSong song;
-  song["artist"] = getValue(map, Field::ARTIST).toString().toStdString();
-  song["title"] = getValue(map, Field::TITLE).toString().toStdString();
-  song["genre"] = getValue(map, Field::GENRE).toString().toStdString();
-  // song["bpm"] = getValue(map, Field::BPM).toString();
-  // song.replaygain = getValue(map, Field::REPLAY_GAIN).toDouble();
-  // song.rating = getValue(map, Field::RATING).toInt();
-  song["path"] = songPath.toString().toStdString();
-  return song;
+  avformat_close_input(&fmt_ctx);
+  throw std::runtime_error("No cover image found");
 }

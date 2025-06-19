@@ -6,7 +6,7 @@
 #include "qsqlquery.h"
 namespace fs = std::filesystem;
 
-SongLoader::SongLoader(QObject* parent) : QObject{parent} {
+SongLoader::SongLoader(QObject *parent) : QObject{parent} {
   QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE");
   db.setDatabaseName("/home/luyao/testdb/mydatabase.db");
   if (!db.open()) {
@@ -62,9 +62,9 @@ QList<Song> SongLoader::loadMetadataFromDB(QString sql) {
   return songs;
 }
 
-void SongLoader::saveUrlsToDB(const QList<QString>&) {}
+void SongLoader::saveUrlsToDB(const QList<QString> &) {}
 
-void SongLoader::saveUrlsToDB(const QList<Song>& songs) {
+void SongLoader::saveUrlsToDB(const QList<Song> &songs) {
   QSqlQuery{"DELETE FROM songs"};
   for (Song s : songs) {
     QSqlQuery query{
@@ -72,7 +72,7 @@ void SongLoader::saveUrlsToDB(const QList<Song>& songs) {
   }
 }
 
-std::string SongLoader::escapeSingleQuote(const std::string& input) {
+std::string SongLoader::escapeSingleQuote(const std::string &input) {
   std::string output;
   for (char c : input) {
     if (c == '\'') {
@@ -83,9 +83,9 @@ std::string SongLoader::escapeSingleQuote(const std::string& input) {
   return output;
 }
 
-QString SongLoader::escapeSingleQuote(const QString& input) {
+QString SongLoader::escapeSingleQuote(const QString &input) {
   QString output;
-  for (const QChar& c : input) {
+  for (const QChar &c : input) {
     if (c == '\'') {
       output += "\'";
     }
@@ -107,8 +107,8 @@ std::map<std::string, std::string> SongLoader::loadSongHash() {
 }
 
 // insert if path not exist, else update
-void SongLoader::insertSongMetadataToDB(const QString& path) {
-  Song song = parser.parseFile(path);
+void SongLoader::insertSongMetadataToDB(const QString &path) {
+  Song song = SongParser::parseFile(path);
   QSqlQuery query;
   ChecksumCalculator checksumCalc;
   std::string sha1 = checksumCalc.calculateHeaderSHA1(path.toStdString(), 1);
@@ -124,7 +124,7 @@ void SongLoader::insertSongMetadataToDB(const QString& path) {
           .arg(QString::fromStdString(sha1)));
 }
 
-void SongLoader::removeSongMetadataFromDB(const QString& path) {
+void SongLoader::removeSongMetadataFromDB(const QString &path) {
   QSqlQuery query;
   query.exec(QString("DELETE FROM songs_full "
                      "WHERE path='%1'")
@@ -134,7 +134,7 @@ void SongLoader::removeSongMetadataFromDB(const QString& path) {
 void SongLoader::saveHashToDB(const std::map<std::string, std::string> map) {
   QSqlQuery query;
   QSqlQuery query0("DELETE FROM songs_hash");
-  for (const auto& pair : map) {
+  for (const auto &pair : map) {
     query.exec(QString("INSERT INTO songs_hash (path, hash) "
                        "VALUES('%1', '%2')")
                    .arg(QString::fromStdString(escapeSingleQuote(pair.first)))

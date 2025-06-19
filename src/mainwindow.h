@@ -72,7 +72,6 @@ private:
   QPixmap pixmap;
   qint64 duration;
   int currentLine = -1;
-  std::unique_ptr<SongParser> parser{new SongParser()};
   QActionGroup *orderGroup;
   QMenu contextMenu;
   QAction *playNextAction;

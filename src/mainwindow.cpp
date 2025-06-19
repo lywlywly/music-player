@@ -212,10 +212,9 @@ void MainWindow::setUpPlaybackControl() {
 void MainWindow::setUpImage(MSong song) {
   lyricsManager->setLyrics(
       lyricsLoader->getLyrics(song.at("title"), song.at("artist")));
-  auto [data, size] =
-      parser->parseSongCover(QString::fromUtf8(song.at("path")));
+  auto [data, size] = SongParser::extractCoverImage(song.at("path"));
   if (size > 0) {
-    pixmap.loadFromData(data.get(), size);
+    pixmap.loadFromData(data.data(), size);
     ui->label->setPixmap(pixmap.scaled(ui->splitter->sizes().first() - 10,
                                        ui->splitter_2->sizes().last() - 10,
                                        Qt::KeepAspectRatio));
@@ -298,9 +297,10 @@ void MainWindow::addEntry() {
   AddEntryDialog *addEntryDialog = new AddEntryDialog(this);
   addEntryDialog->show();
   addEntryDialog->setAttribute(Qt::WA_DeleteOnClose);
-  QObject::connect(
-      addEntryDialog, &AddEntryDialog::entryStringEntered,
-      [this](const QString &text) { playlist.addSong(parser->parse(text)); });
+  QObject::connect(addEntryDialog, &AddEntryDialog::entryStringEntered,
+                   [this](const QString &text) {
+                     playlist.addSong(SongParser::parse(text.toStdString()));
+                   });
 }
 
 void MainWindow::playSong() { mediaPlayer.play(); }
@@ -350,7 +350,7 @@ void MainWindow::open() {
       this, "Open the file", QDir::homePath() + "/Music");
   qDebug() << "opening file" << fileName;
   for (QString s : fileName) {
-    playlist.addSong(parser->parse(s));
+    playlist.addSong(SongParser::parse(s.toStdString()));
   }
 }
 

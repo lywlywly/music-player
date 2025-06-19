@@ -19,6 +19,8 @@ if(APPLE)
     /opt/homebrew/opt/icu4c@77/lib/libicudata.dylib)
 endif()
 find_package(ICU REQUIRED COMPONENTS i18n uc data)
+find_package(TagLib CONFIG REQUIRED)
+
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavcodec libavformat
   libavutil)
 pkg_check_modules(OPENSSL REQUIRED IMPORTED_TARGET openssl)
@@ -79,6 +81,7 @@ if(APPLE)
     PkgConfig::FFMPEG
     PkgConfig::OPENSSL
     ${ICU_LIBRARIES}
+    TagLib::tag
     ${CMAKE_SOURCE_DIR}/lib/libefsw-static-debug.a
   )
 else()
@@ -90,6 +93,7 @@ else()
     PkgConfig::FFMPEG
     PkgConfig::OPENSSL
     ${ICU_LIBRARIES}
+    TagLib::tag
     ${CMAKE_SOURCE_DIR}/lib/libefsw.so
   )
 endif()
