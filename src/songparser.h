@@ -1,8 +1,8 @@
 #ifndef SONGPARSER_H
 #define SONGPARSER_H
 
-#include "qjsonobject.h"
 #include "songlibrary.h"
+#include <qurl.h>
 
 enum class Field {
   ARTIST,
@@ -27,26 +27,12 @@ struct Song {
   QString filePath;
 };
 
-class SongParser {
-public:
-  SongParser();
-  Song parseFile(QUrl);
-  MSong parse(QUrl);
-  QT_DEPRECATED Song parseFileLegacy(QUrl);
-  std::tuple<std::unique_ptr<uchar[]>, int> parseSongCover(QUrl);
-
-private:
-  QJsonValue getValue(const QJsonObject &jsonObject, Field field);
-  QVariant getValue(const QMap<QString, QString> &jsonObject, Field field);
-  QMap<Field, QList<QString>> fieldMap = {
-      {Field::ARTIST, {"artist", "ARTIST", "Artist"}},
-      {Field::TITLE, {"title", "TITLE", "Title"}},
-      {Field::GENRE, {"genre", "GENRE", "Genre"}},
-      {Field::BPM, {"TBPM"}},
-      {Field::REPLAY_GAIN, {"replaygain_track_gain"}},
-      {Field::RATING, {"Rating"}},
-  };
-  int idx = 0;
-};
+namespace SongParser {
+Song parseFile(QUrl);
+MSong parse(const std::string &);
+[[deprecated]] Song parseFileLegacy(QUrl);
+[[deprecated]] std::tuple<std::unique_ptr<uchar[]>, int> parseSongCover(QUrl);
+std::pair<std::vector<uint8_t>, size_t> extractCoverImage(const std::string &);
+} // namespace SongParser
 
 #endif // SONGPARSER_H
