@@ -7,7 +7,8 @@
 #include "songlibrary.h"
 #include "songstore.h"
 
-static QList<QString> fieldStringList = {"status", "artist", "title", "path"}; // TODO: per playlist
+static QList<QString> fieldStringList = {"status", "artist", "title",
+                                         "path"}; // TODO: per playlist
 
 class Playlist : public QAbstractTableModel {
   Q_OBJECT
@@ -24,6 +25,7 @@ public:
   int songCount() const;
   bool empty() const;
   void addSong(MSong &&);
+  void addSongs(std::vector<MSong> &);
   void removeSong(int);
   void clear();
   const MSong &getSongByPk(int) const;
