@@ -35,15 +35,17 @@ private:
   void updateImageSize();
   void resetLyricsPanel();
   void updateLyricsPanel(int index);
-  void setUpImage(MSong song);
+  void setUpImageAndLyrics(MSong song);
   void open();
-  void playSong();
-  void pauseSong();
+  void openFolder();
   void seek(int mseconds);
   void onCustomContextMenuRequested(const QPoint &pos);
+  void onTabContextMenuRequested(const QPoint &pos);
   void addEntry();
   void next();
   void prev();
+  void play(MSong song, int);
+  void navigateIndex(MSong song, int);
   void setUpSplitter();
   void setUpPlaybackActions();
   void setUpSlider();
@@ -54,6 +56,7 @@ private:
   void setUpPlaylist();
   void setUpPlayer();
   bool eventFilter(QObject *obj, QEvent *event) override;
+  QString getNewPlaylistName();
   // TODO: remove song from current playlist, check if any other playlist
   // references the song, if no, remove from library
   void removeSong();
@@ -63,7 +66,8 @@ private:
   PlaybackQueue playbackQueue;
   PlaybackManager control;
   SongLibrary songLibrary;
-  Playlist playlist{SongStore{songLibrary}, playbackQueue};
+  std::map<std::string, Playlist> playlistMap;
+  Playlist *currentPlaylist;
   // TODO: do not inherit QObject, this is a whole utility class outside Qt
   // framework LyricsManager is responsible for providing the right line of
   // lyrics instead

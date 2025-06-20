@@ -255,5 +255,7 @@ SongParser::extractCoverImage(const std::string &filepath) {
   }
 
   avformat_close_input(&fmt_ctx);
-  throw std::runtime_error("No cover image found");
+  // throw std::runtime_error("No cover image found");
+  qDebug() << "No cover image found";
+  return {{}, 0};
 }

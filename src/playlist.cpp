@@ -24,6 +24,7 @@ QVariant Playlist::data(const QModelIndex &index, int role) const {
     return cur == index.row() ? QString{"\u25B6"} : QString{};
   }
   if (index.column() == 1) {
+    // qDebug() << getSongByIndex(index.row());
     return QString::fromUtf8(getSongByIndex(index.row()).at("artist"));
   }
   if (index.column() == 2) {
@@ -58,6 +59,20 @@ bool Playlist::empty() const { return songCount() == 0; }
 void Playlist::addSong(MSong &&s) {
   beginInsertRows(QModelIndex(), songCount(), songCount());
   store.addSong(std::move(s));
+  endInsertRows();
+}
+
+void Playlist::addSongs(std::vector<MSong> &items) {
+  if (items.empty())
+    return;
+
+  beginInsertRows(QModelIndex(), rowCount() - 1,
+                  rowCount() - 1 + static_cast<int>(items.size()) - 1);
+
+  for (auto &s : items) {
+    store.addSong(std::move(s));
+  }
+
   endInsertRows();
 }
 
