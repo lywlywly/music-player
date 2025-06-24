@@ -1,48 +1,41 @@
 #include "playbackpolicysequential.h"
 
-PlaybackPolicySequential::PlaybackPolicySequential(PlaybackQueue &queue)
-    : PlaybackPolicy{queue} {}
+PlaybackPolicySequential::PlaybackPolicySequential() {}
 
 void PlaybackPolicySequential::setPlaylist(const Playlist *playlist) {
   this->playlist = playlist;
 }
 
-int PlaybackPolicySequential::nextIndex() {
+int PlaybackPolicySequential::nextPk() {
   if (playlist->empty()) {
     return -1;
   }
 
-  if (!queue.empty()) {
-    return queue.pop();
-  }
+  int curIdx =
+      this->currentPk >= 0 ? playlist->getIndexByPk(this->currentPk) : -1;
 
-  int currPk = queue.getCurrentPk();
-  int currentIndex = currPk >= 0 ? playlist->getIndexByPk(currPk) : -1;
+  if (curIdx < playlist->songCount() - 1)
+    this->currentPk = playlist->getPkByIndex(curIdx + 1);
+  else
+    this->currentPk = playlist->getPkByIndex(0);
 
-  if (currentIndex < playlist->songCount() - 1) {
-    return currentIndex + 1;
-  } else {
-    return 0;
-  }
-
-  throw std::runtime_error("never");
+  return this->currentPk;
 }
 
-int PlaybackPolicySequential::previousIndex() {
+int PlaybackPolicySequential::prevPk() {
   if (playlist->empty()) {
     return -1;
   }
 
-  int currPk = queue.getCurrentPk();
-  int currentIndex = currPk >= 0 ? playlist->getIndexByPk(currPk) : 0;
+  int curIdx =
+      this->currentPk >= 0 ? playlist->getIndexByPk(this->currentPk) : 0;
 
-  if (currentIndex >= 1) {
-    return currentIndex - 1;
-  } else {
-    return playlist->songCount() - 1;
-  }
+  if (curIdx >= 1)
+    this->currentPk = playlist->getPkByIndex(curIdx - 1);
+  else
+    this->currentPk = playlist->getPkByIndex(playlist->songCount() - 1);
 
-  throw std::runtime_error("never");
+  return this->currentPk;
 }
 
 void PlaybackPolicySequential::reset() {}

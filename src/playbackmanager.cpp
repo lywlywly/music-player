@@ -6,53 +6,76 @@
 PlaybackManager::PlaybackManager(PlaybackQueue &q, QObject *parent)
     : queue{q}, QObject{parent} {}
 
-const MSong &PlaybackManager::play(int currentIndex) {
-  int pk = pl->getPkByIndex(currentIndex);
-  queue.setCurrentId(pk);
-  return pl->getSongByPk(pk);
+const MSong &PlaybackManager::PlayIndex(int currentIndex) {
+  int pk = playlist->getPkByIndex(currentIndex);
+  policy->setCurrentPk(pk);
+  queue.setCurrentId(pk, playlist);
+  return playlist->getSongByPk(pk);
 }
 
-std::tuple<const MSong &, int> PlaybackManager::next() {
-  int idx = policy->nextIndex();
-  if (idx < 0) {
-    return {{}, -1};
+std::tuple<const MSong &, int, Playlist *> PlaybackManager::next() {
+  int pk;
+  Playlist *pl;
+
+  if (!queue.empty()) {
+    std::tie(pk, pl) = queue.pop();
+    if (pl == playlist) {
+      // if queued song not in current playlist, don't notify PlaybackPolicy
+      policy->setCurrentPk(pk);
+    }
+  } else {
+    pl = playlist;
+    pk = policy->nextPk();
   }
-  return {play(idx), idx};
+
+  int row = pk < 0 ? -1 : pl->getIndexByPk(pk);
+  queue.setCurrentId(pk, pl);
+
+  return {pl->getSongByPk(pk), row, pl};
 }
 
-std::tuple<const MSong &, int> PlaybackManager::prev() {
-  int idx = policy->previousIndex();
-  if (idx < 0) {
-    return {{}, -1};
+std::tuple<const MSong &, int, Playlist *> PlaybackManager::prev() {
+  int pk = policy->prevPk();
+
+  if (pk < 0) {
+    return {{}, -1, playlist};
   }
-  return {play(idx), idx};
+
+  queue.setCurrentId(pk, playlist);
+
+  return {playlist->getSongByPk(pk), playlist->getIndexByPk(pk), playlist};
 }
 
-void PlaybackManager::stop() { queue.setCurrentId(-1); }
+void PlaybackManager::stop() { queue.setCurrentId(-1, nullptr); }
 
 void PlaybackManager::queueEnd(int currentIndex) {
-  int pk = pl->getPkByIndex(currentIndex);
-  queue.addLast(pk);
+  int pk = playlist->getPkByIndex(currentIndex);
+  queue.addLast(pk, playlist);
 }
 
 void PlaybackManager::queueStart(int currentIndex) {
-  int pk = pl->getPkByIndex(currentIndex);
-  queue.addNext(pk);
+  int pk = playlist->getPkByIndex(currentIndex);
+  queue.addNext(pk, playlist);
 }
 
 void PlaybackManager::enqueueWeak(int i) { this->candidateWeak = i; }
 
-void PlaybackManager::setView(const Playlist *view) { this->pl = view; }
+void PlaybackManager::setView(Playlist *view) { this->playlist = view; }
 
 void PlaybackManager::setPolicy(Policy policyEnum) {
   switch (policyEnum) {
   case Sequential:
-    policy = new PlaybackPolicySequential{queue};
+    policy = std::make_unique<PlaybackPolicySequential>();
     break;
   case Shuffle:
-    policy = new PlaybackPolicyShuffle{queue};
+    policy = std::make_unique<PlaybackPolicyShuffle>();
     break;
   }
 
-  policy->setPlaylist(pl);
+  policy->setPlaylist(playlist);
+
+  // notify PlaybackPolicy current song
+  const auto &[curPk, curPl] = queue.getCurrentPk();
+  if (curPl == playlist)
+    policy->setCurrentPk(curPk);
 }

@@ -4,28 +4,33 @@
 #include <QObject>
 #include <deque>
 
+class Playlist;
+
 class PlaybackQueue : public QObject {
   Q_OBJECT
 public:
   explicit PlaybackQueue(QObject *parent = nullptr);
-  void setCurrentId(int);
-  void addNext(int);
-  void addLast(int);
+  void setCurrentId(int, Playlist *pl);
+  void addNext(int, Playlist *pl);
+  void addLast(int, Playlist *pl);
   const std::deque<int> &getQueue();
-  int getCurrentPk() const;
+  std::pair<int, Playlist *> getCurrentPk() const;
   int getStatus();
-  int pop();
+  std::pair<int, Playlist *> pop();
   bool empty() const;
-  using statusUpdateCallback = std::function<void(int)>;
+  using statusUpdateCallback = std::function<void(int, Playlist *)>;
   void setStatusUpdateCallback(statusUpdateCallback &&);
-  int getOrder(int);
+  std::pair<int, Playlist *> getOrder(int);
 
 private:
+  void notifyAll(int, Playlist *);
   std::deque<int> queue;
-  std::vector<int> orders;
-  int currentId = -1;
+  std::vector<std::pair<int, Playlist *>> orders;
+  int currentPk = -1;
+  Playlist *currentPlaylist;
   int status; // play/pause
-  statusUpdateCallback cb;
+  std::vector<statusUpdateCallback> cbs;
+  // statusUpdateCallback cb;
 
 signals:
 };

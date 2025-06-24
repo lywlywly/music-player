@@ -1,23 +1,17 @@
 #include "playbackpolicyshuffle.h"
 #include <random>
 
-PlaybackPolicyShuffle::PlaybackPolicyShuffle(PlaybackQueue &queue)
-    : PlaybackPolicy{queue} {}
+PlaybackPolicyShuffle::PlaybackPolicyShuffle() {}
 
 void PlaybackPolicyShuffle::setPlaylist(const Playlist *playlist) {
   this->playlist = playlist;
   recentPks =
       std::make_unique<BoundedSetWithHistory<int>>(playlist->songCount() / 2);
-  // recentPks.reserve(playlist->songCount() / 2);
 }
 
-int PlaybackPolicyShuffle::nextIndex() {
+int PlaybackPolicyShuffle::nextPk() {
   if (playlist->empty()) {
     return -1;
-  }
-
-  if (!queue.empty()) {
-    return queue.pop();
   }
 
   if (recentPks->has_next()) {
@@ -25,19 +19,22 @@ int PlaybackPolicyShuffle::nextIndex() {
   }
 
   int ranIdx = getRandom(0, playlist->songCount() - 1);
+  int pk = playlist->getPkByIndex(ranIdx);
   // retry if too often
-  if (recentPks->contains(ranIdx) || queue.getCurrentPk() == ranIdx) {
+  if (recentPks->contains(pk) || this->currentPk == pk) {
     // `queue.getCurrentPk() == ranIdx` is used to check not current song by
     // directly double clicking
-    return nextIndex();
+    // FIXME: only one song stackoverflow
+    return nextPk();
   }
 
-  recentPks->insert_back(ranIdx);
+  this->currentPk = -1; // TODO: when currentPk present, overwrite all future
+  recentPks->insert_back(pk);
 
-  return ranIdx;
+  return pk;
 }
 
-int PlaybackPolicyShuffle::previousIndex() {
+int PlaybackPolicyShuffle::prevPk() {
   if (playlist->empty()) {
     return -1;
   }
@@ -47,14 +44,20 @@ int PlaybackPolicyShuffle::previousIndex() {
   }
 
   int ranIdx = getRandom(0, playlist->songCount() - 1);
+  int pk = playlist->getPkByIndex(ranIdx);
   // retry if too often
-  if (recentPks->contains(ranIdx) || queue.getCurrentPk() == ranIdx) {
-    return previousIndex();
+  if (recentPks->contains(pk) || this->currentPk == pk) {
+    return prevPk();
   }
 
-  recentPks->insert_front(ranIdx);
+  this->currentPk = -1; // TODO: when currentPk present, overwrite all future
+  recentPks->insert_front(pk);
 
-  return ranIdx;
+  return pk;
+}
+
+void PlaybackPolicyShuffle::setCurrentPk(int pk) {
+  recentPks->insert_cursor(pk);
 }
 
 void PlaybackPolicyShuffle::reset() {}

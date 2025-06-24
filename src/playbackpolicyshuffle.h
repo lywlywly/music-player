@@ -9,6 +9,9 @@ public:
       : capacity_(capacity), cursor_index_(-1) {}
 
   bool insert_back(const T &item) {
+    if (capacity_ == 0)
+      return false;
+
     if (set_.count(item))
       return true;
 
@@ -21,10 +24,14 @@ public:
     queue_.push_back(item);
     set_.insert(item);
     cursor_index_ = static_cast<int>(queue_.size()) - 1;
+
     return false;
   }
 
   bool insert_front(const T &item) {
+    if (capacity_ == 0)
+      return false;
+
     if (set_.count(item))
       return true;
 
@@ -37,6 +44,23 @@ public:
     queue_.push_front(item);
     set_.insert(item);
     cursor_index_ = 0;
+
+    return false;
+  }
+
+  bool insert_cursor(const T &item) {
+     if (capacity_ == 0)
+      return false;
+
+    if (queue_.size() == capacity_) {
+      const T old = queue_.front();
+      queue_.pop_front();
+      set_.erase(old);
+    }
+
+    queue_.insert(queue_.begin() + cursor_index_, item);
+    set_.insert(item);
+
     return false;
   }
 
@@ -82,13 +106,14 @@ private:
 
 class PlaybackPolicyShuffle : public PlaybackPolicy {
 public:
-  PlaybackPolicyShuffle(PlaybackQueue &);
+  PlaybackPolicyShuffle();
 
   // PlaybackPolicy interface
 public:
   void setPlaylist(const Playlist *) override;
-  int nextIndex() override;
-  int previousIndex() override;
+  int nextPk() override;
+  int prevPk() override;
+  void setCurrentPk(int pk) override;
 
 private:
   void reset() override;

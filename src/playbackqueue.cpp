@@ -1,70 +1,81 @@
 #include "playbackqueue.h"
 #include <QDebug>
 
-PlaybackQueue::PlaybackQueue(QObject *parent) : QObject{parent} {}
-
-void PlaybackQueue::setCurrentId(int currentId) {
-  int oldId = this->currentId;
-  this->currentId = currentId;
-  if (cb)
-    cb(currentId);
-  if (oldId >= 0)
-    if (cb)
-      cb(oldId);
+PlaybackQueue::PlaybackQueue(QObject *parent) : QObject{parent} {
+  cbs.reserve(5);
 }
 
-void PlaybackQueue::addNext(int pk) {
+void PlaybackQueue::setCurrentId(int curPk, Playlist *pl) {
+  int oldPk = this->currentPk;
+  this->currentPk = curPk;
+  Playlist *oldpl = this->currentPlaylist;
+  this->currentPlaylist = pl;
+  notifyAll(curPk, pl);
+  if (oldPk >= 0)
+    notifyAll(oldPk, oldpl);
+}
+
+void PlaybackQueue::addNext(int pk, Playlist *pl) {
   queue.push_front(pk);
   if (orders.size() < pk + 1)
-    orders.resize(pk + 1, -1);
-  orders[pk] = 0;
+    orders.resize(pk + 1, {-1, nullptr});
+  orders[pk] = {0, pl};
   for (auto i : queue) {
-    orders[i] += 1;
-    if (cb)
-      cb(i);
+    orders[i].first += 1;
+    notifyAll(i, orders[i].second);
   }
 }
 
-void PlaybackQueue::addLast(int pk) {
+void PlaybackQueue::addLast(int pk, Playlist *pl) {
   queue.push_back(pk);
   if (orders.size() < pk + 1)
-    orders.resize(pk + 1, -1);
-  orders[pk] = queue.size();
-  if (cb)
-    cb(pk);
+    orders.resize(pk + 1, {-1, nullptr});
+  orders[pk] = {queue.size(), pl};
+  notifyAll(pk, pl);
 }
 
-int PlaybackQueue::getOrder(int pk) {
+std::pair<int, Playlist *> PlaybackQueue::getOrder(int pk) {
   if (pk >= orders.size())
-    return -1;
-  return orders[pk];
+    return {-1, nullptr};
+  return {orders[pk]};
+}
+
+void PlaybackQueue::notifyAll(int pk, Playlist *pl) {
+  for (auto &cb : cbs) {
+    cb(pk, pl);
+  }
 }
 
 const std::deque<int> &PlaybackQueue::getQueue() { return queue; }
 
-int PlaybackQueue::getCurrentPk() const { return currentId; }
+std::pair<int, Playlist *> PlaybackQueue::getCurrentPk() const {
+  return {currentPk, currentPlaylist};
+}
 
 int PlaybackQueue::getStatus() { return status; }
 
-int PlaybackQueue::pop() {
+std::pair<int, Playlist *> PlaybackQueue::pop() {
   if (queue.empty())
     throw std::out_of_range("deque is empty");
+
   int front = queue.front();
+  Playlist *pl = orders[front].second;
+
   queue.erase(queue.begin());
-  orders[front] = -1;
-  if (cb)
-    cb(front);
-  for (auto i : queue) {
-    orders[i] -= 1;
-    if (cb)
-      cb(i);
+  orders[front].first = -1;
+  notifyAll(front, pl);
+
+  for (int i : queue) {
+    auto &[o, p] = orders[i];
+    o -= 1;
+    notifyAll(i, p);
   }
 
-  return front;
+  return {front, pl};
 }
 
 bool PlaybackQueue::empty() const { return queue.empty(); }
 
-void PlaybackQueue::setStatusUpdateCallback(statusUpdateCallback &&_cb) {
-  cb = std::move(_cb);
+void PlaybackQueue::setStatusUpdateCallback(statusUpdateCallback &&cb) {
+  cbs.push_back(std::move(cb));
 }

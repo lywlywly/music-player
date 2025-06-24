@@ -11,6 +11,7 @@
 #include <QActionGroup>
 #include <QMainWindow>
 #include <QMenu>
+#include <QTableView>
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -45,34 +46,40 @@ private:
   void next();
   void prev();
   void play(MSong song, int);
-  void navigateIndex(MSong song, int);
+  void navigateIndex(MSong song, int, int);
   void setUpSplitter();
   void setUpPlaybackActions();
   void setUpSlider();
   void setUpLyricsPanel();
-  void setUpTableView();
+  void setUpTableView(Playlist *, QTableView *);
   void createModels();
-  void setUpPlaybackControl();
-  void setUpPlaylist();
+  void setUpPlaybackManager();
+  void setUpCurrentPlaylist();
   void setUpPlayer();
   bool eventFilter(QObject *obj, QEvent *event) override;
+  void setUpTab();
+  void setUpPlaylistOps();
   QString getNewPlaylistName();
+  void setUpPolicyMenu();
+  void setUpDefaultPlaylist();
   // TODO: remove song from current playlist, check if any other playlist
   // references the song, if no, remove from library
   void removeSong();
+  void onTabChanged(int);
   Policy string2Policy(QString);
+  std::string findPlaylistName(Playlist *);
+  int findPlaylistIndex(QString);
   Ui::MainWindow *ui;
   QMediaPlayer mediaPlayer;
   PlaybackQueue playbackQueue;
   PlaybackManager control;
   SongLibrary songLibrary;
+  // TODO: separate playlist manager class
   std::map<std::string, Playlist> playlistMap;
   Playlist *currentPlaylist;
-  // TODO: do not inherit QObject, this is a whole utility class outside Qt
-  // framework LyricsManager is responsible for providing the right line of
-  // lyrics instead
-  LyricsLoader *lyricsLoader;   // TODO: use value type
-  LyricsManager *lyricsManager; // TODO: use value type
+  QTableView *currentTableView;
+  LyricsLoader lyricsLoader;   // TODO: use value type
+  LyricsManager lyricsManager; // TODO: use value type
   QPixmap pixmap;
   qint64 duration;
   int currentLine = -1;

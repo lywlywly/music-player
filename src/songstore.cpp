@@ -14,8 +14,7 @@ SongStore::SongStore(SongLibrary &lib) : library{lib} {}
 
 int SongStore::songCount() const { return songPKs.size(); }
 
-void SongStore::addSong(MSong &&s)
-{
+void SongStore::addSong(MSong &&s) {
   int s1 = library.addTolibrary(std::move(s));
   songPKs.push_back(s1);
   if (indices.size() < s1 + 1)
@@ -23,70 +22,60 @@ void SongStore::addSong(MSong &&s)
   indices[s1] = songPKs.size() - 1;
 }
 
-void SongStore::removeSongByPk(int pk)
-{
+void SongStore::removeSongByPk(int pk) {
   int i = indices[pk];
   songPKs.erase(songPKs.begin() + i); // TODO: lazy delete
   indices[pk] = -1;
 }
 
-void SongStore::removeSongByIndex(int i)
-{
+void SongStore::removeSongByIndex(int i) {
   int pk = songPKs[i];
   songPKs.erase(songPKs.begin() + i); // TODO: lazy delete
   indices[pk] = -1;
 }
 
-void SongStore::clear()
-{
+void SongStore::clear() {
   songPKs.clear();
   indices.clear();
 }
 
-const MSong &SongStore::getSongByPk(int pk) const
-{
-  if (indices[pk] == -1)
-  {
+const MSong &SongStore::getSongByPk(int pk) const {
+  if (indices[pk] == -1) {
     throw std::logic_error("Key not in view");
   }
   return library.getSongByPK(pk);
 }
 
-const MSong &SongStore::getSongByIndex(int i) const
-{
+const MSong &SongStore::getSongByIndex(int i) const {
   return library.getSongByPK(songPKs.at(i));
 }
 
 const int SongStore::getPkByIndex(int i) const { return songPKs.at(i); }
 
-const int SongStore::getIndexByPk(int pk) const
-{
-  if (indices[pk] == -1)
-  {
+const int SongStore::getIndexByPk(int pk) const {
+  if (indices[pk] == -1) {
     throw std::logic_error("Key not in view");
   }
   return indices.at(pk);
 }
 
-void SongStore::sortByField(std::string f, int order)
-{
+void SongStore::sortByField(std::string f, int order) {
   UCollationResult result;
   if (order == 0)
     result = UCollationResult::UCOL_LESS;
   else
     result = UCollationResult::UCOL_GREATER;
-  std::stable_sort(songPKs.begin(), songPKs.end(), [&](int i, int j)
-                   {
+  std::stable_sort(songPKs.begin(), songPKs.end(), [&](int i, int j) {
     icu::UnicodeString ua =
         icu::UnicodeString::fromUTF8(library.getSongByPK(i).at(f));
     icu::UnicodeString ub =
         icu::UnicodeString::fromUTF8(library.getSongByPK(j).at(f));
-    return collator->compare(ua, ub) == result; });
+    return collator->compare(ua, ub) == result;
+  });
 
   std::fill(indices.begin(), indices.end(), -1);
 
-  for (size_t i = 0; i < songPKs.size(); ++i)
-  {
+  for (size_t i = 0; i < songPKs.size(); ++i) {
     indices[songPKs[i]] = i;
   }
 }

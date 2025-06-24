@@ -21,23 +21,37 @@
 #include <QTextStream>
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent), ui(new Ui::MainWindow), control{playbackQueue} {
+    : QMainWindow(parent), ui(new Ui::MainWindow), control{playbackQueue},
+      lyricsManager{this} {
   ui->setupUi(this);
   createModels();
-  setUpPlaylist();
-  setUpPlaybackControl();
-  setUpTableView();
+  setUpTab();
+  setUpPolicyMenu();
+  setUpDefaultPlaylist();
+  setUpPlaybackManager();
   setUpPlayer();
   setUpSlider();
   setUpLyricsPanel();
   setUpPlaybackActions();
   setUpSplitter();
+  setUpTableView(currentPlaylist, currentTableView);
+  setUpPlaylistOps();
+}
+
+void MainWindow::setUpDefaultPlaylist() {
+  playlistMap.emplace(
+      std::piecewise_construct, std::forward_as_tuple("Default"),
+      std::forward_as_tuple(SongStore{songLibrary}, playbackQueue));
+  QWidget *tabWidget = ui->tabWidget->widget(0);
+  currentTableView = tabWidget->findChild<QTableView *>();
+  currentPlaylist = &playlistMap.at("Default");
+  currentPlaylist->registerStatusUpdateCallback();
+  setUpCurrentPlaylist();
 }
 
 void MainWindow::onTabContextMenuRequested(const QPoint &pos) {
   QTabBar *tabBar = ui->tabWidget->tabBar();
   int index = tabBar->tabAt(pos);
-  int count = tabBar->count();
 
   QMenu menu(this);
   QAction *addAction = menu.addAction("Add New Playlist");
@@ -50,17 +64,37 @@ void MainWindow::onTabContextMenuRequested(const QPoint &pos) {
 
   if (selected == addAction) {
     QWidget *newTab = new QWidget;
-    QVBoxLayout *layout = new QVBoxLayout(newTab);
-    layout->addWidget(new QTextEdit("New Tab"));
+    QGridLayout *layout = new QGridLayout(newTab);
+    QTableView *tbv = new QTableView(this);
+    layout->addWidget(tbv);
     QString newPlaylistName = getNewPlaylistName();
     ui->tabWidget->addTab(newTab, newPlaylistName);
     playlistMap.emplace(
         std::piecewise_construct,
         std::forward_as_tuple(std::string(newPlaylistName.toStdString())),
         std::forward_as_tuple(SongStore{songLibrary}, playbackQueue));
+    Playlist &pl = playlistMap.at(newPlaylistName.toStdString());
+
+    setUpTableView(&pl, tbv);
+    pl.registerStatusUpdateCallback();
   } else if (selected == removeAction) {
+    std::string txt = ui->tabWidget->tabText(index).toStdString();
     ui->tabWidget->removeTab(index);
+    playlistMap.erase(txt);
   }
+}
+
+void MainWindow::onTabChanged(int index) {
+  QString text = ui->tabWidget->tabText(index);
+  qDebug() << "Switched to tab" << index << ":" << text;
+  currentPlaylist = &playlistMap.at(text.toStdString());
+  QWidget *tab = ui->tabWidget->widget(index);
+
+  if (QTableView *tbv = tab->findChild<QTableView *>()) {
+    currentTableView = tbv;
+  }
+
+  setUpCurrentPlaylist();
 }
 
 void MainWindow::setUpSplitter() {
@@ -86,36 +120,48 @@ void MainWindow::setUpPlaybackActions() {
 }
 
 void MainWindow::next() {
-  auto [song, row] = control.next();
+  const auto &[song, row, pl] = control.next();
   play(song, row);
-  navigateIndex(song, row);
+
+  int idx = pl != currentPlaylist
+                ? findPlaylistIndex(QString::fromUtf8(findPlaylistName(pl)))
+                : -1;
+
+  navigateIndex(song, row, idx);
 }
 
 void MainWindow::prev() {
-  auto [song, row] = control.prev();
+  const auto &[song, row, pl] = control.prev();
   play(song, row);
-  navigateIndex(song, row);
+
+  int idx = pl != nullptr
+                ? findPlaylistIndex(QString::fromUtf8(findPlaylistName(pl)))
+                : -1;
+
+  navigateIndex(song, row, idx);
 }
 
 void MainWindow::play(MSong song, int row) {
   if (row < 0) {
     // empty playlist, do nothing
-    qDebug() << "prev" << "empty playlist, do nothing";
     return;
   }
+
   QUrl url = QString::fromUtf8(song.at("path"));
   mediaPlayer.setSource(url);
   mediaPlayer.play();
 }
 
-void MainWindow::navigateIndex(MSong song, int row) {
-  QModelIndex index = ui->tableView->model()->index(row, 0);
+void MainWindow::navigateIndex(MSong song, int row, int tabIdx) {
+  if (tabIdx >= 0)
+    ui->tabWidget->setCurrentIndex(tabIdx);
+  QModelIndex index = currentTableView->model()->index(row, 0);
   // column 0 is enough
-  ui->tableView->selectionModel()->select(index, QItemSelectionModel::Select |
-                                                     QItemSelectionModel::Rows);
+  currentTableView->selectionModel()->select(
+      index, QItemSelectionModel::Select | QItemSelectionModel::Rows);
   // Optional: set focus and scroll to it
-  ui->tableView->setCurrentIndex(index);
-  ui->tableView->scrollTo(index);
+  currentTableView->setCurrentIndex(index);
+  currentTableView->scrollTo(index);
   setUpImageAndLyrics(song);
 }
 
@@ -129,19 +175,17 @@ void MainWindow::setUpSlider() {
 }
 
 void MainWindow::setUpLyricsPanel() {
-  lyricsLoader = new LyricsLoader;
-  lyricsManager = new LyricsManager(this);
-  connect(&mediaPlayer, &QMediaPlayer::positionChanged, lyricsManager,
+  connect(&mediaPlayer, &QMediaPlayer::positionChanged, &lyricsManager,
           &LyricsManager::onPlayerProgressChange);
-  connect(lyricsManager, &LyricsManager::newLyricsLineIndex, this,
+  connect(&lyricsManager, &LyricsManager::newLyricsLineIndex, this,
           &MainWindow::updateLyricsPanel);
 }
 
 bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
-  if (obj == ui->tableView && event->type() == QEvent::KeyPress) {
+  if (obj == currentTableView && event->type() == QEvent::KeyPress) {
     QKeyEvent *keyEvent = static_cast<QKeyEvent *>(event);
     if (keyEvent->key() == Qt::Key_Backspace) {
-      QModelIndex index = ui->tableView->currentIndex();
+      QModelIndex index = currentTableView->currentIndex();
       if (index.isValid()) {
         currentPlaylist->removeSong(index.row());
       }
@@ -149,6 +193,24 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
     }
   }
   return QObject::eventFilter(obj, event);
+}
+
+void MainWindow::setUpTab() {
+  ui->tabWidget->tabBar()->setContextMenuPolicy(Qt::CustomContextMenu);
+  connect(ui->tabWidget->tabBar(), &QTabBar::customContextMenuRequested, this,
+          &MainWindow::onTabContextMenuRequested);
+  connect(ui->tabWidget, &QTabWidget::currentChanged, this,
+          &MainWindow::onTabChanged);
+  ui->tabWidget->setTabText(0, "Default");
+}
+
+void MainWindow::setUpPlaylistOps() {
+  connect(ui->actionOpen, &QAction::triggered, this, &MainWindow::open);
+  connect(ui->actionAdd_folder, &QAction::triggered, this,
+          &MainWindow::openFolder);
+  connect(ui->actionAdd, &QAction::triggered, this, &MainWindow::addEntry);
+  connect(ui->actionClear_Playlist, &QAction::triggered, currentPlaylist,
+          &Playlist::clear);
 }
 
 QString MainWindow::getNewPlaylistName() {
@@ -161,6 +223,16 @@ QString MainWindow::getNewPlaylistName() {
   }
 }
 
+void MainWindow::setUpPolicyMenu() {
+  orderGroup = new QActionGroup(this);
+  orderGroup->setExclusive(true);
+  for (QAction *act : {ui->actionDefault, ui->actionShuffle_tracks}) {
+    act->setCheckable(true);
+    orderGroup->addAction(act);
+  }
+  ui->actionDefault->setChecked(true);
+}
+
 Policy MainWindow::string2Policy(QString s) {
   if (s == "Default")
     return Policy::Sequential;
@@ -169,51 +241,63 @@ Policy MainWindow::string2Policy(QString s) {
   throw std::logic_error("Never");
 }
 
-void MainWindow::setUpTableView() {
+std::string MainWindow::findPlaylistName(Playlist *pl) {
+  for (const auto &[key, value] : playlistMap) {
+    if (&value == pl)
+      return key;
+  }
+  throw std::logic_error("Never");
+}
+
+int MainWindow::findPlaylistIndex(QString s) {
+  for (int i = 0; i < ui->tabWidget->count(); ++i) {
+    QString text = ui->tabWidget->tabText(i);
+    if (text == s)
+      return i;
+  }
+  throw std::logic_error("Never");
+}
+
+void MainWindow::setUpTableView(Playlist *pl, QTableView *tbv) {
   ui->textEdit->setReadOnly(true);
-  ui->tableView->setModel(currentPlaylist);
-  ui->tableView->setSortingEnabled(true);
-  ui->tableView->setEditTriggers(QAbstractItemView::NoEditTriggers);
-  ui->tableView->setSelectionBehavior(QAbstractItemView::SelectRows);
-  ui->tableView->installEventFilter(this);
-  ui->tableView->setContextMenuPolicy(Qt::CustomContextMenu);
-  connect(ui->tableView, &QTableView::customContextMenuRequested, this,
+  tbv->setModel(pl);
+  tbv->setSortingEnabled(true);
+  tbv->setEditTriggers(QAbstractItemView::NoEditTriggers);
+  tbv->setSelectionBehavior(QAbstractItemView::SelectRows);
+  tbv->installEventFilter(this);
+  tbv->setContextMenuPolicy(Qt::CustomContextMenu);
+  connect(tbv, &QTableView::customContextMenuRequested, this,
           &MainWindow::onCustomContextMenuRequested);
-  ui->tableView->horizontalHeader()->setSortIndicatorShown(false);
-  QObject::connect(
-      ui->tableView->horizontalHeader(), &QHeaderView::sectionClicked, this,
-      [this](int idx) {
-        ui->tableView->horizontalHeader()->setSortIndicatorShown(true);
-        currentPlaylist->sortByField(
-            fieldStringList[idx].toStdString(),
-            ui->tableView->horizontalHeader()->sortIndicatorOrder());
-      });
+  tbv->horizontalHeader()->setSortIndicatorShown(false);
+  QObject::connect(tbv->horizontalHeader(), &QHeaderView::sectionClicked, this,
+                   [=, this](int idx) {
+                     tbv->horizontalHeader()->setSortIndicatorShown(true);
+                     pl->sortByField(
+                         fieldStringList[idx].toStdString(),
+                         tbv->horizontalHeader()->sortIndicatorOrder());
+                   });
+  connect(tbv, &QTableView::doubleClicked, [this](QModelIndex i) {
+    MSong song = control.PlayIndex(i.row());
+    mediaPlayer.setSource(QString::fromUtf8(song.at("path")));
+    mediaPlayer.play();
+    setUpImageAndLyrics(song);
+  });
 }
 
 void MainWindow::onCustomContextMenuRequested(const QPoint &pos) {
-  QModelIndex index = ui->tableView->indexAt(pos);
+  QModelIndex index = currentTableView->indexAt(pos);
   if (!index.isValid())
     return;
 
   playNextAction->setData(QVariant::fromValue(index));
   playEndAction->setData(QVariant::fromValue(index));
 
-  contextMenu.exec(ui->tableView->viewport()->mapToGlobal(pos));
+  contextMenu.exec(currentTableView->viewport()->mapToGlobal(pos));
 }
 
 void MainWindow::createModels() {}
 
-void MainWindow::setUpPlaybackControl() {
-  orderGroup = new QActionGroup(this);
-  orderGroup->setExclusive(true);
-  for (QAction *act : {ui->actionDefault, ui->actionShuffle_tracks}) {
-    act->setCheckable(true);
-    orderGroup->addAction(act);
-  }
-  ui->actionDefault->setChecked(true); // Set default
-  QAction *checked = orderGroup->checkedAction();
-  QString selectedText = checked->text();
-  control.setPolicy(string2Policy(selectedText));
+void MainWindow::setUpPlaybackManager() {
   connect(orderGroup, &QActionGroup::triggered, this, [this](QAction *action) {
     QAction *checked = orderGroup->checkedAction();
     QString selectedText = checked->text();
@@ -230,18 +314,11 @@ void MainWindow::setUpPlaybackControl() {
     QModelIndex index = playNextAction->data().value<QModelIndex>();
     control.queueEnd(index.row());
   });
-
-  connect(ui->tableView, &QTableView::doubleClicked, [this](QModelIndex i) {
-    MSong song = control.play(i.row());
-    mediaPlayer.setSource(QString::fromUtf8(song.at("path")));
-    mediaPlayer.play();
-    setUpImageAndLyrics(song);
-  });
 }
 
 void MainWindow::setUpImageAndLyrics(MSong song) {
-  lyricsManager->setLyrics(
-      lyricsLoader->getLyrics(song.at("title"), song.at("artist")));
+  lyricsManager.setLyrics(
+      lyricsLoader.getLyrics(song.at("title"), song.at("artist")));
   auto [data, size] = SongParser::extractCoverImage(song.at("path"));
   if (size > 0) {
     pixmap.loadFromData(data.data(), size);
@@ -254,28 +331,11 @@ void MainWindow::setUpImageAndLyrics(MSong song) {
   resetLyricsPanel();
 }
 
-void MainWindow::setUpPlaylist() {
-  // TODO: separate playlist manager class
-  playlistMap.emplace(
-      std::piecewise_construct,
-      std::forward_as_tuple("default"), // forces copy into const std::string
-      std::forward_as_tuple(SongStore{songLibrary}, playbackQueue));
-
-  currentPlaylist = &playlistMap.at("default");
-  currentPlaylist->registerStatusUpdateCallback();
+void MainWindow::setUpCurrentPlaylist() {
   control.setView(currentPlaylist);
-
-  ui->tabWidget->tabBar()->setContextMenuPolicy(Qt::CustomContextMenu);
-  connect(ui->tabWidget->tabBar(), &QTabBar::customContextMenuRequested, this,
-          &MainWindow::onTabContextMenuRequested);
-  ui->tabWidget->setTabText(0, "Default");
-
-  connect(ui->actionOpen, &QAction::triggered, this, &MainWindow::open);
-  connect(ui->actionAdd_folder, &QAction::triggered, this,
-          &MainWindow::openFolder);
-  connect(ui->actionAdd, &QAction::triggered, this, &MainWindow::addEntry);
-  connect(ui->actionClear_Playlist, &QAction::triggered, currentPlaylist,
-          &Playlist::clear);
+  QAction *checked = orderGroup->checkedAction();
+  QString selectedText = checked->text();
+  control.setPolicy(string2Policy(selectedText));
 }
 
 void MainWindow::setUpPlayer() {
@@ -288,7 +348,7 @@ void MainWindow::setUpPlayer() {
 
 void MainWindow::resetLyricsPanel() {
   ui->textEdit->clear();
-  const std::map<int, std::string> &map = lyricsManager->getCurrentLyricsMap();
+  const std::map<int, std::string> &map = lyricsManager.getCurrentLyricsMap();
   for (const auto &[key, value] : map) {
     ui->textEdit->append(QString::fromUtf8(value));
   }
@@ -392,7 +452,6 @@ void MainWindow::statusChanged(QMediaPlayer::MediaStatus status) {
 void MainWindow::open() {
   QList<QString> fileName = QFileDialog::getOpenFileNames(
       this, "Open the file", QDir::homePath() + "/Music");
-  qDebug() << "opening file" << fileName;
   for (QString s : fileName) {
     currentPlaylist->addSong(SongParser::parse(s.toStdString()));
   }
@@ -410,10 +469,11 @@ void MainWindow::openFolder() {
   std::vector<MSong> songs;
   for (QString s : files) {
     if (s.split(".").last() == "mp3") {
+      // more file types
       songs.push_back(SongParser::parse(dir.absoluteFilePath(s).toStdString()));
     }
   }
-  currentPlaylist->addSongs(songs);
+  currentPlaylist->addSongs(std::move(songs));
 }
 
 MainWindow::~MainWindow() { delete ui; }
