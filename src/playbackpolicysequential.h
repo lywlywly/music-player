@@ -4,13 +4,13 @@
 #include "playbackpolicy.h"
 class PlaybackPolicySequential : public PlaybackPolicy {
 public:
-  PlaybackPolicySequential(PlaybackQueue &);
+  PlaybackPolicySequential();
 
   // PlaybackPolicy interface
 public:
   void setPlaylist(const Playlist *) override;
-  int nextIndex() override;
-  int previousIndex() override;
+  int nextPk() override;
+  int prevPk() override;
 
 private:
   void reset() override;

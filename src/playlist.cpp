@@ -13,18 +13,21 @@ QVariant Playlist::data(const QModelIndex &index, int role) const {
   if (!index.isValid() || role != Qt::DisplayRole)
     return QVariant();
 
-  int currPk = playbackQueue.getCurrentPk();
-
-  int row = index.row();
   if (index.column() == 0) {
-    if (playbackQueue.getOrder(row) >= 0) {
-      return playbackQueue.getOrder(row);
+    int pk = store.getPkByIndex(index.row());
+    const auto &[curPk, curPl] = playbackQueue.getCurrentPk();
+
+    if ((pk == curPk) && (curPl == this))
+      return QString{"\u25B6"};
+
+    auto [order, pl] = playbackQueue.getOrder(pk);
+    if ((order >= 0) && (pl == this)) {
+      return QVariant{order};
     }
-    auto cur = currPk >= 0 ? getIndexByPk(currPk) : -1;
-    return cur == index.row() ? QString{"\u25B6"} : QString{};
+
+    return QVariant{};
   }
   if (index.column() == 1) {
-    // qDebug() << getSongByIndex(index.row());
     return QString::fromUtf8(getSongByIndex(index.row()).at("artist"));
   }
   if (index.column() == 2) {
@@ -62,7 +65,7 @@ void Playlist::addSong(MSong &&s) {
   endInsertRows();
 }
 
-void Playlist::addSongs(std::vector<MSong> &items) {
+void Playlist::addSongs(std::vector<MSong> &&items) {
   if (items.empty())
     return;
 
@@ -74,6 +77,8 @@ void Playlist::addSongs(std::vector<MSong> &items) {
   }
 
   endInsertRows();
+  items = {}; // clear the vector as if we moved it because we are taking rvalue
+              // reference
 }
 
 void Playlist::removeSong(int index) {
@@ -111,7 +116,12 @@ void Playlist::toogleSortOrder(int column, int order) {
 }
 
 void Playlist::registerStatusUpdateCallback() {
-  std::function<void(int)> statusUpdate = [this](int pk) {
+  std::function<void(int, Playlist *)> statusUpdate = [this](int pk,
+                                                             Playlist *pl) {
+    if (pl != this) {
+      return;
+    }
+
     int row = this->getIndexByPk(pk);
     emit dataChanged(index(row, 0), index(row, 0));
   };

@@ -21,13 +21,14 @@ private slots:
 
 TestPlaybackManager::TestPlaybackManager(QObject *parent) : QObject{parent} {}
 void TestPlaybackManager::test1() {
-  queue.addNext(1);
-  queue.addNext(3);
-  queue.addLast(2);
+  Playlist *pl;
+  queue.addNext(1, pl);
+  queue.addNext(3, pl);
+  queue.addLast(2, pl);
 
   std::deque<int> expected = {3, 1, 2};
   QCOMPARE(queue.getQueue(), expected);
-  QVERIFY(queue.pop() == 3);
+  QVERIFY(queue.pop().first == 3);
   QVERIFY(queue.getQueue()[0] == 1);
 }
 

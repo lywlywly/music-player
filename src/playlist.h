@@ -25,7 +25,7 @@ public:
   int songCount() const;
   bool empty() const;
   void addSong(MSong &&);
-  void addSongs(std::vector<MSong> &);
+  void addSongs(std::vector<MSong> &&);
   void removeSong(int);
   void clear();
   const MSong &getSongByPk(int) const;

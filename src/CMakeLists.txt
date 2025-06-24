@@ -72,28 +72,25 @@ set(PROJECT_SOURCES
 
 add_library(MYLib ${PROJECT_SOURCES})
 
+target_link_libraries(
+  MYLib
+  Qt${QT_VERSION_MAJOR}::Widgets
+  Qt${QT_VERSION_MAJOR}::Sql
+  Qt${QT_VERSION_MAJOR}::Multimedia
+  PkgConfig::FFMPEG
+  PkgConfig::OPENSSL
+  ${ICU_LIBRARIES}
+  TagLib::tag
+)
+
 if(APPLE)
   target_link_libraries(
     MYLib
-    Qt${QT_VERSION_MAJOR}::Widgets
-    Qt${QT_VERSION_MAJOR}::Sql
-    Qt${QT_VERSION_MAJOR}::Multimedia
-    PkgConfig::FFMPEG
-    PkgConfig::OPENSSL
-    ${ICU_LIBRARIES}
-    TagLib::tag
     ${CMAKE_SOURCE_DIR}/lib/libefsw-static-debug.a
   )
 else()
   target_link_libraries(
     MYLib
-    Qt${QT_VERSION_MAJOR}::Widgets
-    Qt${QT_VERSION_MAJOR}::Sql
-    Qt${QT_VERSION_MAJOR}::Multimedia
-    PkgConfig::FFMPEG
-    PkgConfig::OPENSSL
-    ${ICU_LIBRARIES}
-    TagLib::tag
     ${CMAKE_SOURCE_DIR}/lib/libefsw.so
   )
 endif()

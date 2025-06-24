@@ -1,3 +1,5 @@
 #include "playbackpolicy.h"
 
-PlaybackPolicy::PlaybackPolicy(PlaybackQueue &queue) : queue{queue} {}
+PlaybackPolicy::PlaybackPolicy() {}
+
+void PlaybackPolicy::setCurrentPk(int pk) { this->currentPk = pk; }
