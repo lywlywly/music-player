@@ -24,8 +24,7 @@ find_package(TagLib CONFIG REQUIRED)
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavcodec libavformat
   libavutil)
 pkg_check_modules(OPENSSL REQUIRED IMPORTED_TARGET openssl)
-
-include_directories(include ${ICU_INCLUDE_DIRS})
+pkg_check_modules(GST REQUIRED gstreamer-1.0)
 
 set(PROJECT_SOURCES
   mainwindow.cpp
@@ -34,43 +33,52 @@ set(PROJECT_SOURCES
   addentrydialog.h
   addentrydialog.cpp
   addentrydialog.ui
-  songparser.h
-  songparser.cpp
+  audioplayer.h
+  audioplayer.cpp
+  checksumcalculator.h
+  checksumcalculator.cpp
+  efswfilesystemmonitor.h
+  efswfilesystemmonitor.cpp
+  filesystemcomparer.h
+  filesystemcomparer.cpp
+  gstaudioplayer.h
+  gstaudioplayer.cpp
+  ifilesystemmonitor.h
   lyricsloader.h
   lyricsloader.cpp
   lyricsmanager.h
   lyricsmanager.cpp
-  checksumcalculator.h
-  checksumcalculator.cpp
-  filesystemcomparer.h
-  filesystemcomparer.cpp
-  ifilesystemmonitor.h
-  qfilesystemmonitor.h
-  qfilesystemmonitor.cpp
-  efswfilesystemmonitor.h
-  efswfilesystemmonitor.cpp
-  songloader.h
-  songloader.cpp
   playbackmanager.h
   playbackmanager.cpp
-  playbackqueue.h
-  playbackqueue.cpp
-  playlist.h
-  playlist.cpp
-  songstore.h
-  songstore.cpp
-  songlibrary.h
-  songlibrary.cpp
   playbackpolicy.h
   playbackpolicy.cpp
   playbackpolicysequential.h
   playbackpolicysequential.cpp
   playbackpolicyshuffle.h
   playbackpolicyshuffle.cpp
+  playbackqueue.h
+  playbackqueue.cpp
+  playlist.h
+  playlist.cpp
+  qfilesystemmonitor.h
+  qfilesystemmonitor.cpp
+  qtaudioplayer.h
+  qtaudioplayer.cpp
+  songlibrary.h
+  songlibrary.cpp
+  songloader.h
+  songloader.cpp
+  songparser.h
+  songparser.cpp
+  songstore.h
+  songstore.cpp
   utils.h
 )
 
 add_library(MYLib ${PROJECT_SOURCES})
+
+include_directories(MYLib PRIVATE ${ICU_INCLUDE_DIRS})
+include_directories(MYLib PRIVATE ${GST_INCLUDE_DIRS})
 
 target_link_libraries(
   MYLib
@@ -81,6 +89,7 @@ target_link_libraries(
   PkgConfig::OPENSSL
   ${ICU_LIBRARIES}
   TagLib::tag
+  ${GST_LIBRARIES}
 )
 
 if(APPLE)
@@ -97,5 +106,6 @@ endif()
 
 add_executable(EXEC main.cpp)
 target_link_libraries(EXEC MYLib)
+target_compile_options(EXEC PRIVATE ${GST_CFLAGS_OTHER})
 
 add_subdirectory(Tests)
