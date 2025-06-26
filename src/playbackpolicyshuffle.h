@@ -93,6 +93,14 @@ public:
     return nullptr;
   }
 
+  void resize(int new_size) {
+    if (new_size < capacity_) {
+      throw std::runtime_error(
+          "new_size should be greater than or equal to original capacity. ");
+    }
+    capacity_ = new_size;
+  }
+
   bool has_prev() const { return cursor_index_ > 0; }
 
   bool has_next() const {
@@ -110,6 +118,7 @@ private:
 class PlaybackPolicyShuffle : public PlaybackPolicy {
 public:
   PlaybackPolicyShuffle();
+  ~PlaybackPolicyShuffle() override;
 
   // PlaybackPolicy interface
 public:

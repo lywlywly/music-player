@@ -18,8 +18,8 @@ public:
   int getStatus();
   std::pair<int, Playlist *> pop();
   bool empty() const;
-  using statusUpdateCallback = std::function<void(int, Playlist *)>;
-  void setStatusUpdateCallback(statusUpdateCallback &&);
+  using StatusUpdateCallback = std::function<void(int, Playlist *)>;
+  void setStatusUpdateCallback(StatusUpdateCallback &&);
   std::pair<int, Playlist *> getOrder(int);
 
 private:
@@ -29,7 +29,7 @@ private:
   int currentPk = -1;
   Playlist *currentPlaylist;
   int status; // play/pause
-  std::vector<statusUpdateCallback> cbs;
+  std::vector<StatusUpdateCallback> cbs;
   // statusUpdateCallback cb;
 
 signals:

@@ -39,11 +39,15 @@ public:
   // unregister queue update callback, use when unregisterStatusUpdateCallback
   // focus
   void unregisterStatusUpdateCallback();
+  using SizeChangeCallback = std::function<void(int)>;
+  void setSizeChangeCallback(SizeChangeCallback &&) const;
+  void unsetSizeChangeCallback() const;
 
 private:
   SongStore store;
   PlaybackQueue &playbackQueue;
   int lastPlayed;
+  mutable SizeChangeCallback sizeChangeCallback;
 };
 
 #endif // PLAYLIST_H

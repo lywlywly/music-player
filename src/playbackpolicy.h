@@ -10,6 +10,7 @@ class PlaybackPolicy {
 public:
   // PlaybackPolicy(PlaybackQueue &);
   PlaybackPolicy();
+  virtual ~PlaybackPolicy() {}
   virtual void setPlaylist(const Playlist *) = 0;
   virtual int nextPk() = 0;
   virtual int prevPk() = 0;
