@@ -2,7 +2,9 @@
 
 #include "./ui_mainwindow.h"
 #include "addentrydialog.h"
+#include "gstaudioplayer.h"
 #include "qevent.h"
+#include "qtaudioplayer.h"
 #include <QAudioOutput>
 #include <QDebug>
 #include <QFile>
@@ -105,14 +107,13 @@ void MainWindow::setUpSplitter() {
 }
 
 void MainWindow::setUpPlaybackActions() {
-  connect(ui->actionPlay, &QAction::triggered, &mediaPlayer,
-          &QMediaPlayer::play);
-  connect(ui->play_button, &QAbstractButton::clicked, &mediaPlayer,
-          &QMediaPlayer::play);
-  connect(ui->actionPause, &QAction::triggered, &mediaPlayer,
-          &QMediaPlayer::pause);
-  connect(ui->pause_button, &QAbstractButton::clicked, &mediaPlayer,
-          &QMediaPlayer::pause);
+  connect(ui->actionPlay, &QAction::triggered, mediaPlayer, &AudioPlayer::play);
+  connect(ui->play_button, &QAbstractButton::clicked, mediaPlayer,
+          &AudioPlayer::play);
+  connect(ui->actionPause, &QAction::triggered, mediaPlayer,
+          &AudioPlayer::pause);
+  connect(ui->pause_button, &QAbstractButton::clicked, mediaPlayer,
+          &AudioPlayer::pause);
   connect(ui->next_button, &QAbstractButton::clicked, this, &MainWindow::next);
   connect(ui->prev_button, &QAbstractButton::clicked, this, &MainWindow::prev);
   // connect(ui->random_button, &QAbstractButton::clicked, &pb,
@@ -148,8 +149,8 @@ void MainWindow::play(MSong song, int row) {
   }
 
   QUrl url = QString::fromUtf8(song.at("path"));
-  mediaPlayer.setSource(url);
-  mediaPlayer.play();
+  mediaPlayer->setSource(url);
+  mediaPlayer->play();
 }
 
 void MainWindow::navigateIndex(MSong song, int row, int tabIdx) {
@@ -166,16 +167,16 @@ void MainWindow::navigateIndex(MSong song, int row, int tabIdx) {
 }
 
 void MainWindow::setUpSlider() {
-  ui->horizontalSlider->setRange(0, mediaPlayer.duration());
+  // ui->horizontalSlider->setRange(0, mediaPlayer.duration());
   connect(ui->horizontalSlider, &QSlider::sliderMoved, this, &MainWindow::seek);
-  connect(&mediaPlayer, &QMediaPlayer::durationChanged, this,
+  connect(mediaPlayer, &AudioPlayer::durationChanged, this,
           &MainWindow::durationChanged);
-  connect(&mediaPlayer, &QMediaPlayer::positionChanged, this,
+  connect(mediaPlayer, &AudioPlayer::positionChanged, this,
           &MainWindow::positionChanged);
 }
 
 void MainWindow::setUpLyricsPanel() {
-  connect(&mediaPlayer, &QMediaPlayer::positionChanged, &lyricsManager,
+  connect(mediaPlayer, &AudioPlayer::positionChanged, &lyricsManager,
           &LyricsManager::onPlayerProgressChange);
   connect(&lyricsManager, &LyricsManager::newLyricsLineIndex, this,
           &MainWindow::updateLyricsPanel);
@@ -278,8 +279,8 @@ void MainWindow::setUpTableView(Playlist *pl, QTableView *tbv) {
                    });
   connect(tbv, &QTableView::doubleClicked, [this](QModelIndex i) {
     MSong song = control.PlayIndex(i.row());
-    mediaPlayer.setSource(QString::fromUtf8(song.at("path")));
-    mediaPlayer.play();
+    mediaPlayer->setSource(QString::fromUtf8(song.at("path")));
+    mediaPlayer->play();
     setUpImageAndLyrics(song);
   });
 }
@@ -339,10 +340,8 @@ void MainWindow::setUpCurrentPlaylist() {
 }
 
 void MainWindow::setUpPlayer() {
-  auto audioOutput = new QAudioOutput;
-  mediaPlayer.setAudioOutput(audioOutput);
-  // audioOutput->setVolume(50);
-  connect(&mediaPlayer, &QMediaPlayer::mediaStatusChanged, this,
+  mediaPlayer = new GstAudioPlayer;
+  connect(mediaPlayer, &AudioPlayer::mediaStatusChanged, this,
           &MainWindow::statusChanged);
 }
 
@@ -421,7 +420,7 @@ void MainWindow::positionChanged(qint64 progress) {
     ui->horizontalSlider->setValue(progress);
 }
 
-void MainWindow::seek(int mseconds) { mediaPlayer.setPosition(mseconds); }
+void MainWindow::seek(int mseconds) { mediaPlayer->setPosition(mseconds); }
 
 void MainWindow::statusChanged(QMediaPlayer::MediaStatus status) {
   // TODO

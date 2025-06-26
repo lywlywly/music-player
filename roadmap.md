@@ -1,7 +1,7 @@
 # Roadmap
 
-- ⬜ GStreamer backend
-- ⬜ ReplayGain
+- ✅ GStreamer backend
+- 🟧 ReplayGain
 - ✅ sorting
 - ✅ multiple playlists
 - ⬜ serialize and deserialize playlists

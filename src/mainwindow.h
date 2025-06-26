@@ -1,6 +1,7 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
+#include "audioplayer.h"
 #include "lyricsloader.h"
 #include "lyricsmanager.h"
 #include "playbackmanager.h"
@@ -70,7 +71,7 @@ private:
   std::string findPlaylistName(Playlist *);
   int findPlaylistIndex(QString);
   Ui::MainWindow *ui;
-  QMediaPlayer mediaPlayer;
+  AudioPlayer *mediaPlayer;
   PlaybackQueue playbackQueue;
   PlaybackManager control;
   SongLibrary songLibrary;
