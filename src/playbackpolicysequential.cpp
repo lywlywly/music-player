@@ -39,3 +39,5 @@ int PlaybackPolicySequential::prevPk() {
 }
 
 void PlaybackPolicySequential::reset() {}
+
+void PlaybackPolicySequential::setCurrentPk(int pk) { this->currentPk = pk; }

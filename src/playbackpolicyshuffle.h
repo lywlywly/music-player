@@ -49,14 +49,17 @@ public:
   }
 
   bool insert_cursor(const T &item) {
-     if (capacity_ == 0)
+    if (capacity_ == 0)
       return false;
 
     if (queue_.size() == capacity_) {
       const T old = queue_.front();
       queue_.pop_front();
       set_.erase(old);
+      cursor_index_--;
     }
+
+    cursor_index_++;
 
     queue_.insert(queue_.begin() + cursor_index_, item);
     set_.insert(item);
