@@ -21,14 +21,13 @@ int PlaybackPolicyShuffle::nextPk() {
   int ranIdx = getRandom(0, playlist->songCount() - 1);
   int pk = playlist->getPkByIndex(ranIdx);
   // retry if too often
-  if (recentPks->contains(pk) || this->currentPk == pk) {
+  if (recentPks->contains(pk)) {
     // `queue.getCurrentPk() == ranIdx` is used to check not current song by
     // directly double clicking
     // FIXME: only one song stackoverflow
     return nextPk();
   }
 
-  this->currentPk = -1; // TODO: when currentPk present, overwrite all future
   recentPks->insert_back(pk);
 
   return pk;
@@ -46,11 +45,10 @@ int PlaybackPolicyShuffle::prevPk() {
   int ranIdx = getRandom(0, playlist->songCount() - 1);
   int pk = playlist->getPkByIndex(ranIdx);
   // retry if too often
-  if (recentPks->contains(pk) || this->currentPk == pk) {
+  if (recentPks->contains(pk)) {
     return prevPk();
   }
 
-  this->currentPk = -1; // TODO: when currentPk present, overwrite all future
   recentPks->insert_front(pk);
 
   return pk;
