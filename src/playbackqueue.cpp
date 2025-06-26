@@ -76,6 +76,6 @@ std::pair<int, Playlist *> PlaybackQueue::pop() {
 
 bool PlaybackQueue::empty() const { return queue.empty(); }
 
-void PlaybackQueue::setStatusUpdateCallback(statusUpdateCallback &&cb) {
+void PlaybackQueue::setStatusUpdateCallback(StatusUpdateCallback &&cb) {
   cbs.push_back(std::move(cb));
 }

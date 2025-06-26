@@ -3,10 +3,18 @@
 
 PlaybackPolicyShuffle::PlaybackPolicyShuffle() {}
 
+PlaybackPolicyShuffle::~PlaybackPolicyShuffle() {
+  playlist->unsetSizeChangeCallback();
+}
+
 void PlaybackPolicyShuffle::setPlaylist(const Playlist *playlist) {
   this->playlist = playlist;
   recentPks =
       std::make_unique<BoundedSetWithHistory<int>>(playlist->songCount() / 2);
+  std::function<void(int)> statusUpdate = [this](int s) {
+    this->recentPks->resize(s / 2);
+  };
+  playlist->setSizeChangeCallback(std::move(statusUpdate));
 }
 
 int PlaybackPolicyShuffle::nextPk() {
@@ -22,9 +30,6 @@ int PlaybackPolicyShuffle::nextPk() {
   int pk = playlist->getPkByIndex(ranIdx);
   // retry if too often
   if (recentPks->contains(pk)) {
-    // `queue.getCurrentPk() == ranIdx` is used to check not current song by
-    // directly double clicking
-    // FIXME: only one song stackoverflow
     return nextPk();
   }
 

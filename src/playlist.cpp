@@ -63,6 +63,9 @@ void Playlist::addSong(MSong &&s) {
   beginInsertRows(QModelIndex(), songCount(), songCount());
   store.addSong(std::move(s));
   endInsertRows();
+
+  if (sizeChangeCallback)
+    sizeChangeCallback(songCount());
 }
 
 void Playlist::addSongs(std::vector<MSong> &&items) {
@@ -79,18 +82,27 @@ void Playlist::addSongs(std::vector<MSong> &&items) {
   endInsertRows();
   items = {}; // clear the vector as if we moved it because we are taking rvalue
               // reference
+
+  if (sizeChangeCallback)
+    sizeChangeCallback(songCount());
 }
 
 void Playlist::removeSong(int index) {
   beginRemoveRows(QModelIndex(), index, index);
   store.removeSongByIndex(index);
   endRemoveRows();
+
+  if (sizeChangeCallback)
+    sizeChangeCallback(songCount());
 }
 
 void Playlist::clear() {
   beginResetModel();
   store.clear();
   endResetModel();
+
+  if (sizeChangeCallback)
+    sizeChangeCallback(songCount());
 }
 
 const MSong &Playlist::getSongByPk(int pk) const {
@@ -130,4 +142,12 @@ void Playlist::registerStatusUpdateCallback() {
 
 void Playlist::unregisterStatusUpdateCallback() {
   // TODO
+}
+
+void Playlist::setSizeChangeCallback(SizeChangeCallback &&cb_) const {
+  this->sizeChangeCallback = std::move(cb_);
+}
+
+void Playlist::unsetSizeChangeCallback() const {
+  this->sizeChangeCallback = nullptr;
 }
