@@ -107,5 +107,8 @@ endif()
 add_executable(EXEC main.cpp)
 target_link_libraries(EXEC MYLib)
 target_compile_options(EXEC PRIVATE ${GST_CFLAGS_OTHER})
+if(APPLE)
+  target_link_directories(EXEC PRIVATE ${GST_LIBRARY_DIRS})
+endif()
 
 add_subdirectory(Tests)

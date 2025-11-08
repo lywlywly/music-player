@@ -1,4 +1,5 @@
 #include "gstaudioplayer.h"
+#include <iomanip>
 #include <qdebug.h>
 
 GstAudioPlayer::GstAudioPlayer(QObject *parent)
