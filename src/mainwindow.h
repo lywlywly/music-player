@@ -1,7 +1,6 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
-#include "audioplayer.h"
 #include "lyricsloader.h"
 #include "lyricsmanager.h"
 #include "playbackbackendmanager.h"
@@ -9,7 +8,6 @@
 #include "playlist.h"
 #include "qmediaplayer.h"
 #include "songlibrary.h"
-#include "songparser.h"
 #include <QActionGroup>
 #include <QMainWindow>
 #include <QMenu>
@@ -36,8 +34,6 @@ private:
   void durationChanged(qint64 duration);
   void statusChanged(QMediaPlayer::MediaStatus status);
   void updateImageSize();
-  void resetLyricsPanel();
-  void updateLyricsPanel(int index);
   void setUpImageAndLyrics(MSong song);
   void open();
   void openFolder();
@@ -72,7 +68,6 @@ private:
   std::string findPlaylistName(Playlist *);
   int findPlaylistIndex(QString);
   Ui::MainWindow *ui;
-  // AudioPlayer *mediaPlayer;
   PlaybackBackendManager *backendManager;
   PlaybackQueue playbackQueue;
   PlaybackManager control;

@@ -121,14 +121,7 @@
                <property name="orientation">
                 <enum>Qt::Orientation::Vertical</enum>
                </property>
-               <widget class="QTextEdit" name="textEdit">
-                <property name="maximumSize">
-                 <size>
-                  <width>600</width>
-                  <height>16777215</height>
-                 </size>
-                </property>
-               </widget>
+               <widget class="LyricsPanel" name="lyricsPanel" native="true"/>
                <widget class="QLabel" name="label">
                 <property name="minimumSize">
                  <size>
@@ -345,6 +338,14 @@
    </property>
   </action>
  </widget>
+ <customwidgets>
+  <customwidget>
+   <class>LyricsPanel</class>
+   <extends>QWidget</extends>
+   <header>lyricspanel.h</header>
+   <container>1</container>
+  </customwidget>
+ </customwidgets>
  <resources/>
  <connections/>
 </ui>

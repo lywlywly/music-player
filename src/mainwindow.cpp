@@ -2,10 +2,9 @@
 
 #include "./ui_mainwindow.h"
 #include "addentrydialog.h"
-#include "gstaudioplayer.h"
 #include "qevent.h"
-#include "qtaudioplayer.h"
 #include "settingsdialog.h"
+#include "songparser.h"
 #include <QAudioOutput>
 #include <QDebug>
 #include <QFile>
@@ -22,6 +21,7 @@
 #include <QSortFilterProxyModel>
 #include <QStandardItem>
 #include <QTextBlock>
+#include <QTextEdit>
 #include <QTextStream>
 
 MainWindow::MainWindow(QWidget *parent)
@@ -180,8 +180,8 @@ void MainWindow::setUpSlider() {
 void MainWindow::setUpLyricsPanel() {
   connect(backendManager->player(), &AudioPlayer::positionChanged,
           &lyricsManager, &LyricsManager::onPlayerProgressChange);
-  connect(&lyricsManager, &LyricsManager::newLyricsLineIndex, this,
-          &MainWindow::updateLyricsPanel);
+  connect(&lyricsManager, &LyricsManager::newLyricsLineIndex, ui->lyricsPanel,
+          &LyricsPanel::updateLyricsPanel);
 }
 
 bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
@@ -262,7 +262,6 @@ int MainWindow::findPlaylistIndex(QString s) {
 }
 
 void MainWindow::setUpTableView(Playlist *pl, QTableView *tbv) {
-  ui->textEdit->setReadOnly(true);
   tbv->setModel(pl);
   tbv->setSortingEnabled(true);
   tbv->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -331,7 +330,7 @@ void MainWindow::setUpImageAndLyrics(MSong song) {
   } else {
     ui->label->setText("No cover");
   }
-  resetLyricsPanel();
+  ui->lyricsPanel->setLyricsPanel(lyricsManager.getCurrentLyricsMap());
 }
 
 void MainWindow::setUpCurrentPlaylist() {
@@ -375,48 +374,6 @@ void MainWindow::setUpPlayer() {
             });
     dialog.exec(); // blocks until user closes the dialog
   });
-}
-
-void MainWindow::resetLyricsPanel() {
-  ui->textEdit->clear();
-  const std::map<int, std::string> &map = lyricsManager.getCurrentLyricsMap();
-  for (const auto &[key, value] : map) {
-    ui->textEdit->append(QString::fromUtf8(value));
-  }
-}
-
-void getVisibleTextRange(QTextEdit *textEdit) {
-  QTextCursor cursor = textEdit->textCursor();
-  int cursorPosition = cursor.position();
-
-  QScrollBar *verticalScrollBar = textEdit->verticalScrollBar();
-  qDebug() << verticalScrollBar->value();
-
-  qDebug() << cursor.blockNumber() << cursorPosition;
-}
-
-void MainWindow::updateLyricsPanel(int index) {
-  // Get the text cursor of the QTextEdit
-  QTextCursor cursor = ui->textEdit->textCursor();
-  QTextBlockFormat format = cursor.blockFormat();
-
-  cursor.movePosition(QTextCursor::Start);
-  cursor.movePosition(QTextCursor::Down, QTextCursor::MoveAnchor, index);
-  format = cursor.blockFormat();
-  format.setBackground(QColor(Qt::blue));
-  cursor.setBlockFormat(format);
-
-  cursor.movePosition(QTextCursor::Start);
-  cursor.movePosition(QTextCursor::Down, QTextCursor::MoveAnchor, index - 1);
-  format = cursor.blockFormat();
-  format.setBackground(QColor(Qt::transparent));
-  cursor.setBlockFormat(format);
-  cursor.movePosition(QTextCursor::Down, QTextCursor::MoveAnchor, 1);
-
-  ui->textEdit->setTextCursor(cursor);
-  ui->textEdit->ensureCursorVisible();
-
-  // getVisibleTextRange(ui->textEdit);
 }
 
 void MainWindow::resizeEvent(QResizeEvent *event) {

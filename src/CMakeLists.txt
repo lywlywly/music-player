@@ -27,12 +27,12 @@ pkg_check_modules(OPENSSL REQUIRED IMPORTED_TARGET openssl)
 pkg_check_modules(GST REQUIRED gstreamer-1.0)
 
 set(PROJECT_SOURCES
-  mainwindow.cpp
-  mainwindow.h
   mainwindow.ui
+  mainwindow.h
+  mainwindow.cpp
+  addentrydialog.ui
   addentrydialog.h
   addentrydialog.cpp
-  addentrydialog.ui
   audioplayer.h
   audioplayer.cpp
   checksumcalculator.h
@@ -48,6 +48,9 @@ set(PROJECT_SOURCES
   lyricsloader.cpp
   lyricsmanager.h
   lyricsmanager.cpp
+  lyricspanel.ui
+  lyricspanel.h
+  lyricspanel.cpp
   playbackbackendmanager.h
   playbackbackendmanager.cpp
   playbackmanager.h
@@ -66,9 +69,9 @@ set(PROJECT_SOURCES
   qfilesystemmonitor.cpp
   qtaudioplayer.h
   qtaudioplayer.cpp
+  settingsdialog.ui
   settingsdialog.h
   settingsdialog.cpp
-  settingsdialog.ui
   songlibrary.h
   songlibrary.cpp
   songloader.h
@@ -115,9 +118,9 @@ target_compile_options(EXEC PRIVATE ${GST_CFLAGS_OTHER})
 if(APPLE)
   target_link_directories(EXEC PRIVATE ${GST_LIBRARY_DIRS})
   set_target_properties(EXEC PROPERTIES
-      MACOSX_BUNDLE TRUE
-      MACOSX_BUNDLE_BUNDLE_NAME "myplayer"
-      MACOSX_BUNDLE_GUI_IDENTIFIER "com.example.myplayer"
+    MACOSX_BUNDLE TRUE
+    MACOSX_BUNDLE_BUNDLE_NAME "myplayer"
+    MACOSX_BUNDLE_GUI_IDENTIFIER "com.example.myplayer"
   )
 endif()
 
