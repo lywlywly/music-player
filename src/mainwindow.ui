@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>MainWindow</string>
+   <string>myplayer</string>
   </property>
   <widget class="QWidget" name="centralWidget">
    <layout class="QVBoxLayout" name="verticalLayout_4">
@@ -186,7 +186,7 @@
      <x>0</x>
      <y>0</y>
      <width>800</width>
-     <height>24</height>
+     <height>30</height>
     </rect>
    </property>
    <widget class="QMenu" name="menuFile">
@@ -198,6 +198,8 @@
     <addaction name="actionAdd_folder"/>
     <addaction name="actionLoad_playlist"/>
     <addaction name="actionClear_Playlist"/>
+    <addaction name="separator"/>
+    <addaction name="actionSettings"/>
    </widget>
    <widget class="QMenu" name="menuEdit">
     <property name="title">
@@ -332,6 +334,14 @@
   <action name="actionShuffle_tracks">
    <property name="text">
     <string>Shuffle (tracks)</string>
+   </property>
+  </action>
+  <action name="actionSettings">
+   <property name="text">
+    <string>Settings</string>
+   </property>
+   <property name="menuRole">
+    <enum>QAction::MenuRole::PreferencesRole</enum>
    </property>
   </action>
  </widget>

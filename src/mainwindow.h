@@ -4,6 +4,7 @@
 #include "audioplayer.h"
 #include "lyricsloader.h"
 #include "lyricsmanager.h"
+#include "playbackbackendmanager.h"
 #include "playbackmanager.h"
 #include "playlist.h"
 #include "qmediaplayer.h"
@@ -71,7 +72,8 @@ private:
   std::string findPlaylistName(Playlist *);
   int findPlaylistIndex(QString);
   Ui::MainWindow *ui;
-  AudioPlayer *mediaPlayer;
+  // AudioPlayer *mediaPlayer;
+  PlaybackBackendManager *backendManager;
   PlaybackQueue playbackQueue;
   PlaybackManager control;
   SongLibrary songLibrary;

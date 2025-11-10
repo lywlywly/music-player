@@ -48,6 +48,8 @@ set(PROJECT_SOURCES
   lyricsloader.cpp
   lyricsmanager.h
   lyricsmanager.cpp
+  playbackbackendmanager.h
+  playbackbackendmanager.cpp
   playbackmanager.h
   playbackmanager.cpp
   playbackpolicy.h
@@ -64,6 +66,9 @@ set(PROJECT_SOURCES
   qfilesystemmonitor.cpp
   qtaudioplayer.h
   qtaudioplayer.cpp
+  settingsdialog.h
+  settingsdialog.cpp
+  settingsdialog.ui
   songlibrary.h
   songlibrary.cpp
   songloader.h
@@ -109,6 +114,11 @@ target_link_libraries(EXEC MYLib)
 target_compile_options(EXEC PRIVATE ${GST_CFLAGS_OTHER})
 if(APPLE)
   target_link_directories(EXEC PRIVATE ${GST_LIBRARY_DIRS})
+  set_target_properties(EXEC PROPERTIES
+      MACOSX_BUNDLE TRUE
+      MACOSX_BUNDLE_BUNDLE_NAME "myplayer"
+      MACOSX_BUNDLE_GUI_IDENTIFIER "com.example.myplayer"
+  )
 endif()
 
 add_subdirectory(Tests)
