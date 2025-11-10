@@ -55,6 +55,12 @@ void GstAudioPlayer::pause() {
   isPlaying_ = false;
 }
 
+void GstAudioPlayer::stop() {
+  gst_element_set_state(playbin_, GST_STATE_NULL);
+  isPlaying_ = false;
+  emit positionChanged(0);
+}
+
 void GstAudioPlayer::setSource(const QUrl &source) {
   gst_element_set_state(playbin_, GST_STATE_READY);
   QString s = source.toString();

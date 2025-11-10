@@ -11,6 +11,7 @@ public:
   virtual ~AudioPlayer() {};
   virtual void play() = 0;
   virtual void pause() = 0;
+  virtual void stop() = 0;
   virtual void setSource(const QUrl &) = 0;
   virtual void setPosition(qint64 position) = 0;
 

@@ -114,6 +114,8 @@ void MainWindow::setUpPlaybackActions() {
           &AudioPlayer::pause);
   connect(ui->pause_button, &QAbstractButton::clicked, mediaPlayer,
           &AudioPlayer::pause);
+  connect(ui->stop_button, &QAbstractButton::clicked, mediaPlayer,
+          &AudioPlayer::stop);
   connect(ui->next_button, &QAbstractButton::clicked, this, &MainWindow::next);
   connect(ui->prev_button, &QAbstractButton::clicked, this, &MainWindow::prev);
   // connect(ui->random_button, &QAbstractButton::clicked, &pb,

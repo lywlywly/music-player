@@ -16,6 +16,7 @@ public:
 public:
   void play() override;
   void pause() override;
+  void stop() override;
   void setSource(const QUrl &) override;
   void setPosition(qint64 position) override;
 
