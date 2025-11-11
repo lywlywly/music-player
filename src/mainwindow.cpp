@@ -174,7 +174,10 @@ void MainWindow::navigateIndex(MSong song, int row, int tabIdx) {
 void MainWindow::setUpSlider() {
   // ui->horizontalSlider->setRange(0,
   // playbackBackendManager->player().duration());
-  connect(ui->horizontalSlider, &QSlider::sliderMoved, this, &MainWindow::seek);
+  connect(ui->horizontalSlider, &QSlider::sliderReleased, this, [this]() {
+    int value = ui->horizontalSlider->value();
+    seek(value);
+  });
 }
 
 void MainWindow::setUpLyricsPanel() {
