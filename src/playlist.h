@@ -42,11 +42,13 @@ public:
   using SizeChangeCallback = std::function<void(int)>;
   void setSizeChangeCallback(SizeChangeCallback &&) const;
   void unsetSizeChangeCallback() const;
+  void setLastPlayed(int newLastPlayed);
+  int getLastPlayed() const;
 
 private:
   SongStore store;
   PlaybackQueue &playbackQueue;
-  int lastPlayed;
+  int lastPlayed = 0;
   mutable SizeChangeCallback sizeChangeCallback;
 };
 

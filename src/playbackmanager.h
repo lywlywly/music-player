@@ -8,18 +8,21 @@
 #include <QUrl>
 enum Policy { Sequential, Shuffle };
 
+// Operations on song switching, abstract layer over `PlaybackQueue`
 class PlaybackManager : public QObject {
   Q_OBJECT
 public:
   explicit PlaybackManager(PlaybackQueue &q, QObject *parent = nullptr);
   // PlayByIndex a song, make it current song, do not change queue
-  const MSong &PlayIndex(int);
+  const MSong &playIndex(int);
   // return const reference to a song, its index in playlist, and the playlist
   // that the song is in.
   std::tuple<const MSong &, int, Playlist *> next();
   // return const reference to a song, its index in playlist, and the playlist
   // that the song is in.
   std::tuple<const MSong &, int, Playlist *> prev();
+  void play();
+  void pause();
   void stop();
   // add to queue
   void queueEnd(int);
@@ -28,6 +31,7 @@ public:
   void enqueueWeak(int);
   void setView(Playlist *);
   void setPolicy(Policy);
+  PlaybackQueue::PlaybackStatus getStatus();
 
 private:
   // const Playlist *playlist;

@@ -2,55 +2,177 @@
 
 #include "./ui_mainwindow.h"
 #include "addentrydialog.h"
-#include "qevent.h"
 #include "settingsdialog.h"
 #include "songparser.h"
-#include <QAudioOutput>
+#include <QActionGroup>
 #include <QDebug>
-#include <QFile>
 #include <QFileDialog>
-#include <QHeaderView>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QMediaPlayer>
-#include <QMessageBox>
-#include <QProcess>
-#include <QScrollBar>
+#include <QKeyEvent>
 #include <QSettings>
-#include <QSortFilterProxyModel>
-#include <QStandardItem>
-#include <QTextBlock>
-#include <QTextEdit>
-#include <QTextStream>
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent), ui(new Ui::MainWindow), control{playbackQueue},
+    : QMainWindow(parent), ui(new Ui::MainWindow), control{playbackQueue_},
       lyricsManager{this} {
   ui->setupUi(this);
-  createModels();
-  setUpTab();
-  setUpPolicyMenu();
-  setUpDefaultPlaylist();
+  setUpMenuBar();
+  setUpPlaylist();
+  initSettings();
   setUpPlaybackManager();
-  setUpPlayer();
-  setUpSlider();
-  setUpLyricsPanel();
+  initPlaybackBackend();
   setUpPlaybackActions();
-  setUpSplitter();
   setUpTableView(currentPlaylist, currentTableView);
-  setUpPlaylistOps();
+  setUpLyricsPanel();
+  setUpSplitter();
 }
 
-void MainWindow::setUpDefaultPlaylist() {
+void MainWindow::setUpMenuBar() {
+  playbackOrderMenuActionGroup = new QActionGroup(this);
+  playbackOrderMenuActionGroup->setExclusive(true);
+  for (QAction *act : {ui->actionDefault, ui->actionShuffle_tracks}) {
+    act->setCheckable(true);
+    playbackOrderMenuActionGroup->addAction(act);
+  }
+  ui->actionDefault->setChecked(true);
+}
+
+void MainWindow::setUpPlaylist() {
+  // context menu
+  playNextAction = playlistContextMenu.addAction("Play Next");
+  playEndAction = playlistContextMenu.addAction("Add to Playback Queue");
+  // tabs
+  ui->tabWidget->tabBar()->setContextMenuPolicy(Qt::CustomContextMenu);
+  connect(ui->tabWidget->tabBar(), &QTabBar::customContextMenuRequested, this,
+          &MainWindow::onTabContextMenuRequested);
+  connect(ui->tabWidget, &QTabWidget::currentChanged, this,
+          &MainWindow::onTabChanged);
+  ui->tabWidget->setTabText(0, "Default");
+  // default playlist
   playlistMap.emplace(
       std::piecewise_construct, std::forward_as_tuple("Default"),
-      std::forward_as_tuple(SongStore{songLibrary}, playbackQueue));
+      std::forward_as_tuple(SongStore{songLibrary}, playbackQueue_));
   QWidget *tabWidget = ui->tabWidget->widget(0);
   currentTableView = tabWidget->findChild<QTableView *>();
   currentPlaylist = &playlistMap.at("Default");
   currentPlaylist->registerStatusUpdateCallback();
   setUpCurrentPlaylist();
+  // playlist operations
+  connect(ui->actionOpen, &QAction::triggered, this, &MainWindow::open);
+  connect(ui->actionAdd_folder, &QAction::triggered, this,
+          &MainWindow::openFolder);
+  connect(ui->actionAdd, &QAction::triggered, this, &MainWindow::addEntry);
+  connect(ui->actionClear_Playlist, &QAction::triggered, currentPlaylist,
+          &Playlist::clear);
+}
+
+void MainWindow::initSettings() {
+  connect(ui->actionSettings, &QAction::triggered, this, [this]() {
+    SettingsDialog dialog(this);
+    connect(&dialog, &SettingsDialog::backendChanged, this,
+            [this](PlaybackBackendManager::Backend backend) {
+              if (backendManager->currentBackend() != backend) {
+                backendManager->setBackend(backend);
+                control.stop();
+                setUpPlaybackBackend();
+              }
+            });
+    dialog.exec();
+  });
+}
+
+void MainWindow::setUpPlaybackManager() {
+  connect(playbackOrderMenuActionGroup, &QActionGroup::triggered, this,
+          [this](QAction *action) {
+            QAction *checked = playbackOrderMenuActionGroup->checkedAction();
+            QString selectedText = checked->text();
+            control.setPolicy(string2Policy(selectedText));
+          });
+  connect(playNextAction, &QAction::triggered, this, [&]() {
+    QModelIndex index = playNextAction->data().value<QModelIndex>();
+    control.queueStart(index.row());
+  });
+  connect(playEndAction, &QAction::triggered, this, [&]() {
+    QModelIndex index = playNextAction->data().value<QModelIndex>();
+    control.queueEnd(index.row());
+  });
+}
+
+void MainWindow::initPlaybackBackend() {
+  QSettings settings;
+  int backendIndex =
+      settings
+          .value(
+              "playback/backend",
+              static_cast<int>(PlaybackBackendManager::Backend::QMediaPlayer))
+          .toInt();
+  auto backend = static_cast<PlaybackBackendManager::Backend>(backendIndex);
+  backendManager = new PlaybackBackendManager(backend, this);
+  setUpPlaybackBackend();
+}
+
+void MainWindow::setUpPlaybackActions() {
+  connect(ui->actionPlay, &QAction::triggered, this, &MainWindow::play);
+  connect(ui->play_button, &QAbstractButton::clicked, this, &MainWindow::play);
+  connect(ui->actionPause, &QAction::triggered, this, &MainWindow::pause);
+  connect(ui->pause_button, &QAbstractButton::clicked, this,
+          &MainWindow::pause);
+  connect(ui->stop_button, &QAbstractButton::clicked, this, &MainWindow::stop);
+  connect(ui->next_button, &QAbstractButton::clicked, this, &MainWindow::next);
+  connect(ui->prev_button, &QAbstractButton::clicked, this, &MainWindow::prev);
+  connect(ui->horizontalSlider, &QSlider::sliderReleased, this,
+          [this]() { seek(ui->horizontalSlider->value()); });
+}
+
+void MainWindow::setUpTableView(Playlist *pl, QTableView *tbv) {
+  tbv->setModel(pl);
+  tbv->setSortingEnabled(true);
+  tbv->setEditTriggers(QAbstractItemView::NoEditTriggers);
+  tbv->setSelectionBehavior(QAbstractItemView::SelectRows);
+  tbv->installEventFilter(this);
+  tbv->setContextMenuPolicy(Qt::CustomContextMenu);
+  connect(tbv, &QTableView::customContextMenuRequested, this,
+          &MainWindow::onCustomContextMenuRequested);
+  tbv->horizontalHeader()->setSortIndicatorShown(false);
+  QObject::connect(tbv->horizontalHeader(), &QHeaderView::sectionClicked, this,
+                   [=, this](int idx) {
+                     tbv->horizontalHeader()->setSortIndicatorShown(true);
+                     pl->sortByField(
+                         fieldStringList[idx].toStdString(),
+                         tbv->horizontalHeader()->sortIndicatorOrder());
+                   });
+  connect(tbv, &QTableView::doubleClicked, [this](QModelIndex i) {
+    MSong song = control.playIndex(i.row());
+    playSong(QString::fromUtf8(song.at("path")));
+    setUpImageAndLyrics(song);
+  });
+}
+
+void MainWindow::setUpLyricsPanel() {
+  connect(backendManager->player(), &AudioPlayer::positionChanged,
+          &lyricsManager, &LyricsManager::onPlayerProgressChange);
+  connect(&lyricsManager, &LyricsManager::newLyricsLineIndex, ui->lyricsPanel,
+          &LyricsPanel::updateLyricsPanel);
+}
+
+void MainWindow::setUpSplitter() {
+  connect(ui->splitter, &QSplitter::splitterMoved, this,
+          &MainWindow::updateImageSize);
+  connect(ui->splitter_2, &QSplitter::splitterMoved, this,
+          &MainWindow::updateImageSize);
+}
+
+void MainWindow::setUpPlaybackBackend() {
+  connect(backendManager->player(), &AudioPlayer::mediaStatusChanged, this,
+          &MainWindow::statusChanged);
+  connect(backendManager->player(), &AudioPlayer::durationChanged, this,
+          &MainWindow::durationChanged);
+  connect(backendManager->player(), &AudioPlayer::positionChanged, this,
+          &MainWindow::positionChanged);
+  connect(backendManager->player(), &AudioPlayer::mediaStatusChanged, this,
+          &MainWindow::statusChanged);
+  connect(backendManager->player(), &AudioPlayer::durationChanged, this,
+          &MainWindow::durationChanged);
+  connect(backendManager->player(), &AudioPlayer::positionChanged, this,
+          &MainWindow::positionChanged);
 }
 
 void MainWindow::onTabContextMenuRequested(const QPoint &pos) {
@@ -76,7 +198,7 @@ void MainWindow::onTabContextMenuRequested(const QPoint &pos) {
     playlistMap.emplace(
         std::piecewise_construct,
         std::forward_as_tuple(std::string(newPlaylistName.toStdString())),
-        std::forward_as_tuple(SongStore{songLibrary}, playbackQueue));
+        std::forward_as_tuple(SongStore{songLibrary}, playbackQueue_));
     Playlist &pl = playlistMap.at(newPlaylistName.toStdString());
 
     setUpTableView(&pl, tbv);
@@ -101,59 +223,51 @@ void MainWindow::onTabChanged(int index) {
   setUpCurrentPlaylist();
 }
 
-void MainWindow::setUpSplitter() {
-  connect(ui->splitter, &QSplitter::splitterMoved, this,
-          &MainWindow::updateImageSize);
-  connect(ui->splitter_2, &QSplitter::splitterMoved, this,
-          &MainWindow::updateImageSize);
-}
-
-void MainWindow::setUpPlaybackActions() {
-  connect(ui->actionPlay, &QAction::triggered, backendManager->player(),
-          &AudioPlayer::play);
-  connect(ui->play_button, &QAbstractButton::clicked, backendManager->player(),
-          &AudioPlayer::play);
-  connect(ui->actionPause, &QAction::triggered, backendManager->player(),
-          &AudioPlayer::pause);
-  connect(ui->pause_button, &QAbstractButton::clicked, backendManager->player(),
-          &AudioPlayer::pause);
-  connect(ui->stop_button, &QAbstractButton::clicked, backendManager->player(),
-          &AudioPlayer::stop);
-  connect(ui->next_button, &QAbstractButton::clicked, this, &MainWindow::next);
-  connect(ui->prev_button, &QAbstractButton::clicked, this, &MainWindow::prev);
-  // connect(ui->random_button, &QAbstractButton::clicked, &pb,
-  //         &PlaybackState::shuffle);
-}
-
 void MainWindow::next() {
   const auto &[song, row, pl] = control.next();
-  play(song, row);
+  if (row < 0)
+    return;
 
-  int idx = pl != currentPlaylist
-                ? findPlaylistIndex(QString::fromUtf8(findPlaylistName(pl)))
-                : -1;
-
-  navigateIndex(song, row, idx);
+  playSong(QString::fromUtf8(song.at("path")));
+  control.play();
+  navigateIndex(song, row,
+                findPlaylistIndex(QString::fromUtf8(findPlaylistName(pl))));
 }
 
 void MainWindow::prev() {
   const auto &[song, row, pl] = control.prev();
-  play(song, row);
+  if (row < 0)
+    return;
 
-  int idx = pl != nullptr
-                ? findPlaylistIndex(QString::fromUtf8(findPlaylistName(pl)))
-                : -1;
-
-  navigateIndex(song, row, idx);
+  playSong(QString::fromUtf8(song.at("path")));
+  control.play();
+  navigateIndex(song, row,
+                findPlaylistIndex(QString::fromUtf8(findPlaylistName(pl))));
 }
 
-void MainWindow::play(MSong song, int row) {
-  if (row < 0) {
-    // empty playlist, do nothing
-    return;
+void MainWindow::play() {
+  if (control.getStatus() == PlaybackQueue::PlaybackStatus::None) {
+    MSong song = control.playIndex(currentPlaylist->getLastPlayed());
+    playSong(QString::fromUtf8(song.at("path")));
+  } else {
+    backendManager->player()->play();
+    control.play();
   }
+}
 
-  QUrl url = QString::fromUtf8(song.at("path"));
+void MainWindow::pause() {
+  if (control.getStatus() == PlaybackQueue::PlaybackStatus::None)
+    return;
+  backendManager->player()->pause();
+  control.pause();
+}
+
+void MainWindow::stop() {
+  backendManager->player()->stop();
+  control.stop();
+}
+
+void MainWindow::playSong(const QUrl &url) {
   backendManager->player()->setSource(url);
   backendManager->player()->play();
 }
@@ -162,29 +276,11 @@ void MainWindow::navigateIndex(MSong song, int row, int tabIdx) {
   if (tabIdx >= 0)
     ui->tabWidget->setCurrentIndex(tabIdx);
   QModelIndex index = currentTableView->model()->index(row, 0);
-  // column 0 is enough
   currentTableView->selectionModel()->select(
       index, QItemSelectionModel::Select | QItemSelectionModel::Rows);
-  // Optional: set focus and scroll to it
   currentTableView->setCurrentIndex(index);
   currentTableView->scrollTo(index);
   setUpImageAndLyrics(song);
-}
-
-void MainWindow::setUpSlider() {
-  // ui->horizontalSlider->setRange(0,
-  // playbackBackendManager->player().duration());
-  connect(ui->horizontalSlider, &QSlider::sliderReleased, this, [this]() {
-    int value = ui->horizontalSlider->value();
-    seek(value);
-  });
-}
-
-void MainWindow::setUpLyricsPanel() {
-  connect(backendManager->player(), &AudioPlayer::positionChanged,
-          &lyricsManager, &LyricsManager::onPlayerProgressChange);
-  connect(&lyricsManager, &LyricsManager::newLyricsLineIndex, ui->lyricsPanel,
-          &LyricsPanel::updateLyricsPanel);
 }
 
 bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
@@ -201,24 +297,6 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
   return QObject::eventFilter(obj, event);
 }
 
-void MainWindow::setUpTab() {
-  ui->tabWidget->tabBar()->setContextMenuPolicy(Qt::CustomContextMenu);
-  connect(ui->tabWidget->tabBar(), &QTabBar::customContextMenuRequested, this,
-          &MainWindow::onTabContextMenuRequested);
-  connect(ui->tabWidget, &QTabWidget::currentChanged, this,
-          &MainWindow::onTabChanged);
-  ui->tabWidget->setTabText(0, "Default");
-}
-
-void MainWindow::setUpPlaylistOps() {
-  connect(ui->actionOpen, &QAction::triggered, this, &MainWindow::open);
-  connect(ui->actionAdd_folder, &QAction::triggered, this,
-          &MainWindow::openFolder);
-  connect(ui->actionAdd, &QAction::triggered, this, &MainWindow::addEntry);
-  connect(ui->actionClear_Playlist, &QAction::triggered, currentPlaylist,
-          &Playlist::clear);
-}
-
 QString MainWindow::getNewPlaylistName() {
   if (playlistMap.find("New Playlist") == playlistMap.end())
     return "New Playlist";
@@ -227,16 +305,6 @@ QString MainWindow::getNewPlaylistName() {
     if (playlistMap.find(newName) == playlistMap.end())
       return QString::fromUtf8(newName);
   }
-}
-
-void MainWindow::setUpPolicyMenu() {
-  orderGroup = new QActionGroup(this);
-  orderGroup->setExclusive(true);
-  for (QAction *act : {ui->actionDefault, ui->actionShuffle_tracks}) {
-    act->setCheckable(true);
-    orderGroup->addAction(act);
-  }
-  ui->actionDefault->setChecked(true);
 }
 
 Policy MainWindow::string2Policy(QString s) {
@@ -264,31 +332,6 @@ int MainWindow::findPlaylistIndex(QString s) {
   throw std::logic_error("Never");
 }
 
-void MainWindow::setUpTableView(Playlist *pl, QTableView *tbv) {
-  tbv->setModel(pl);
-  tbv->setSortingEnabled(true);
-  tbv->setEditTriggers(QAbstractItemView::NoEditTriggers);
-  tbv->setSelectionBehavior(QAbstractItemView::SelectRows);
-  tbv->installEventFilter(this);
-  tbv->setContextMenuPolicy(Qt::CustomContextMenu);
-  connect(tbv, &QTableView::customContextMenuRequested, this,
-          &MainWindow::onCustomContextMenuRequested);
-  tbv->horizontalHeader()->setSortIndicatorShown(false);
-  QObject::connect(tbv->horizontalHeader(), &QHeaderView::sectionClicked, this,
-                   [=, this](int idx) {
-                     tbv->horizontalHeader()->setSortIndicatorShown(true);
-                     pl->sortByField(
-                         fieldStringList[idx].toStdString(),
-                         tbv->horizontalHeader()->sortIndicatorOrder());
-                   });
-  connect(tbv, &QTableView::doubleClicked, [this](QModelIndex i) {
-    MSong song = control.PlayIndex(i.row());
-    backendManager->player()->setSource(QString::fromUtf8(song.at("path")));
-    backendManager->player()->play();
-    setUpImageAndLyrics(song);
-  });
-}
-
 void MainWindow::onCustomContextMenuRequested(const QPoint &pos) {
   QModelIndex index = currentTableView->indexAt(pos);
   if (!index.isValid())
@@ -297,28 +340,7 @@ void MainWindow::onCustomContextMenuRequested(const QPoint &pos) {
   playNextAction->setData(QVariant::fromValue(index));
   playEndAction->setData(QVariant::fromValue(index));
 
-  contextMenu.exec(currentTableView->viewport()->mapToGlobal(pos));
-}
-
-void MainWindow::createModels() {}
-
-void MainWindow::setUpPlaybackManager() {
-  connect(orderGroup, &QActionGroup::triggered, this, [this](QAction *action) {
-    QAction *checked = orderGroup->checkedAction();
-    QString selectedText = checked->text();
-    control.setPolicy(string2Policy(selectedText));
-  });
-
-  playNextAction = contextMenu.addAction("Play Next");
-  playEndAction = contextMenu.addAction("Add to Playback Queue");
-  connect(playNextAction, &QAction::triggered, this, [&]() {
-    QModelIndex index = playNextAction->data().value<QModelIndex>();
-    control.queueStart(index.row());
-  });
-  connect(playEndAction, &QAction::triggered, this, [&]() {
-    QModelIndex index = playNextAction->data().value<QModelIndex>();
-    control.queueEnd(index.row());
-  });
+  playlistContextMenu.exec(currentTableView->viewport()->mapToGlobal(pos));
 }
 
 void MainWindow::setUpImageAndLyrics(MSong song) {
@@ -338,45 +360,9 @@ void MainWindow::setUpImageAndLyrics(MSong song) {
 
 void MainWindow::setUpCurrentPlaylist() {
   control.setView(currentPlaylist);
-  QAction *checked = orderGroup->checkedAction();
+  QAction *checked = playbackOrderMenuActionGroup->checkedAction();
   QString selectedText = checked->text();
   control.setPolicy(string2Policy(selectedText));
-}
-
-void MainWindow::setUpPlayer() {
-  QSettings settings;
-  int backendIndex =
-      settings
-          .value(
-              "playback/backend",
-              static_cast<int>(PlaybackBackendManager::Backend::QMediaPlayer))
-          .toInt();
-
-  auto backend = static_cast<PlaybackBackendManager::Backend>(backendIndex);
-  backendManager = new PlaybackBackendManager(backend, this);
-  connect(backendManager->player(), &AudioPlayer::mediaStatusChanged, this,
-          &MainWindow::statusChanged);
-  connect(backendManager->player(), &AudioPlayer::durationChanged, this,
-          &MainWindow::durationChanged);
-  connect(backendManager->player(), &AudioPlayer::positionChanged, this,
-          &MainWindow::positionChanged);
-  connect(ui->actionSettings, &QAction::triggered, this, [this]() {
-    SettingsDialog dialog(this);
-    connect(&dialog, &SettingsDialog::backendChanged, this,
-            [this](PlaybackBackendManager::Backend backend) {
-              if (backendManager->currentBackend() != backend) {
-                backendManager->setBackend(backend);
-                connect(backendManager->player(),
-                        &AudioPlayer::mediaStatusChanged, this,
-                        &MainWindow::statusChanged);
-                connect(backendManager->player(), &AudioPlayer::durationChanged,
-                        this, &MainWindow::durationChanged);
-                connect(backendManager->player(), &AudioPlayer::positionChanged,
-                        this, &MainWindow::positionChanged);
-              }
-            });
-    dialog.exec(); // blocks until user closes the dialog
-  });
 }
 
 void MainWindow::resizeEvent(QResizeEvent *event) {

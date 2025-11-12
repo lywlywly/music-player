@@ -59,6 +59,7 @@ void GstAudioPlayer::stop() {
   gst_element_set_state(playbin_, GST_STATE_NULL);
   isPlaying_ = false;
   emit positionChanged(0);
+  g_object_set(playbin_, "uri", NULL, NULL);
 }
 
 void GstAudioPlayer::setSource(const QUrl &source) {

@@ -18,7 +18,10 @@ void QtAudioPlayer::play() { p.play(); }
 
 void QtAudioPlayer::pause() { p.pause(); }
 
-void QtAudioPlayer::stop() { p.stop(); }
+void QtAudioPlayer::stop() {
+  p.stop();
+  p.setSource(QUrl{}); // set to null source
+}
 
 void QtAudioPlayer::setSource(const QUrl &source) { p.setSource(source); }
 

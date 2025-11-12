@@ -15,3 +15,9 @@
 - ⬜ query patterns for media search
 - ⬜ playback statistics
   - ⬜ cloud sync
+- ⬜ CLI tool and headless mode
+
+## Known issues
+
+- `QMediaPlayer` unable to seek accurately on macOS
+  - <https://forum.qt.io/topic/107671/qmediaplayer-unable-to-seek-accurately-on-macos>

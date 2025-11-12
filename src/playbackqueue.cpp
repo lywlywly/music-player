@@ -52,7 +52,14 @@ std::pair<int, Playlist *> PlaybackQueue::getCurrentPk() const {
   return {currentPk, currentPlaylist};
 }
 
-int PlaybackQueue::getStatus() { return status; }
+void PlaybackQueue::setPlaybackStatus(PlaybackStatus status) {
+  this->playbackStatus = status;
+  notifyAll(currentPk, currentPlaylist);
+}
+
+PlaybackQueue::PlaybackStatus PlaybackQueue::getStatus() {
+  return playbackStatus;
+}
 
 std::pair<int, Playlist *> PlaybackQueue::pop() {
   if (queue.empty())

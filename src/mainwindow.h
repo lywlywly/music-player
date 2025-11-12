@@ -6,9 +6,7 @@
 #include "playbackbackendmanager.h"
 #include "playbackmanager.h"
 #include "playlist.h"
-#include "qmediaplayer.h"
 #include "songlibrary.h"
-#include <QActionGroup>
 #include <QMainWindow>
 #include <QMenu>
 #include <QTableView>
@@ -43,23 +41,24 @@ private:
   void addEntry();
   void next();
   void prev();
-  void play(MSong song, int);
+  void play();
+  void pause();
+  void stop();
+  void playSong(const QUrl &);
   void navigateIndex(MSong song, int, int);
   void setUpSplitter();
-  void setUpPlaybackActions();
-  void setUpSlider();
   void setUpLyricsPanel();
   void setUpTableView(Playlist *, QTableView *);
-  void createModels();
   void setUpPlaybackManager();
   void setUpCurrentPlaylist();
-  void setUpPlayer();
+  void initSettings();
+  void initPlaybackBackend();
+  void setUpPlaybackBackend();
+  void setUpPlaybackActions();
   bool eventFilter(QObject *obj, QEvent *event) override;
-  void setUpTab();
-  void setUpPlaylistOps();
+  void setUpPlaylist();
   QString getNewPlaylistName();
-  void setUpPolicyMenu();
-  void setUpDefaultPlaylist();
+  void setUpMenuBar();
   // TODO: remove song from current playlist, check if any other playlist
   // references the song, if no, remove from library
   void removeSong();
@@ -69,7 +68,7 @@ private:
   int findPlaylistIndex(QString);
   Ui::MainWindow *ui;
   PlaybackBackendManager *backendManager;
-  PlaybackQueue playbackQueue;
+  PlaybackQueue playbackQueue_;
   PlaybackManager control;
   SongLibrary songLibrary;
   // TODO: separate playlist manager class
@@ -81,8 +80,8 @@ private:
   QPixmap pixmap;
   qint64 duration;
   int currentLine = -1;
-  QActionGroup *orderGroup;
-  QMenu contextMenu;
+  QActionGroup *playbackOrderMenuActionGroup;
+  QMenu playlistContextMenu;
   QAction *playNextAction;
   QAction *playEndAction;
 };

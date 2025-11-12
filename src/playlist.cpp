@@ -17,8 +17,16 @@ QVariant Playlist::data(const QModelIndex &index, int role) const {
     int pk = store.getPkByIndex(index.row());
     const auto &[curPk, curPl] = playbackQueue.getCurrentPk();
 
-    if ((pk == curPk) && (curPl == this))
-      return QString{"\u25B6"};
+    if ((pk == curPk) && (curPl == this)) {
+      switch (playbackQueue.getStatus()) {
+      case PlaybackQueue::PlaybackStatus::Playing:
+        return QString{"\u25B6"};
+      case PlaybackQueue::PlaybackStatus::Paused:
+        return QString{"\u23F8"};
+      default:
+        return QVariant{};
+      }
+    }
 
     auto [order, pl] = playbackQueue.getOrder(pk);
     if ((order >= 0) && (pl == this)) {
@@ -151,3 +159,7 @@ void Playlist::setSizeChangeCallback(SizeChangeCallback &&cb_) const {
 void Playlist::unsetSizeChangeCallback() const {
   this->sizeChangeCallback = nullptr;
 }
+
+void Playlist::setLastPlayed(int newLastPlayed) { lastPlayed = newLastPlayed; }
+
+int Playlist::getLastPlayed() const { return lastPlayed; }
