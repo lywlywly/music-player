@@ -11,7 +11,6 @@ const MSong &PlaybackManager::playIndex(int currentIndex) {
   policy->setCurrentPk(pk);
   queue.setCurrentId(pk, playlist);
   playlist->setLastPlayed(pk);
-  queue.setPlaybackStatus(PlaybackQueue::PlaybackStatus::Playing);
   return playlist->getSongByPk(pk);
 }
 

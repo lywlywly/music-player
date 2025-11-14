@@ -2,6 +2,11 @@
 
 #include "./ui_mainwindow.h"
 #include "addentrydialog.h"
+#ifdef Q_OS_MACOS
+#include "macosmediacenter.h"
+#else
+#include "dummysystemmediainterface.h"
+#endif
 #include "settingsdialog.h"
 #include "songparser.h"
 #include <QActionGroup>
@@ -20,6 +25,24 @@ MainWindow::MainWindow(QWidget *parent)
   setUpPlaybackActions();
   setUpLyricsPanel();
   setUpSplitter();
+  setupSystemMediaInterface();
+}
+
+void MainWindow::setupSystemMediaInterface() {
+#ifdef Q_OS_MACOS
+  sysMedia = new MacOSMediaCenter(this);
+#else
+  sysMedia = new DummySystemMediaInterface(this);
+#endif
+
+  connect(sysMedia, &ISystemMediaInterface::playRequested, this,
+          &MainWindow::play);
+  connect(sysMedia, &ISystemMediaInterface::pauseRequested, this,
+          &MainWindow::pause);
+  connect(sysMedia, &ISystemMediaInterface::nextRequested, this,
+          &MainWindow::next);
+  connect(sysMedia, &ISystemMediaInterface::previousRequested, this,
+          &MainWindow::prev);
 }
 
 void MainWindow::setUpMenuBar() {
@@ -38,7 +61,7 @@ void MainWindow::setUpPlaylist() {
                      playbackOrderMenuActionGroup);
   connect(playlistTabs, &PlaylistTabs::doubleClicked, [this](QModelIndex i) {
     MSong song = control.playIndex(i.row());
-    playSong(QString::fromUtf8(song.at("path")));
+    playSong(song);
     setUpImageAndLyrics(song);
   });
   // playlist operations
@@ -120,13 +143,20 @@ void MainWindow::setUpPlaybackBackend() {
           &MainWindow::positionChanged);
 }
 
+void MainWindow::playSong(const MSong &song) {
+  backendManager->player()->setSource(QString::fromStdString(song.at("path")));
+  backendManager->player()->play();
+  sysMedia->setTrackInfo(QString::fromStdString(song.at("title")),
+                         QString::fromStdString(song.at("artist")), 0);
+  control.play();
+}
+
 void MainWindow::next() {
   const auto &[song, row, pl] = control.next();
   if (row < 0)
     return;
 
-  playSong(QString::fromUtf8(song.at("path")));
-  control.play();
+  playSong(song);
   navigateIndex(song, row, pl);
 }
 
@@ -135,8 +165,7 @@ void MainWindow::prev() {
   if (row < 0)
     return;
 
-  playSong(QString::fromUtf8(song.at("path")));
-  control.play();
+  playSong(song);
   navigateIndex(song, row, pl);
 }
 
@@ -145,10 +174,11 @@ void MainWindow::play() {
     int lastPlayedPk = playlistTabs->currentPlaylist()->getLastPlayed();
     MSong song = control.playIndex(
         playlistTabs->currentPlaylist()->getIndexByPk(lastPlayedPk));
-    playSong(QString::fromUtf8(song.at("path")));
+    playSong(song);
   } else {
     backendManager->player()->play();
     control.play();
+    sysMedia->updatePlaybackState(true);
   }
 }
 
@@ -157,16 +187,13 @@ void MainWindow::pause() {
     return;
   backendManager->player()->pause();
   control.pause();
+  sysMedia->updatePlaybackState(false);
 }
 
 void MainWindow::stop() {
   backendManager->player()->stop();
   control.stop();
-}
-
-void MainWindow::playSong(const QUrl &url) {
-  backendManager->player()->setSource(url);
-  backendManager->player()->play();
+  sysMedia->updatePlaybackState(false);
 }
 
 void MainWindow::navigateIndex(MSong song, int row, Playlist *pl) {

@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
-project(my_player)
+project(my_player LANGUAGES CXX)
+if(APPLE)
+  enable_language(OBJCXX)
+endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_AUTOUIC ON)
@@ -37,6 +40,7 @@ set(PROJECT_SOURCES
   audioplayer.cpp
   checksumcalculator.h
   checksumcalculator.cpp
+  dummysystemmediainterface.h
   efswfilesystemmonitor.h
   efswfilesystemmonitor.cpp
   filesystemcomparer.h
@@ -44,6 +48,7 @@ set(PROJECT_SOURCES
   gstaudioplayer.h
   gstaudioplayer.cpp
   ifilesystemmonitor.h
+  isystemmediainterface.h
   jumpslider.h
   lyricsloader.h
   lyricsloader.cpp
@@ -87,6 +92,13 @@ set(PROJECT_SOURCES
   utils.h
 )
 
+if(APPLE)
+  list(APPEND PROJECT_SOURCES
+    macosmediacenter.h
+    macosmediacenter.mm
+  )
+endif()
+
 add_library(MYLib ${PROJECT_SOURCES})
 
 include_directories(MYLib PRIVATE ${ICU_INCLUDE_DIRS})
@@ -105,9 +117,14 @@ target_link_libraries(
 )
 
 if(APPLE)
+  set_source_files_properties(macosmediacenter.mm PROPERTIES
+    COMPILE_FLAGS "-fobjc-arc"
+  )
   target_link_libraries(
     MYLib
     ${CMAKE_SOURCE_DIR}/lib/libefsw-static-debug.a
+    "-framework Foundation"
+    "-framework MediaPlayer"
   )
 else()
   target_link_libraries(

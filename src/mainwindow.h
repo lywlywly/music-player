@@ -1,6 +1,7 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
+#include "isystemmediainterface.h"
 #include "lyricsloader.h"
 #include "lyricsmanager.h"
 #include "playbackbackendmanager.h"
@@ -41,10 +42,11 @@ private:
   void play();
   void pause();
   void stop();
-  void playSong(const QUrl &);
+  void playSong(const MSong &);
   void navigateIndex(MSong song, int, Playlist *);
   void setUpSplitter();
   void setUpLyricsPanel();
+  void setupSystemMediaInterface();
   void initSettings();
   void initPlaybackBackend();
   void setUpPlaybackBackend();
@@ -65,5 +67,6 @@ private:
   QPixmap pixmap;
   qint64 duration;
   QActionGroup *playbackOrderMenuActionGroup;
+  ISystemMediaInterface *sysMedia;
 };
 #endif // MAINWINDOW_H
