@@ -1,7 +1,7 @@
 #ifndef PLAYBACKBACKENDMANAGER_H
 #define PLAYBACKBACKENDMANAGER_H
 
-#include "AudioPlayer.h"
+#include "audioplayer.h"
 #include "glib.h"
 #include <QObject>
 #include <atomic>

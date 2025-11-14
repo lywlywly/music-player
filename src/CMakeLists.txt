@@ -44,6 +44,7 @@ set(PROJECT_SOURCES
   gstaudioplayer.h
   gstaudioplayer.cpp
   ifilesystemmonitor.h
+  jumpslider.h
   lyricsloader.h
   lyricsloader.cpp
   lyricsmanager.h

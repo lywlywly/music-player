@@ -62,7 +62,7 @@
          </widget>
         </item>
         <item>
-         <widget class="QSlider" name="horizontalSlider">
+         <widget class="JumpSlider" name="horizontalSlider">
           <property name="orientation">
            <enum>Qt::Orientation::Horizontal</enum>
           </property>
@@ -166,7 +166,7 @@
      <x>0</x>
      <y>0</y>
      <width>800</width>
-     <height>39</height>
+     <height>26</height>
     </rect>
    </property>
    <widget class="QMenu" name="menuFile">
@@ -337,6 +337,11 @@
    <extends>QWidget</extends>
    <header>playlisttabs.h</header>
    <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>JumpSlider</class>
+   <extends>QSlider</extends>
+   <header>jumpslider.h</header>
   </customwidget>
  </customwidgets>
  <resources/>
