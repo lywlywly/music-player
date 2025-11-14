@@ -143,26 +143,13 @@
              </item>
             </layout>
            </widget>
-           <widget class="QTabWidget" name="tabWidget">
+           <widget class="PlaylistTabs" name="playlistTabs" native="true">
             <property name="sizePolicy">
              <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
               <horstretch>3</horstretch>
               <verstretch>0</verstretch>
              </sizepolicy>
             </property>
-            <property name="currentIndex">
-             <number>0</number>
-            </property>
-            <widget class="QWidget" name="tab">
-             <attribute name="title">
-              <string>Tab 1</string>
-             </attribute>
-             <layout class="QGridLayout" name="gridLayout">
-              <item row="0" column="0">
-               <widget class="QTableView" name="tableView"/>
-              </item>
-             </layout>
-            </widget>
            </widget>
           </widget>
          </item>
@@ -179,7 +166,7 @@
      <x>0</x>
      <y>0</y>
      <width>800</width>
-     <height>30</height>
+     <height>39</height>
     </rect>
    </property>
    <widget class="QMenu" name="menuFile">
@@ -343,6 +330,12 @@
    <class>LyricsPanel</class>
    <extends>QWidget</extends>
    <header>lyricspanel.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>PlaylistTabs</class>
+   <extends>QWidget</extends>
+   <header>playlisttabs.h</header>
    <container>1</container>
   </customwidget>
  </customwidgets>

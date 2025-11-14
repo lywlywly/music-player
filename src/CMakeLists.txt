@@ -65,6 +65,9 @@ set(PROJECT_SOURCES
   playbackqueue.cpp
   playlist.h
   playlist.cpp
+  playlisttabs.ui
+  playlisttabs.h
+  playlisttabs.cpp
   qfilesystemmonitor.h
   qfilesystemmonitor.cpp
   qtaudioplayer.h
