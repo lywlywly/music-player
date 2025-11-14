@@ -9,9 +9,10 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Sql Test Multimedia)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Sql Test
-  Multimedia)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Sql Test Multimedia)
+if(LINUX)
+  find_package(Qt6 REQUIRED COMPONENTS DBus)
+endif()
 find_package(PkgConfig REQUIRED)
 if(APPLE)
   set(ICU_ROOT "/opt/homebrew/opt/icu4c")
@@ -97,6 +98,11 @@ if(APPLE)
     macosmediacenter.h
     macosmediacenter.mm
   )
+elseif(LINUX)
+  list(APPEND PROJECT_SOURCES
+    mprismediainterface.h
+    mprismediainterface.cpp
+  )
 endif()
 
 add_library(MYLib ${PROJECT_SOURCES})
@@ -126,9 +132,10 @@ if(APPLE)
     "-framework Foundation"
     "-framework MediaPlayer"
   )
-else()
+elseif(LINUX)
   target_link_libraries(
     MYLib
+    Qt${QT_VERSION_MAJOR}::DBus
     ${CMAKE_SOURCE_DIR}/lib/libefsw.so
   )
 endif()

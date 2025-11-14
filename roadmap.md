@@ -18,7 +18,7 @@
 - ⬜ CLI tool and headless mode
 - 🟧 system media center integration
   - 🟧 macOS
-  - ⬜ linux (MPRIS)
+  - 🟧 linux (MPRIS)
   - ⬜ windows
 
 ## Known issues
