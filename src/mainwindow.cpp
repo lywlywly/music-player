@@ -43,6 +43,8 @@ void MainWindow::setupSystemMediaInterface() {
           &MainWindow::play);
   connect(sysMedia, &ISystemMediaInterface::pauseRequested, this,
           &MainWindow::pause);
+  connect(sysMedia, &ISystemMediaInterface::toggleRequested, this,
+          &MainWindow::toggle);
   connect(sysMedia, &ISystemMediaInterface::nextRequested, this,
           &MainWindow::next);
   connect(sysMedia, &ISystemMediaInterface::previousRequested, this,
@@ -192,6 +194,13 @@ void MainWindow::pause() {
   backendManager->player()->pause();
   control.pause();
   sysMedia->updatePlaybackState(false);
+}
+
+void MainWindow::toggle() {
+  if (control.getStatus() == PlaybackQueue::PlaybackStatus::Playing)
+    pause();
+  else
+    play();
 }
 
 void MainWindow::stop() {

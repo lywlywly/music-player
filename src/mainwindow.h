@@ -41,6 +41,7 @@ private:
   void prev();
   void play();
   void pause();
+  void toggle();
   void stop();
   void playSong(const MSong &);
   void navigateIndex(MSong song, int, Playlist *);
