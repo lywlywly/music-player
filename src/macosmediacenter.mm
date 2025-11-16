@@ -5,6 +5,9 @@
 MacOSMediaCenter::MacOSMediaCenter(QObject *parent)
     : ISystemMediaInterface(parent) {
   connectRemoteCommands();
+  // show in media center and set status to pause
+  updateNowPlaying("", "", 0, 0, true);
+  updateNowPlaying("", "", 0, 0, false);
 }
 
 void MacOSMediaCenter::connectRemoteCommands() {
