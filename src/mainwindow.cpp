@@ -9,6 +9,7 @@
 #else
 #include "dummysystemmediainterface.h"
 #endif
+#include "databasemanager.h"
 #include "settingsdialog.h"
 #include "songparser.h"
 #include <QActionGroup>
@@ -63,6 +64,7 @@ void MainWindow::setUpMenuBar() {
 
 void MainWindow::setUpPlaylist() {
   playlistTabs = ui->playlistTabs;
+  songLibrary.loadAll(DatabaseManager::db());
   playlistTabs->init(&songLibrary, &playbackQueue_, &control,
                      playbackOrderMenuActionGroup);
   connect(playlistTabs, &PlaylistTabs::doubleClicked, [this](QModelIndex i) {

@@ -13,8 +13,8 @@ static QList<QString> fieldStringList = {"status", "artist", "title",
 class Playlist : public QAbstractTableModel {
   Q_OBJECT
 public:
-  explicit Playlist(SongStore &&, PlaybackQueue &, QObject *parent = nullptr);
-
+  explicit Playlist(SongStore &&, PlaybackQueue &, int = -1,
+                    QObject *parent = nullptr);
   int rowCount(const QModelIndex &parent = QModelIndex()) const override;
   int columnCount(const QModelIndex &parent = QModelIndex()) const override;
   QVariant data(const QModelIndex &index,
@@ -44,11 +44,13 @@ public:
   void unsetSizeChangeCallback() const;
   void setLastPlayed(int newLastPlayed);
   int getLastPlayed() const;
+  bool load(QSqlDatabase &);
 
 private:
+  int playlistId;
   SongStore store;
   PlaybackQueue &playbackQueue;
-  int lastPlayed = 0;
+  int lastPlayed = 1;
   mutable SizeChangeCallback sizeChangeCallback;
 };
 

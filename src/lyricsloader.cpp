@@ -20,7 +20,7 @@ std::map<int, std::string> LyricsLoader::getLyrics(std::string_view title,
   std::map<std::string, std::string> metadata;
 
   if (!file.is_open()) {
-    std::cerr << "Could not open file.\n";
+    std::cerr << "Could not open lyrics file.\n";
     return lyricsMap;
   }
 

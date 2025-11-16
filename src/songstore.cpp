@@ -1,4 +1,6 @@
 #include "songstore.h"
+#include <QSqlError>
+#include <QSqlQuery>
 #include <unicode/coll.h>
 #include <unicode/locid.h>
 
@@ -10,7 +12,8 @@ icu::Locale loc = icu::Locale::forLanguageTag("zh-u-kr-latn-hani-hrkt", status);
 std::unique_ptr<icu::Collator> collator(icu::Collator::createInstance(loc,
                                                                       status));
 
-SongStore::SongStore(SongLibrary &lib) : library{lib} {}
+SongStore::SongStore(SongLibrary &lib, int pid)
+    : library{lib}, playlistId{pid} {}
 
 int SongStore::songCount() const { return songPKs.size(); }
 
@@ -83,3 +86,47 @@ void SongStore::sortByField(std::string f, int order) {
 const std::vector<int> &SongStore::getSongsView() const { return songPKs; }
 
 const std::vector<int> &SongStore::getIndices() const { return indices; }
+
+bool SongStore::loadAll(QSqlDatabase &db) {
+  songPKs.clear();
+  indices.clear();
+
+  QSqlQuery q(db);
+
+  q.prepare(
+      R"(
+            SELECT song_id
+            FROM playlist_items
+            WHERE playlist_id = :pid
+            ORDER BY position ASC
+        )");
+  q.bindValue(":pid", playlistId);
+
+  if (!q.exec()) {
+    qWarning() << "loadFromDatabase failed:" << q.lastError().text();
+    return false;
+  }
+
+  while (q.next()) {
+    int songId = q.value(0).toInt();
+    songPKs.push_back(songId);
+  }
+
+  if (songPKs.empty()) {
+    return true;
+  }
+
+  int maxPk = 0;
+  for (int pk : songPKs)
+    if (pk > maxPk)
+      maxPk = pk;
+
+  indices.assign(maxPk + 1, -1);
+
+  for (int row = 0; row < (int)songPKs.size(); ++row) {
+    int pk = songPKs[row];
+    indices[pk] = row;
+  }
+
+  return true;
+}

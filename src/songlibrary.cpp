@@ -1,5 +1,8 @@
 #include "songlibrary.h"
+#include "databasemanager.h"
 #include <QDebug>
+#include <QSqlError>
+#include <QSqlQuery>
 
 SongLibrary::SongLibrary() { songs.reserve(10); }
 
@@ -80,6 +83,48 @@ SongLibrary::registerQueryField(std::string field) const {
 
 void SongLibrary::unRegisterQueryField(std::string field) const {
   registeredQueryFields.erase(field);
+}
+
+bool SongLibrary::loadAll(QSqlDatabase &db) {
+  // auto &db = DatabaseManager::db();
+
+  int maxId = DatabaseManager::scalarInt(
+      db, "SELECT IFNULL(MAX(song_id), 0) FROM songs");
+  songs.clear();
+  songs.resize(maxId + 1);
+  paths.clear();
+  paths.reserve(maxId + 1);
+
+  QSqlQuery q(db);
+  if (!q.exec(R"(
+        SELECT song_id, title, artist, album, filepath
+        FROM songs
+        ORDER BY song_id
+    )")) {
+    qWarning() << "SongLibrary loadAll error:" << q.lastError().text();
+    return false;
+  }
+
+  while (q.next()) {
+    int id = q.value(0).toInt();
+    if (id < 0)
+      continue;
+    if (id >= (int)songs.size())
+      songs.resize(id + 1);
+
+    auto &m = songs[id];
+    m.reserve(5);
+    // m.emplace("song_id", std::to_string(id));
+    m.emplace("title", q.value(1).toString().toStdString());
+    m.emplace("artist", q.value(2).toString().toStdString());
+    m.emplace("album", q.value(3).toString().toStdString());
+    std::string path = q.value(4).toString().toStdString();
+    m.emplace("path", path);
+
+    paths.emplace(std::move(path), id);
+  }
+
+  return true;
 }
 
 const MSong &SongLibrary::getSongByPK(int pk) const { return songs[pk]; }

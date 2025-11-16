@@ -41,6 +41,8 @@ set(PROJECT_SOURCES
   audioplayer.cpp
   checksumcalculator.h
   checksumcalculator.cpp
+  databasemanager.h
+  databasemanager.cpp
   dummysystemmediainterface.h
   efswfilesystemmonitor.h
   efswfilesystemmonitor.cpp

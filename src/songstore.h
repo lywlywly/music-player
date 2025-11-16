@@ -4,11 +4,10 @@
 #include "songlibrary.h"
 #include <QDebug>
 
-// can duplicate
-class SongStore
-{
+// actual class that holds playlist data, can duplicate
+class SongStore {
 public:
-  SongStore(SongLibrary &);
+  SongStore(SongLibrary &, int = -1);
   int songCount() const;
   void addSong(MSong &&);
   // remove song by Pk
@@ -26,15 +25,13 @@ public:
   std::vector<const std::string *> queryField(std::string);
   const std::vector<int> &getSongsView() const;
   const std::vector<int> &getIndices() const;
+  bool loadAll(QSqlDatabase &);
 
 private:
+  int playlistId;
   SongLibrary &library;
-  std::vector<const MSong *> songs;
   std::vector<int> songPKs;
   std::vector<int> indices;
-  // WrapperVec wrapper;
-  // MSong *basePtr;
-  // std::unordered_map<std::string, const MSong *> songs;
 };
 
 #endif // SONGSTORE_H

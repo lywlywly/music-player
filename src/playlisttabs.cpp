@@ -36,7 +36,7 @@ void PlaylistTabs::setUpPlaylist() {
   // default playlist
   playlistMap.emplace(
       std::piecewise_construct, std::forward_as_tuple("Default"),
-      std::forward_as_tuple(SongStore{*songLibrary}, *playbackQueue_));
+      std::forward_as_tuple(SongStore{*songLibrary, 1}, *playbackQueue_, 1));
   QWidget *tabWidget = ui->tabWidget->widget(0);
   currentTableView = tabWidget->findChild<QTableView *>();
   currentPlaylist_ = &playlistMap.at("Default");
@@ -104,10 +104,12 @@ void PlaylistTabs::onTabContextMenuRequested(const QPoint &pos) {
     layout->addWidget(tbv);
     QString newPlaylistName = getNewPlaylistName();
     ui->tabWidget->addTab(newTab, newPlaylistName);
+    int newPid = playlistMap.size() + 1;
     playlistMap.emplace(
         std::piecewise_construct,
         std::forward_as_tuple(std::string(newPlaylistName.toStdString())),
-        std::forward_as_tuple(SongStore{*songLibrary}, *playbackQueue_));
+        std::forward_as_tuple(SongStore{*songLibrary, newPid}, *playbackQueue_,
+                              newPid));
     Playlist &pl = playlistMap.at(newPlaylistName.toStdString());
 
     setUpTableView(&pl, tbv);

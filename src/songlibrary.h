@@ -1,24 +1,13 @@
 #ifndef SONGLIBRARY_H
 #define SONGLIBRARY_H
 
+#include <QSqlDatabase>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 using MSong = std::unordered_map<std::string, std::string>;
-
-struct StringPtrHash {
-  std::size_t operator()(const std::string *s) const {
-    return std::hash<std::string>()(*s);
-  }
-};
-
-struct StringPtrEqual {
-  bool operator()(const std::string *a, const std::string *b) const {
-    return *a == *b;
-  }
-};
 
 // abstraction layer ovre DB
 // no duplicate (file path)
@@ -40,6 +29,7 @@ public:
   // TODO: remove, by marking as deleted, also update registered queries
   // TODO: serialize, skipping songs marked deleted
   // TODO: deserialize
+  bool loadAll(QSqlDatabase &);
 
 private:
   std::vector<MSong> songs;

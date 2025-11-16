@@ -1,7 +1,13 @@
 #include "playlist.h"
+#include "databasemanager.h"
+#include <QSqlError>
+#include <QSqlQuery>
 
-Playlist::Playlist(SongStore &&st, PlaybackQueue &queue, QObject *parent)
-    : store{std::move(st)}, playbackQueue{queue} {}
+Playlist::Playlist(SongStore &&st, PlaybackQueue &queue, int pid,
+                   QObject *parent)
+    : store{std::move(st)}, playbackQueue{queue}, playlistId(pid) {
+  load(DatabaseManager::db());
+}
 
 int Playlist::rowCount(const QModelIndex &parent) const { return songCount(); }
 
@@ -163,3 +169,21 @@ void Playlist::unsetSizeChangeCallback() const {
 void Playlist::setLastPlayed(int newLastPlayed) { lastPlayed = newLastPlayed; }
 
 int Playlist::getLastPlayed() const { return lastPlayed; }
+
+bool Playlist::load(QSqlDatabase &db) {
+  if (!store.loadAll(db))
+    return false;
+
+  QSqlQuery q(db);
+
+  if (!q.exec(R"(
+        SELECT playlist_id, name, last_played
+        FROM playlists
+        WHERE playlist_id=1
+    )"))
+    qDebug() << q.lastError().text();
+  q.next();
+  lastPlayed = q.value(2).toInt();
+
+  return true;
+}
