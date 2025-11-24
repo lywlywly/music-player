@@ -15,12 +15,9 @@ if(LINUX)
 endif()
 find_package(PkgConfig REQUIRED)
 if(APPLE)
+  # icu does not install symlinks into /opt/homebrew/ since icu is keg-only
+  # adjust as needed
   set(ICU_ROOT "/opt/homebrew/opt/icu4c")
-  set(ICU_INCLUDE_DIR "/opt/homebrew/opt/icu4c/include")
-  set(ICU_LIBRARIES
-    /opt/homebrew/opt/icu4c@77/lib/libicui18n.dylib
-    /opt/homebrew/opt/icu4c@77/lib/libicuuc.dylib
-    /opt/homebrew/opt/icu4c@77/lib/libicudata.dylib)
 endif()
 find_package(ICU REQUIRED COMPONENTS i18n uc data)
 find_package(TagLib CONFIG REQUIRED)
@@ -28,7 +25,7 @@ find_package(TagLib CONFIG REQUIRED)
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavcodec libavformat
   libavutil)
 pkg_check_modules(OPENSSL REQUIRED IMPORTED_TARGET openssl)
-pkg_check_modules(GST REQUIRED gstreamer-1.0)
+pkg_check_modules(GST IMPORTED_TARGET REQUIRED gstreamer-1.0)
 
 set(PROJECT_SOURCES
   mainwindow.ui
@@ -110,18 +107,17 @@ endif()
 add_library(MYLib ${PROJECT_SOURCES})
 
 include_directories(MYLib PRIVATE ${ICU_INCLUDE_DIRS})
-include_directories(MYLib PRIVATE ${GST_INCLUDE_DIRS})
 
 target_link_libraries(
   MYLib
-  Qt${QT_VERSION_MAJOR}::Widgets
-  Qt${QT_VERSION_MAJOR}::Sql
-  Qt${QT_VERSION_MAJOR}::Multimedia
+  Qt6::Widgets
+  Qt6::Sql
+  Qt6::Multimedia
   PkgConfig::FFMPEG
   PkgConfig::OPENSSL
   ${ICU_LIBRARIES}
   TagLib::tag
-  ${GST_LIBRARIES}
+  PkgConfig::GST
 )
 
 if(APPLE)
@@ -137,16 +133,14 @@ if(APPLE)
 elseif(LINUX)
   target_link_libraries(
     MYLib
-    Qt${QT_VERSION_MAJOR}::DBus
+    Qt6::DBus
     ${CMAKE_SOURCE_DIR}/lib/libefsw.so
   )
 endif()
 
 add_executable(EXEC main.cpp)
 target_link_libraries(EXEC MYLib)
-target_compile_options(EXEC PRIVATE ${GST_CFLAGS_OTHER})
 if(APPLE)
-  target_link_directories(EXEC PRIVATE ${GST_LIBRARY_DIRS})
   set_target_properties(EXEC PROPERTIES
     MACOSX_BUNDLE TRUE
     MACOSX_BUNDLE_BUNDLE_NAME "myplayer"
