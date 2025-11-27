@@ -16,6 +16,7 @@
 #include <QDebug>
 #include <QFileDialog>
 #include <QSettings>
+#include <QStandardPaths>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), ui(new Ui::MainWindow), control{playbackQueue_},
@@ -295,29 +296,32 @@ void MainWindow::statusChanged(QMediaPlayer::MediaStatus status) {
 }
 
 void MainWindow::open() {
-  QList<QString> fileName = QFileDialog::getOpenFileNames(
-      this, "Open the file", QDir::homePath() + "/Music");
-  for (QString s : fileName) {
+  const QList<QString> fileName = QFileDialog::getOpenFileNames(
+      this, "Open the file",
+      QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
+      R"(Audio Files (*.mp3 *.flac *.m4a *.wav *.ogg *.opus *.alac);;All Files (*.*))");
+  for (const QString &s : fileName) {
     playlistTabs->currentPlaylist()->addSong(
         SongParser::parse(s.toStdString()));
   }
 }
 
 void MainWindow::openFolder() {
-  QString dirPath = QFileDialog::getExistingDirectory(this, "Select Folder");
+  QString dirPath = QFileDialog::getExistingDirectory(
+      this, "Select Folder",
+      QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
+      QFileDialog::ShowDirsOnly);
 
   if (dirPath.isEmpty())
     return;
 
   QDir dir(dirPath);
-  QStringList files = dir.entryList(QDir::Files);
-
+  QStringList filters = {"*.mp3", "*.flac", "*.m4a", "*.wav",
+                         "*.ogg", "*.opus", "*.alac"};
+  const QStringList files = dir.entryList(filters, QDir::Files);
   std::vector<MSong> songs;
-  for (QString s : files) {
-    if (s.split(".").last() == "mp3") {
-      // more file types
-      songs.push_back(SongParser::parse(dir.absoluteFilePath(s).toStdString()));
-    }
+  for (const QString &s : files) {
+    songs.push_back(SongParser::parse(dir.absoluteFilePath(s).toStdString()));
   }
   playlistTabs->currentPlaylist()->addSongs(std::move(songs));
 }
