@@ -64,9 +64,8 @@ void GstAudioPlayer::stop() {
 
 void GstAudioPlayer::setSource(const QUrl &source) {
   gst_element_set_state(playbin_, GST_STATE_READY);
-  QString s = source.toString();
-  std::string uri = encodeUri(s.toStdString());
-  g_object_set(playbin_, "uri", uri.c_str(), NULL);
+  g_object_set(playbin_, "uri",
+               g_filename_to_uri(source.toString().toUtf8(), NULL, NULL), NULL);
 }
 
 void GstAudioPlayer::setPosition(qint64 milliseconds) {
@@ -109,18 +108,4 @@ void GstAudioPlayer::onBusMessage(GstBus *bus, GstMessage *msg,
   default:
     break;
   }
-}
-
-std::string GstAudioPlayer::encodeUri(const std::string &path) {
-  std::ostringstream encoded;
-  encoded << "file://";
-  for (unsigned char c : path) {
-    if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '/') {
-      encoded << c;
-    } else {
-      encoded << '%' << std::setw(2) << std::setfill('0') << std::hex
-              << std::uppercase << (int)c;
-    }
-  }
-  return encoded.str();
 }

@@ -1,9 +1,12 @@
 cmake_minimum_required(VERSION 3.16)
 project(my_player LANGUAGES CXX)
+
 if(APPLE)
   enable_language(OBJCXX)
 endif()
+
 set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
@@ -13,6 +16,7 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets Sql Test Multimedia)
 if(LINUX)
   find_package(Qt6 REQUIRED COMPONENTS DBus)
 endif()
+
 find_package(PkgConfig REQUIRED)
 if(APPLE)
   # icu does not install symlinks into /opt/homebrew/ since icu is keg-only
@@ -21,11 +25,16 @@ if(APPLE)
 endif()
 find_package(ICU REQUIRED COMPONENTS i18n uc data)
 find_package(TagLib CONFIG REQUIRED)
-
-pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavcodec libavformat
-  libavutil)
-pkg_check_modules(OPENSSL REQUIRED IMPORTED_TARGET openssl)
 pkg_check_modules(GST IMPORTED_TARGET REQUIRED gstreamer-1.0)
+
+if(WIN32)
+  find_package(OpenSSL REQUIRED)
+  find_package(FFmpeg REQUIRED COMPONENTS avcodec avformat avutil)
+else()
+  pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavcodec libavformat
+    libavutil)
+  pkg_check_modules(OPENSSL REQUIRED IMPORTED_TARGET openssl)
+endif()
 
 set(PROJECT_SOURCES
   mainwindow.ui
@@ -41,8 +50,6 @@ set(PROJECT_SOURCES
   databasemanager.h
   databasemanager.cpp
   dummysystemmediainterface.h
-  efswfilesystemmonitor.h
-  efswfilesystemmonitor.cpp
   filesystemcomparer.h
   filesystemcomparer.cpp
   gstaudioplayer.h
@@ -92,6 +99,13 @@ set(PROJECT_SOURCES
   utils.h
 )
 
+if(NOT WIN32)
+  list(APPEND PROJECT_SOURCES
+    efswfilesystemmonitor.h
+    efswfilesystemmonitor.cpp
+  )
+endif()
+
 if(APPLE)
   list(APPEND PROJECT_SOURCES
     macosmediacenter.h
@@ -105,20 +119,34 @@ elseif(LINUX)
 endif()
 
 add_library(MYLib ${PROJECT_SOURCES})
-
-include_directories(MYLib PRIVATE ${ICU_INCLUDE_DIRS})
+target_include_directories(MYLib PRIVATE ${ICU_INCLUDE_DIRS})
 
 target_link_libraries(
   MYLib
   Qt6::Widgets
   Qt6::Sql
   Qt6::Multimedia
-  PkgConfig::FFMPEG
-  PkgConfig::OPENSSL
   ${ICU_LIBRARIES}
   TagLib::tag
   PkgConfig::GST
 )
+
+if(WIN32)
+  target_link_libraries(
+    MYLib
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    FFmpeg::avcodec
+    FFmpeg::avformat
+    FFmpeg::avutil
+  )
+else()
+  target_link_libraries(
+    MYLib
+    PkgConfig::FFMPEG
+    PkgConfig::OPENSSL
+  )
+endif()
 
 if(APPLE)
   set_source_files_properties(macosmediacenter.mm PROPERTIES
@@ -140,6 +168,7 @@ endif()
 
 add_executable(EXEC main.cpp)
 target_link_libraries(EXEC MYLib)
+
 if(APPLE)
   set_target_properties(EXEC PROPERTIES
     MACOSX_BUNDLE TRUE

@@ -10,7 +10,7 @@ namespace fs = std::filesystem;
 
 FileSystemComparer::FileSystemComparer() {}
 
-bool isMusicFile(const std::string& filePath) {
+bool isMusicFile(const std::string &filePath) {
   // List of common music file extensions
   std::vector<std::string> musicExtensions = {".mp3", ".wav", ".flac",
                                               ".ogg", ".aac", "alac"};
@@ -21,7 +21,7 @@ bool isMusicFile(const std::string& filePath) {
     std::string extension = filePath.substr(extensionPos);
 
     // Check if the extension is in the list of music extensions
-    for (const std::string& musicExtension : musicExtensions) {
+    for (const std::string &musicExtension : musicExtensions) {
       if (extension == musicExtension) {
         return true;
       }
@@ -31,8 +31,8 @@ bool isMusicFile(const std::string& filePath) {
   return false;
 }
 
-std::map<std::string, std::string> FileSystemComparer::getDirectoryState(
-    std::string directoryPath) {
+std::map<std::string, std::string>
+FileSystemComparer::getDirectoryState(std::string directoryPath) {
   std::map<std::string, std::string> checksumMap;
   // very slow))
   // for (const auto& entry : fs::directory_iterator(directoryPath)) {
@@ -44,13 +44,13 @@ std::map<std::string, std::string> FileSystemComparer::getDirectoryState(
   // }
 
   std::vector<std::string> filenames;
-  for (const auto& entry : fs::directory_iterator(directoryPath)) {
-    if (entry.is_regular_file() && isMusicFile(entry.path())) {
+  for (const auto &entry : fs::directory_iterator(directoryPath)) {
+    if (entry.is_regular_file() && isMusicFile(entry.path().string())) {
       filenames.push_back(entry.path().string());
       // qDebug() << entry.path().string();
     }
   }
-  for (const auto& filename : filenames) {
+  for (const auto &filename : filenames) {
     checksumMap[filename] = checksumCalc.calculateHeaderSHA1(filename, 1);
   }
 
@@ -63,14 +63,14 @@ FileSystemComparer::compareTwoStates(std::map<std::string, std::string> m1,
   std::vector<std::string> keys1;
   keys1.reserve(m1.size());
   std::transform(m1.begin(), m1.end(), std::back_inserter(keys1),
-                 [](const std::pair<std::string, std::string>& pair) {
+                 [](const std::pair<std::string, std::string> &pair) {
                    // std::pair<std::string, std::string> pair
                    return pair.first;
                  });
   std::vector<std::string> keys2;
   keys2.reserve(m2.size());
   std::transform(m2.begin(), m2.end(), std::back_inserter(keys2),
-                 [](const std::pair<std::string, std::string>& pair) {
+                 [](const std::pair<std::string, std::string> &pair) {
                    return pair.first;
                  });
 

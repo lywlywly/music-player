@@ -4,8 +4,12 @@
 #include <QMap>
 #include <qjsonobject.h>
 #include <regex>
+#include <string>
 #include <taglib/fileref.h>
 #include <taglib/tag.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 extern "C" {
 #include "libavformat/avformat.h"
@@ -123,12 +127,22 @@ Song SongParser::parseFile(QUrl songPath) {
 }
 
 MSong SongParser::parse(const std::string &filepath) {
+#ifdef _WIN32
+  // convert UTF-8 std::string → UTF-16 std::wstring
+  int wlen = MultiByteToWideChar(CP_UTF8, 0, filepath.c_str(), -1, nullptr, 0);
+  std::wstring wpath(wlen, L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, filepath.c_str(), -1, wpath.data(), wlen);
+
+  // use wide-character overload on Windows
+  TagLib::FileRef file(wpath.c_str());
+
+#else
   TagLib::FileRef file(filepath.c_str());
+#endif
   MSong tags;
 
   if (!file.isNull() && file.tag()) {
     TagLib::Tag *tag = file.tag();
-
     tags["title"] = tag->title().to8Bit(true);
     tags["artist"] = tag->artist().to8Bit(true);
     tags["album"] = tag->album().to8Bit(true);

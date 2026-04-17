@@ -9,12 +9,17 @@ function(SETUP_TESTS)
     endforeach()
 endfunction()
 
-SETUP_TESTS(
+set(TEST_NAMES
     basics
     parser
     lyrics
     checksum
-    fsmonitor
     playbackmanager
     songlibrary
 )
+
+if(NOT WIN32)
+    list(APPEND TEST_NAMES fsmonitor)
+endif()
+
+SETUP_TESTS(${TEST_NAMES})

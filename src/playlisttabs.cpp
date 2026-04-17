@@ -143,6 +143,8 @@ void PlaylistTabs::setUpCurrentPlaylist() {
 
 void PlaylistTabs::setUpTableView(Playlist *pl, QTableView *tbv) {
   tbv->setModel(pl);
+  tbv->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+  tbv->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
   tbv->setSortingEnabled(true);
   tbv->setEditTriggers(QAbstractItemView::NoEditTriggers);
   tbv->setSelectionBehavior(QAbstractItemView::SelectRows);

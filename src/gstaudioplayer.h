@@ -24,7 +24,6 @@ private:
   void UpdatePosition();
   void emitDurationIfAvailable();
   static void onBusMessage(GstBus *bus, GstMessage *msg, gpointer user_data);
-  static std::string encodeUri(const std::string &path);
   GstElement *playbin_;
   GstElement *rgvolume_; // for ReplayGain
   bool isPlaying_;

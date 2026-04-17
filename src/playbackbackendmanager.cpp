@@ -18,7 +18,7 @@ PlaybackBackendManager::~PlaybackBackendManager() {
     player_ = nullptr;
   }
 
-#ifdef Q_OS_MAC
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
   stopGlibLoop();
 #endif
 }
@@ -31,7 +31,7 @@ void PlaybackBackendManager::setBackend(Backend backend) {
 
   stopAndDestroyBackend();
 
-#ifdef Q_OS_MAC
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
   if (backend_ == Backend::GStreamer) {
     stopGlibLoop();
   }
@@ -42,7 +42,7 @@ void PlaybackBackendManager::setBackend(Backend backend) {
 }
 
 void PlaybackBackendManager::createBackend(Backend backend) {
-#ifdef Q_OS_MAC
+#if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
   if (backend == Backend::GStreamer) {
     startGlibLoop();
   }

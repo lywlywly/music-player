@@ -7,6 +7,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 ChecksumCalculator::ChecksumCalculator() {}
 
@@ -23,7 +24,7 @@ std::string ChecksumCalculator::calculateSHA1(const std::string &file_path,
   }
 
   const size_t CHUNK_SIZE = size;
-  unsigned char buffer[CHUNK_SIZE];
+  std::vector<unsigned char> buffer(CHUNK_SIZE);
 
   std::ifstream file(file_path, std::ios::binary);
   if (!file) {
@@ -32,9 +33,9 @@ std::string ChecksumCalculator::calculateSHA1(const std::string &file_path,
   }
 
   while (file) {
-    file.read(reinterpret_cast<char *>(buffer), CHUNK_SIZE);
+    file.read(reinterpret_cast<char *>(buffer.data()), CHUNK_SIZE);
     const auto bytesRead = file.gcount();
-    if (EVP_DigestUpdate(md5Context, buffer, bytesRead) != 1) {
+    if (EVP_DigestUpdate(md5Context, buffer.data(), bytesRead) != 1) {
       EVP_MD_CTX_free(md5Context);
       return "";
     }
@@ -58,8 +59,9 @@ std::string ChecksumCalculator::calculateSHA1(const std::string &file_path,
   return ss.str();
 }
 
-std::string ChecksumCalculator::calculateHeaderSHA1(
-    const std::string &file_path, int nums) {
+std::string
+ChecksumCalculator::calculateHeaderSHA1(const std::string &file_path,
+                                        int nums) {
   EVP_MD_CTX *md5Context = EVP_MD_CTX_new();
   if (md5Context == nullptr) {
     return "";

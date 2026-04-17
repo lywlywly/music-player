@@ -86,8 +86,8 @@ void Playlist::addSongs(std::vector<MSong> &&items) {
   if (items.empty())
     return;
 
-  beginInsertRows(QModelIndex(), rowCount() - 1,
-                  rowCount() - 1 + static_cast<int>(items.size()) - 1);
+  beginInsertRows(QModelIndex(), rowCount(),
+                  rowCount() + static_cast<int>(items.size()) - 1);
 
   for (auto &s : items) {
     store.addSong(std::move(s));
