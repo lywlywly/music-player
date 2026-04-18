@@ -104,6 +104,11 @@ if(NOT WIN32)
     efswfilesystemmonitor.h
     efswfilesystemmonitor.cpp
   )
+else()
+  list(APPEND PROJECT_SOURCES
+    windowsmediacenter.h
+    windowsmediacenter.cpp
+  )
 endif()
 
 if(APPLE)
@@ -139,6 +144,7 @@ if(WIN32)
     FFmpeg::avcodec
     FFmpeg::avformat
     FFmpeg::avutil
+    windowsapp
   )
 else()
   target_link_libraries(

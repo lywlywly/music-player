@@ -4,8 +4,10 @@
 #include "addentrydialog.h"
 #ifdef Q_OS_MACOS
 #include "macosmediacenter.h"
-#elifdef Q_OS_LINUX
+#elif defined(Q_OS_LINUX)
 #include "mprismediainterface.h"
+#elif defined(Q_OS_WIN)
+#include "windowsmediacenter.h"
 #else
 #include "dummysystemmediainterface.h"
 #endif
@@ -35,8 +37,10 @@ MainWindow::MainWindow(QWidget *parent)
 void MainWindow::setupSystemMediaInterface() {
 #ifdef Q_OS_MACOS
   sysMedia = new MacOSMediaCenter(this);
-#elifdef Q_OS_LINUX
+#elif defined(Q_OS_LINUX)
   sysMedia = new MprisMediaInterface(this);
+#elif defined(Q_OS_WIN)
+  sysMedia = new WindowsMediaCenter(static_cast<quintptr>(winId()), this);
 #else
   sysMedia = new DummySystemMediaInterface(this);
 #endif
