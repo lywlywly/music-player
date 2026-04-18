@@ -55,6 +55,8 @@ void MainWindow::setupSystemMediaInterface() {
           &MainWindow::next);
   connect(sysMedia, &ISystemMediaInterface::previousRequested, this,
           &MainWindow::prev);
+  connect(sysMedia, &ISystemMediaInterface::seekRequested, this,
+          [this](qint64 positionMs) { seek(positionMs); });
 }
 
 void MainWindow::setUpMenuBar() {
@@ -148,19 +150,15 @@ void MainWindow::setUpPlaybackBackend() {
           &MainWindow::durationChanged);
   connect(backendManager->player(), &AudioPlayer::positionChanged, this,
           &MainWindow::positionChanged);
-  connect(backendManager->player(), &AudioPlayer::mediaStatusChanged, this,
-          &MainWindow::statusChanged);
-  connect(backendManager->player(), &AudioPlayer::durationChanged, this,
-          &MainWindow::durationChanged);
-  connect(backendManager->player(), &AudioPlayer::positionChanged, this,
-          &MainWindow::positionChanged);
 }
 
 void MainWindow::playSong(const MSong &song) {
   backendManager->player()->setSource(QString::fromStdString(song.at("path")));
   backendManager->player()->play();
-  sysMedia->setTrackInfo(QString::fromStdString(song.at("title")),
-                         QString::fromStdString(song.at("artist")), 0);
+  sysMedia->setTitleAndArtist(QString::fromStdString(song.at("title")),
+                              QString::fromStdString(song.at("artist")));
+  sysMedia->updateCurrentPosition(0);
+  sysMedia->setPlaybackState(ISystemMediaInterface::PlaybackState::Playing);
   control.play();
 }
 
@@ -191,7 +189,7 @@ void MainWindow::play() {
   } else {
     backendManager->player()->play();
     control.play();
-    sysMedia->updatePlaybackState(true);
+    sysMedia->setPlaybackState(ISystemMediaInterface::PlaybackState::Playing);
   }
 }
 
@@ -200,7 +198,7 @@ void MainWindow::pause() {
     return;
   backendManager->player()->pause();
   control.pause();
-  sysMedia->updatePlaybackState(false);
+  sysMedia->setPlaybackState(ISystemMediaInterface::PlaybackState::Paused);
 }
 
 void MainWindow::toggle() {
@@ -213,7 +211,7 @@ void MainWindow::toggle() {
 void MainWindow::stop() {
   backendManager->player()->stop();
   control.stop();
-  sysMedia->updatePlaybackState(false);
+  sysMedia->setPlaybackState(ISystemMediaInterface::PlaybackState::Stopped);
 }
 
 void MainWindow::navigateIndex(MSong song, int row, Playlist *pl) {
@@ -260,16 +258,18 @@ void MainWindow::addEntry() {
 }
 
 void MainWindow::durationChanged(qint64 newDuration) {
-  duration = newDuration;
-  ui->horizontalSlider->setMaximum(duration);
+  ui->horizontalSlider->setMaximum(newDuration);
+  sysMedia->setDuration(newDuration);
 }
 
 void MainWindow::positionChanged(qint64 progress) {
   if (!ui->horizontalSlider->isSliderDown())
     ui->horizontalSlider->setValue(progress);
+  sysMedia->updateCurrentPosition(progress);
 }
 
 void MainWindow::seek(int mseconds) {
+  sysMedia->setPosition(mseconds);
   backendManager->player()->setPosition(mseconds);
 }
 

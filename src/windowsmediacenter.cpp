@@ -7,7 +7,9 @@
 #include <windows.media.h>
 #include <winrt/Windows.Foundation.h>
 
+using namespace std::chrono;
 using namespace winrt;
+using namespace winrt::Windows::Foundation;
 using namespace winrt::Windows::Media;
 
 WindowsMediaCenter::WindowsMediaCenter(quintptr windowId, QObject *parent)
@@ -18,40 +20,39 @@ WindowsMediaCenter::WindowsMediaCenter(quintptr windowId, QObject *parent)
 WindowsMediaCenter::~WindowsMediaCenter() {
   if (initialized_ && smtc_) {
     smtc_.ButtonPressed(buttonPressedToken_);
+    smtc_.PlaybackPositionChangeRequested(positionChangeRequestedToken_);
   }
 }
 
-void WindowsMediaCenter::updateNowPlaying(const QString &title,
-                                          const QString &artist,
-                                          qint64 durationMs, qint64 positionMs,
-                                          bool isPlaying) {
+void WindowsMediaCenter::setTitleAndArtist(const QString &title,
+                                           const QString &artist) {
   state_.title = title;
   state_.artist = artist;
-  state_.durationMs = durationMs;
-  state_.positionMs = positionMs;
-  state_.isPlaying = isPlaying;
-  pushNowPlayingToSystem();
-}
-
-void WindowsMediaCenter::setTrackInfo(const QString &title,
-                                      const QString &artist,
-                                      qint64 durationMs) {
-  state_.title = title;
-  state_.artist = artist;
-  state_.durationMs = durationMs;
+  state_.playbackState = PlaybackState::Playing;
   state_.positionMs = 0;
-  state_.isPlaying = true;
-  pushNowPlayingToSystem();
+
+  pushMetadataToSystem();
+  pushPlaybackStateToSystem();
+  pushTimelineToSystem();
 }
 
-void WindowsMediaCenter::updatePosition(qint64 positionMs) {
+void WindowsMediaCenter::setDuration(qint64 durationMs) {
+  state_.durationMs = durationMs;
+  pushTimelineToSystem();
+}
+
+void WindowsMediaCenter::setPlaybackState(PlaybackState state) {
+  state_.playbackState = state;
+  pushPlaybackStateToSystem();
+  if (state == PlaybackState::Stopped) {
+    state_.positionMs = 0;
+    pushTimelineToSystem();
+  }
+}
+
+void WindowsMediaCenter::setPosition(qint64 positionMs) {
   state_.positionMs = positionMs;
-  pushNowPlayingToSystem();
-}
-
-void WindowsMediaCenter::updatePlaybackState(bool isPlaying) {
-  state_.isPlaying = isPlaying;
-  pushNowPlayingToSystem();
+  pushTimelineToSystem();
 }
 
 void WindowsMediaCenter::initialize() {
@@ -93,15 +94,32 @@ void WindowsMediaCenter::initialize() {
                const SystemMediaTransportControlsButtonPressedEventArgs &args) {
           emitButtonSignal(args.Button());
         });
+    positionChangeRequestedToken_ = smtc_.PlaybackPositionChangeRequested(
+        [this](const SystemMediaTransportControls &,
+               const PlaybackPositionChangeRequestedEventArgs &args) {
+          const auto requestedMs =
+              duration_cast<milliseconds>(args.RequestedPlaybackPosition())
+                  .count();
+          const qint64 boundedRequestedMs =
+              requestedMs < 0 ? 0 : static_cast<qint64>(requestedMs);
+          QMetaObject::invokeMethod(
+              this,
+              [this, boundedRequestedMs]() {
+                emit seekRequested(boundedRequestedMs);
+              },
+              Qt::QueuedConnection);
+        });
 
     initialized_ = true;
-    pushNowPlayingToSystem();
+    pushMetadataToSystem();
+    pushPlaybackStateToSystem();
+    pushTimelineToSystem();
   } catch (...) {
     initialized_ = false;
   }
 }
 
-void WindowsMediaCenter::pushNowPlayingToSystem() {
+void WindowsMediaCenter::pushMetadataToSystem() {
   if (!initialized_ || !smtc_) {
     return;
   }
@@ -112,8 +130,36 @@ void WindowsMediaCenter::pushNowPlayingToSystem() {
   updater.MusicProperties().Artist(
       winrt::hstring(state_.artist.toStdWString()));
   updater.Update();
-  smtc_.PlaybackStatus(state_.isPlaying ? MediaPlaybackStatus::Playing
-                                        : MediaPlaybackStatus::Paused);
+}
+
+void WindowsMediaCenter::pushPlaybackStateToSystem() {
+  if (!initialized_ || !smtc_) {
+    return;
+  }
+
+  const auto playbackStatus = state_.playbackState == PlaybackState::Playing
+                                  ? MediaPlaybackStatus::Playing
+                              : state_.playbackState == PlaybackState::Paused
+                                  ? MediaPlaybackStatus::Paused
+                                  : MediaPlaybackStatus::Stopped;
+  smtc_.PlaybackStatus(playbackStatus);
+}
+
+void WindowsMediaCenter::pushTimelineToSystem() {
+  if (!initialized_ || !smtc_) {
+    return;
+  }
+
+  SystemMediaTransportControlsTimelineProperties timeline;
+
+  timeline.StartTime(duration_cast<TimeSpan>(milliseconds(0)));
+  timeline.Position(duration_cast<TimeSpan>(milliseconds(state_.positionMs)));
+  timeline.EndTime(duration_cast<TimeSpan>(milliseconds(state_.durationMs)));
+  timeline.MinSeekTime(duration_cast<TimeSpan>(milliseconds(0)));
+  timeline.MaxSeekTime(
+      duration_cast<TimeSpan>(milliseconds(state_.durationMs)));
+
+  smtc_.UpdateTimelineProperties(timeline);
 }
 
 void WindowsMediaCenter::emitButtonSignal(

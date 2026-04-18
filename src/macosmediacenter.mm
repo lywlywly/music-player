@@ -6,8 +6,9 @@ MacOSMediaCenter::MacOSMediaCenter(QObject *parent)
     : ISystemMediaInterface(parent) {
   connectRemoteCommands();
   // show in media center and set status to pause
-  updateNowPlaying("", "", 0, 0, true);
-  updateNowPlaying("", "", 0, 0, false);
+  setTitleAndArtist("", "");
+  setDuration(0);
+  setPlaybackState(PlaybackState::Paused);
 }
 
 void MacOSMediaCenter::connectRemoteCommands() {
@@ -47,43 +48,45 @@ void MacOSMediaCenter::connectRemoteCommands() {
     emit previousRequested();
     return MPRemoteCommandHandlerStatusSuccess;
   }];
+
+  // Seek
+  cc.changePlaybackPositionCommand.enabled = YES;
+  [cc.changePlaybackPositionCommand
+      addTargetWithHandler:^MPRemoteCommandHandlerStatus(
+          MPRemoteCommandEvent *event) {
+        MPChangePlaybackPositionCommandEvent *positionEvent =
+            (MPChangePlaybackPositionCommandEvent *)event;
+        const qint64 requestedMs = positionEvent.positionTime * 1000.0;
+        emit seekRequested(requestedMs);
+        return MPRemoteCommandHandlerStatusSuccess;
+      }];
 }
 
-void MacOSMediaCenter::updateNowPlaying(const QString &title,
-                                        const QString &artist,
-                                        qint64 durationSec, qint64 positionSec,
-                                        bool isPlaying) {
-  NSMutableDictionary *info = [NSMutableDictionary dictionary];
-
-  if (!title.isEmpty())
-    info[MPMediaItemPropertyTitle] = title.toNSString();
-  if (!artist.isEmpty())
-    info[MPMediaItemPropertyArtist] = artist.toNSString();
-
-  info[MPMediaItemPropertyPlaybackDuration] = @(durationSec);
-  info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = @(positionSec);
-  info[MPNowPlayingInfoPropertyPlaybackRate] = (isPlaying ? @1 : @0);
-
-  [MPNowPlayingInfoCenter.defaultCenter setNowPlayingInfo:info];
-}
-
-void MacOSMediaCenter::setTrackInfo(const QString &title, const QString &artist,
-                                    qint64 durationMs) {
+void MacOSMediaCenter::setTitleAndArtist(const QString &title,
+                                         const QString &artist) {
   state_.title = title;
   state_.artist = artist;
+  state_.playbackState = PlaybackState::Playing;
+  state_.positionMs = 0;
+
+  pushNowPlayingToSystem();
+}
+
+void MacOSMediaCenter::setDuration(qint64 durationMs) {
   state_.durationMs = durationMs;
-  state_.isPlaying = true;
-
   pushNowPlayingToSystem();
 }
 
-void MacOSMediaCenter::updatePosition(qint64 positionMs) {
+void MacOSMediaCenter::setPlaybackState(PlaybackState state) {
+  state_.playbackState = state;
+  if (state == PlaybackState::Stopped) {
+    state_.positionMs = 0;
+  }
+  pushNowPlayingToSystem();
+}
+
+void MacOSMediaCenter::setPosition(qint64 positionMs) {
   state_.positionMs = positionMs;
-  pushNowPlayingToSystem();
-}
-
-void MacOSMediaCenter::updatePlaybackState(bool isPlaying) {
-  state_.isPlaying = isPlaying;
   pushNowPlayingToSystem();
 }
 
@@ -99,7 +102,8 @@ void MacOSMediaCenter::pushNowPlayingToSystem() {
   info[MPMediaItemPropertyPlaybackDuration] = @(state_.durationMs / 1000.0);
   info[MPNowPlayingInfoPropertyElapsedPlaybackTime] =
       @(state_.positionMs / 1000.0);
-  info[MPNowPlayingInfoPropertyPlaybackRate] = (state_.isPlaying ? @1 : @0);
+  info[MPNowPlayingInfoPropertyPlaybackRate] =
+      (state_.playbackState == PlaybackState::Playing ? @1 : @0);
 
   [MPNowPlayingInfoCenter.defaultCenter setNowPlayingInfo:info];
 }

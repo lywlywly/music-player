@@ -2,16 +2,10 @@
 #define MPRISMEDIAINTERFACE_H
 
 #include "isystemmediainterface.h"
+#include <QByteArray>
 #include <QDBusAbstractAdaptor>
+#include <QDBusObjectPath>
 #include <QVariantMap>
-
-struct NowPlayingState {
-  QString title;
-  QString artist;
-  qint64 durationMs = 0;
-  qint64 positionMs = 0;
-  bool isPlaying = false;
-};
 
 class MprisMediaInterface;
 
@@ -52,6 +46,8 @@ class MprisPlayerAdaptor : public QDBusAbstractAdaptor {
   Q_PROPERTY(bool CanPause READ canPause)
   Q_PROPERTY(bool CanGoNext READ canGoNext)
   Q_PROPERTY(bool CanGoPrevious READ canGoPrevious)
+  Q_PROPERTY(bool CanSeek READ canSeek)
+  Q_PROPERTY(qlonglong Position READ position)
 public:
   explicit MprisPlayerAdaptor(MprisMediaInterface *parent);
   bool canControl() const { return true; }
@@ -59,12 +55,16 @@ public:
   bool canPause() const { return true; }
   bool canGoNext() const { return true; }
   bool canGoPrevious() const { return true; }
+  bool canSeek() const { return true; }
+  qlonglong position() const;
 public slots:
   void Play();
   void Pause();
   void PlayPause();
   void Next();
   void Previous();
+  void Seek(qlonglong offsetUs);
+  void SetPosition(const QDBusObjectPath &trackId, qlonglong positionUs);
 
 private:
   MprisMediaInterface *backend_;
@@ -75,25 +75,32 @@ class MprisMediaInterface : public ISystemMediaInterface {
 public:
   explicit MprisMediaInterface(QObject *parent = nullptr);
   ~MprisMediaInterface() override = default;
-  void updateNowPlaying(const QString &title, const QString &artist,
-                        qint64 durationMs, qint64 positionMs,
-                        bool isPlaying) override;
-  void setTrackInfo(const QString &title, const QString &artist,
-                    qint64 durationMs) override;
-  void updatePosition(qint64 positionMs) override;
-  void updatePlaybackState(bool isPlaying) override;
+  void setTitleAndArtist(const QString &title, const QString &artist) override;
+  void setPlaybackState(PlaybackState state) override;
+  void setDuration(qint64 durationMs) override;
+  void setPosition(qint64 positionMs) override;
   // Called by adaptor
   void emitPlayRequested() { emit playRequested(); }
   void emitPauseRequested() { emit pauseRequested(); }
   void emitToggleRequested() { emit toggleRequested(); }
   void emitNextRequested() { emit nextRequested(); }
   void emitPreviousRequested() { emit previousRequested(); }
+  void emitSeekRequested(qint64 positionMs) { emit seekRequested(positionMs); }
+  void requestSeek(qint64 positionMs);
+  qlonglong positionUs() const { return state_.positionMs * 1000; }
+  qlonglong durationUs() const { return state_.durationMs * 1000; }
+  QDBusObjectPath currentTrackId() const;
 
 private:
-  void sendPropertiesChanged();
+  void sendPropertiesChanged(const QVariantMap &changed);
+  void sendPlaybackStatusChanged();
+  void sendMetadataChanged();
+  void sendCapabilitiesChanged();
+  void sendSeeked(qint64 positionMs);
   QVariantMap buildMetadata() const;
+  QString playbackStatusString() const;
 
-  NowPlayingState state_;
+  qulonglong trackIdSerial_ = 1;
   MprisRootAdaptor *rootAdaptor_ = nullptr;
   MprisPlayerAdaptor *playerAdaptor_ = nullptr;
 };

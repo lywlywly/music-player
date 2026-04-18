@@ -9,11 +9,10 @@ public:
   explicit DummySystemMediaInterface(QObject *parent = nullptr)
       : ISystemMediaInterface(parent) {}
   ~DummySystemMediaInterface() override = default;
-  void updateNowPlaying(const QString &, const QString &, qint64, qint64,
-                        bool) override {}
-  void setTrackInfo(const QString &title, const QString &artist,
-                    qint64 durationMs) override {}
-  void updatePosition(qint64 positionMs) override {}
-  void updatePlaybackState(bool isPlaying) override {}
+  void setTitleAndArtist(const QString &title, const QString &artist) override {
+  }
+  void setPlaybackState(PlaybackState state) override {}
+  void setDuration(qint64 durationMs) override {}
+  void setPosition(qint64 positionMs) override {}
 };
 #endif // DUMMYSYSTEMMEDIAINTERFACE_H

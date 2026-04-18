@@ -6,39 +6,29 @@
 #include <QString>
 #include <winrt/Windows.Media.h>
 #include <winrt/base.h>
-
-struct WindowsNowPlayingState {
-  QString title;
-  QString artist;
-  qint64 durationMs = 0;
-  qint64 positionMs = 0;
-  bool isPlaying = false;
-};
-
 class WindowsMediaCenter : public ISystemMediaInterface {
   Q_OBJECT
 public:
   explicit WindowsMediaCenter(quintptr windowId, QObject *parent = nullptr);
   ~WindowsMediaCenter() override;
 
-  void updateNowPlaying(const QString &title, const QString &artist,
-                        qint64 durationMs, qint64 positionMs,
-                        bool isPlaying) override;
-  void setTrackInfo(const QString &title, const QString &artist,
-                    qint64 durationMs) override;
-  void updatePosition(qint64 positionMs) override;
-  void updatePlaybackState(bool isPlaying) override;
+  void setTitleAndArtist(const QString &title, const QString &artist) override;
+  void setPlaybackState(PlaybackState state) override;
+  void setDuration(qint64 durationMs) override;
+  void setPosition(qint64 positionMs) override;
 
 private:
   void initialize();
-  void pushNowPlayingToSystem();
+  void pushMetadataToSystem();
+  void pushPlaybackStateToSystem();
+  void pushTimelineToSystem();
   void emitButtonSignal(
       winrt::Windows::Media::SystemMediaTransportControlsButton button);
   quintptr windowId_ = 0;
-  WindowsNowPlayingState state_;
   bool initialized_ = false;
   winrt::Windows::Media::SystemMediaTransportControls smtc_{nullptr};
   winrt::event_token buttonPressedToken_{};
+  winrt::event_token positionChangeRequestedToken_{};
 };
 
 #endif // WINDOWSMEDIACENTER_H

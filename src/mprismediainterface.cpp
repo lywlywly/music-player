@@ -2,6 +2,10 @@
 #include <QDBusConnection>
 #include <QDBusMessage>
 #include <QDebug>
+#include <QDir>
+#include <QImage>
+#include <QStandardPaths>
+#include <QUrl>
 
 MprisRootAdaptor::MprisRootAdaptor(MprisMediaInterface *parent)
     : QDBusAbstractAdaptor(parent) {}
@@ -14,6 +18,19 @@ void MprisPlayerAdaptor::Pause() { backend_->emitPauseRequested(); }
 void MprisPlayerAdaptor::PlayPause() { backend_->emitToggleRequested(); }
 void MprisPlayerAdaptor::Next() { backend_->emitNextRequested(); }
 void MprisPlayerAdaptor::Previous() { backend_->emitPreviousRequested(); }
+qlonglong MprisPlayerAdaptor::position() const {
+  return backend_->positionUs();
+}
+void MprisPlayerAdaptor::Seek(qlonglong offsetUs) {
+  const qlonglong currentUs = backend_->positionUs();
+  const qlonglong targetUs = currentUs + offsetUs;
+  backend_->requestSeek(targetUs / 1000);
+}
+void MprisPlayerAdaptor::SetPosition(const QDBusObjectPath &trackId,
+                                     qlonglong positionUs) {
+  Q_UNUSED(trackId);
+  backend_->requestSeek(positionUs / 1000);
+}
 
 MprisMediaInterface::MprisMediaInterface(QObject *parent)
     : ISystemMediaInterface(parent) {
@@ -37,64 +54,76 @@ MprisMediaInterface::MprisMediaInterface(QObject *parent)
   // Create adaptors (they attach to 'this')
   rootAdaptor_ = new MprisRootAdaptor(this);
   playerAdaptor_ = new MprisPlayerAdaptor(this);
+
+  sendCapabilitiesChanged();
+  sendPlaybackStatusChanged();
+  sendMetadataChanged();
 }
 
-void MprisMediaInterface::updateNowPlaying(const QString &title,
-                                           const QString &artist,
-                                           qint64 durationMs, qint64 positionMs,
-                                           bool isPlaying) {
+void MprisMediaInterface::setTitleAndArtist(const QString &title,
+                                            const QString &artist) {
+  ++trackIdSerial_;
+
   state_.title = title;
   state_.artist = artist;
+  state_.playbackState = PlaybackState::Playing;
+  state_.positionMs = 0;
+
+  sendMetadataChanged();
+  sendPlaybackStatusChanged();
+  sendSeeked(0);
+}
+
+void MprisMediaInterface::setDuration(qint64 durationMs) {
   state_.durationMs = durationMs;
-  state_.positionMs = positionMs;
-  state_.isPlaying = isPlaying;
-
-  sendPropertiesChanged();
+  sendMetadataChanged();
 }
 
-void MprisMediaInterface::setTrackInfo(const QString &title,
-                                       const QString &artist,
-                                       qint64 durationMs) {
-  state_.title = title;
-  state_.artist = artist;
-  state_.durationMs = durationMs;
-  state_.isPlaying = true;
+void MprisMediaInterface::setPlaybackState(PlaybackState state) {
+  if (state_.playbackState == state) {
+    return;
+  }
 
-  sendPropertiesChanged();
-}
+  state_.playbackState = state;
+  if (state == PlaybackState::Stopped) {
+    state_.positionMs = 0;
+    sendPlaybackStatusChanged();
+    sendSeeked(0);
+    return;
+  }
 
-void MprisMediaInterface::updatePosition(qint64 positionMs) {
-  state_.positionMs = positionMs;
-  sendPropertiesChanged();
-}
-
-void MprisMediaInterface::updatePlaybackState(bool isPlaying) {
-  state_.isPlaying = isPlaying;
-  sendPropertiesChanged();
+  sendPlaybackStatusChanged();
 }
 
 QVariantMap MprisMediaInterface::buildMetadata() const {
   QVariantMap m;
+  m[QStringLiteral("mpris:trackid")] = QVariant::fromValue(currentTrackId());
   m[QStringLiteral("xesam:title")] = state_.title;
   m[QStringLiteral("xesam:artist")] = QStringList{state_.artist};
   m[QStringLiteral("mpris:length")] = state_.durationMs * 1000;
   return m;
 }
 
-void MprisMediaInterface::sendPropertiesChanged() {
-  QVariantMap changed;
+QDBusObjectPath MprisMediaInterface::currentTrackId() const {
+  // MPRIS requires a stable object-path identifier for the current track, so
+  // we expose a synthetic path that changes whenever the track changes.
+  return QDBusObjectPath(
+      QStringLiteral("/org/mpris/MediaPlayer2/Track/%1").arg(trackIdSerial_));
+}
 
-  changed[QStringLiteral("PlaybackStatus")] =
-      state_.isPlaying ? QStringLiteral("Playing") : QStringLiteral("Paused");
+void MprisMediaInterface::requestSeek(qint64 positionMs) {
+  emitSeekRequested(positionMs);
+}
 
-  changed[QStringLiteral("Metadata")] = buildMetadata();
-  changed[QStringLiteral("Position")] = state_.positionMs * 1000;
+void MprisMediaInterface::setPosition(qint64 positionMs) {
+  state_.positionMs = positionMs;
+  sendSeeked(positionMs);
+}
 
-  changed[QStringLiteral("CanControl")] = true;
-  changed[QStringLiteral("CanPlay")] = true;
-  changed[QStringLiteral("CanPause")] = true;
-  changed[QStringLiteral("CanGoNext")] = true;
-  changed[QStringLiteral("CanGoPrevious")] = true;
+void MprisMediaInterface::sendPropertiesChanged(const QVariantMap &changed) {
+  if (changed.isEmpty()) {
+    return;
+  }
 
   QDBusMessage msg = QDBusMessage::createSignal(
       QStringLiteral("/org/mpris/MediaPlayer2"),
@@ -106,4 +135,49 @@ void MprisMediaInterface::sendPropertiesChanged() {
   msg << QStringList{};
 
   QDBusConnection::sessionBus().send(msg);
+}
+
+void MprisMediaInterface::sendPlaybackStatusChanged() {
+  QVariantMap changed;
+  changed[QStringLiteral("PlaybackStatus")] = playbackStatusString();
+  sendPropertiesChanged(changed);
+}
+
+void MprisMediaInterface::sendMetadataChanged() {
+  QVariantMap changed;
+  changed[QStringLiteral("Metadata")] = buildMetadata();
+  sendPropertiesChanged(changed);
+}
+
+void MprisMediaInterface::sendCapabilitiesChanged() {
+  QVariantMap changed;
+  changed[QStringLiteral("CanControl")] = true;
+  changed[QStringLiteral("CanPlay")] = true;
+  changed[QStringLiteral("CanPause")] = true;
+  changed[QStringLiteral("CanGoNext")] = true;
+  changed[QStringLiteral("CanGoPrevious")] = true;
+  changed[QStringLiteral("CanSeek")] = true;
+  sendPropertiesChanged(changed);
+}
+
+void MprisMediaInterface::sendSeeked(qint64 positionMs) {
+  QDBusMessage msg = QDBusMessage::createSignal(
+      QStringLiteral("/org/mpris/MediaPlayer2"),
+      QStringLiteral("org.mpris.MediaPlayer2.Player"),
+      QStringLiteral("Seeked"));
+  msg << positionMs * 1000;
+  QDBusConnection::sessionBus().send(msg);
+}
+
+QString MprisMediaInterface::playbackStatusString() const {
+  switch (state_.playbackState) {
+  case PlaybackState::Playing:
+    return QStringLiteral("Playing");
+  case PlaybackState::Paused:
+    return QStringLiteral("Paused");
+  case PlaybackState::Stopped:
+    return QStringLiteral("Stopped");
+  }
+
+  return QStringLiteral("Stopped");
 }

@@ -66,7 +66,6 @@ private:
   LyricsLoader lyricsLoader;   // TODO: use value type
   LyricsManager lyricsManager; // TODO: use value type
   QPixmap pixmap;
-  qint64 duration;
   QActionGroup *playbackOrderMenuActionGroup;
   ISystemMediaInterface *sysMedia;
 };
