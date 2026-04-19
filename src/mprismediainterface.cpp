@@ -1,11 +1,15 @@
 #include "mprismediainterface.h"
+#include "artworkutils.h"
 #include <QDBusConnection>
 #include <QDBusMessage>
 #include <QDebug>
 #include <QDir>
-#include <QImage>
+#include <QFile>
+#include <QMetaObject>
+#include <QPointer>
 #include <QStandardPaths>
 #include <QUrl>
+#include <thread>
 
 MprisRootAdaptor::MprisRootAdaptor(MprisMediaInterface *parent)
     : QDBusAbstractAdaptor(parent) {}
@@ -63,11 +67,14 @@ MprisMediaInterface::MprisMediaInterface(QObject *parent)
 void MprisMediaInterface::setTitleAndArtist(const QString &title,
                                             const QString &artist) {
   ++trackIdSerial_;
+  ++artworkTaskId_;
 
   state_.title = title;
   state_.artist = artist;
   state_.playbackState = PlaybackState::Playing;
   state_.positionMs = 0;
+  state_.artworkData.clear();
+  artworkUrl_.clear();
 
   sendMetadataChanged();
   sendPlaybackStatusChanged();
@@ -101,6 +108,9 @@ QVariantMap MprisMediaInterface::buildMetadata() const {
   m[QStringLiteral("xesam:title")] = state_.title;
   m[QStringLiteral("xesam:artist")] = QStringList{state_.artist};
   m[QStringLiteral("mpris:length")] = state_.durationMs * 1000;
+  if (!artworkUrl_.isEmpty()) {
+    m[QStringLiteral("mpris:artUrl")] = artworkUrl_;
+  }
   return m;
 }
 
@@ -118,6 +128,75 @@ void MprisMediaInterface::requestSeek(qint64 positionMs) {
 void MprisMediaInterface::setPosition(qint64 positionMs) {
   state_.positionMs = positionMs;
   sendSeeked(positionMs);
+}
+
+void MprisMediaInterface::setArtwork(const QByteArray &imageData) {
+  const uint64_t taskId = ++artworkTaskId_;
+
+  if (imageData.isEmpty()) {
+    if (state_.artworkData.isEmpty() && artworkUrl_.isEmpty()) {
+      return;
+    }
+    state_.artworkData.clear();
+    artworkUrl_.clear();
+    sendMetadataChanged();
+    return;
+  }
+
+  QPointer<MprisMediaInterface> self(this);
+  const QByteArray imageDataCopy = imageData;
+  std::thread([self, taskId, imageDataCopy]() {
+    const QByteArray preparedArtworkPng =
+        ArtworkUtils::normalizeArtworkToPng(imageDataCopy, 512);
+    QString preparedArtworkUrl;
+
+    if (!preparedArtworkPng.isEmpty()) {
+      QString cacheDir =
+          QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+      if (cacheDir.isEmpty()) {
+        cacheDir =
+            QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+      }
+      QDir dir(cacheDir);
+      if (!dir.exists()) {
+        dir.mkpath(QStringLiteral("."));
+      }
+
+      const QString artworkPath =
+          dir.filePath(QStringLiteral("myplayer_mpris_artwork.png"));
+      QFile artworkFile(artworkPath);
+      if (artworkFile.open(QIODevice::WriteOnly | QIODevice::Truncate) &&
+          artworkFile.write(preparedArtworkPng) == preparedArtworkPng.size()) {
+        artworkFile.close();
+        preparedArtworkUrl = QUrl::fromLocalFile(artworkPath).toString();
+      }
+    }
+
+    if (!self) {
+      return;
+    }
+    QMetaObject::invokeMethod(
+        self,
+        [self, taskId, preparedArtworkPng, preparedArtworkUrl]() {
+          if (!self || taskId != self->artworkTaskId_.load()) {
+            return;
+          }
+          if (preparedArtworkPng.isEmpty() || preparedArtworkUrl.isEmpty()) {
+            self->state_.artworkData.clear();
+            self->artworkUrl_.clear();
+            self->sendMetadataChanged();
+            return;
+          }
+          if (self->state_.artworkData == preparedArtworkPng &&
+              self->artworkUrl_ == preparedArtworkUrl) {
+            return;
+          }
+          self->state_.artworkData = preparedArtworkPng;
+          self->artworkUrl_ = preparedArtworkUrl;
+          self->sendMetadataChanged();
+        },
+        Qt::QueuedConnection);
+  }).detach();
 }
 
 void MprisMediaInterface::sendPropertiesChanged(const QVariantMap &changed) {

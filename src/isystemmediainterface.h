@@ -14,13 +14,15 @@ public:
     qint64 durationMs = 0;
     qint64 positionMs = 0;
     PlaybackState playbackState = PlaybackState::Stopped;
+    QByteArray artworkData;
   };
 
   explicit ISystemMediaInterface(QObject *parent = nullptr) : QObject(parent) {}
   virtual ~ISystemMediaInterface() = default;
-  // Updates the current track title and artist, sets playback state to Playing,
-  // resets position to 0, and publishes the change. Do not call this repeatedly
-  // for the same song.
+  // Call this when switching to a new song. It updates the current track title
+  // and artist, sets playback state to Playing, resets position to 0, clears
+  // existing artwork, and publishes the change. Do not call this repeatedly for
+  // the same song.
   virtual void setTitleAndArtist(const QString &title,
                                  const QString &artist) = 0;
   // Updates the playback state and publishes the change.
@@ -36,6 +38,7 @@ public:
   virtual void updateCurrentPosition(qint64 positionMs) {
     state_.positionMs = positionMs;
   }
+  virtual void setArtwork(const QByteArray &imageData) = 0;
 
 protected:
   MediaState state_;

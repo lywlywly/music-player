@@ -1,16 +1,18 @@
 #include "windowsmediacenter.h"
+#include "artworkutils.h"
 
-#include <QDebug>
 #include <QMetaObject>
+#include <QPointer>
 #include <systemmediatransportcontrolsinterop.h>
+#include <thread>
 #include <windows.h>
-#include <windows.media.h>
 #include <winrt/Windows.Foundation.h>
 
 using namespace std::chrono;
 using namespace winrt;
 using namespace winrt::Windows::Foundation;
 using namespace winrt::Windows::Media;
+using namespace winrt::Windows::Storage::Streams;
 
 WindowsMediaCenter::WindowsMediaCenter(quintptr windowId, QObject *parent)
     : ISystemMediaInterface(parent), windowId_(windowId) {
@@ -26,14 +28,17 @@ WindowsMediaCenter::~WindowsMediaCenter() {
 
 void WindowsMediaCenter::setTitleAndArtist(const QString &title,
                                            const QString &artist) {
+  const uint64_t taskId = ++artworkTaskId_;
   state_.title = title;
   state_.artist = artist;
   state_.playbackState = PlaybackState::Playing;
   state_.positionMs = 0;
+  state_.artworkData.clear();
 
   pushMetadataToSystem();
   pushPlaybackStateToSystem();
   pushTimelineToSystem();
+  pushArtworkToSystem({}, taskId);
 }
 
 void WindowsMediaCenter::setDuration(qint64 durationMs) {
@@ -53,6 +58,41 @@ void WindowsMediaCenter::setPlaybackState(PlaybackState state) {
 void WindowsMediaCenter::setPosition(qint64 positionMs) {
   state_.positionMs = positionMs;
   pushTimelineToSystem();
+}
+
+void WindowsMediaCenter::setArtwork(const QByteArray &imageData) {
+  if (state_.artworkData == imageData) {
+    return;
+  }
+  state_.artworkData = imageData;
+  const uint64_t taskId = ++artworkTaskId_;
+
+  if (imageData.isEmpty()) {
+    pushArtworkToSystem({}, taskId);
+    return;
+  }
+
+  QPointer<WindowsMediaCenter> self(this);
+  const QByteArray imageDataCopy = imageData;
+  std::thread([self, taskId, imageDataCopy]() {
+    // Keep artwork decode/encode off the UI thread.
+    // Resize oversized covers to reduce SMTC payload/update cost.
+    const QByteArray preparedArtworkPng =
+        ArtworkUtils::normalizeArtworkToPng(imageDataCopy, 256);
+
+    if (!self) {
+      return;
+    }
+    QMetaObject::invokeMethod(
+        self,
+        [self, taskId, preparedArtworkPng]() {
+          if (!self || taskId != self->artworkTaskId_.load()) {
+            return;
+          }
+          self->pushArtworkToSystem(std::move(preparedArtworkPng), taskId);
+        },
+        Qt::QueuedConnection);
+  }).detach();
 }
 
 void WindowsMediaCenter::initialize() {
@@ -160,6 +200,48 @@ void WindowsMediaCenter::pushTimelineToSystem() {
       duration_cast<TimeSpan>(milliseconds(state_.durationMs)));
 
   smtc_.UpdateTimelineProperties(timeline);
+}
+
+void WindowsMediaCenter::pushArtworkToSystem(QByteArray imageData,
+                                             uint64_t taskId) {
+  if (!initialized_ || !smtc_) {
+    return;
+  }
+  auto updater = smtc_.DisplayUpdater();
+  if (imageData.isEmpty()) {
+    updater.Thumbnail(nullptr);
+    updater.Update();
+    return;
+  }
+
+  InMemoryRandomAccessStream stream;
+  DataWriter writer(stream);
+  std::vector<uint8_t> bytes(
+      reinterpret_cast<const uint8_t *>(imageData.constData()),
+      reinterpret_cast<const uint8_t *>(imageData.constData()) +
+          imageData.size());
+  writer.WriteBytes(bytes);
+  QPointer<WindowsMediaCenter> self(this);
+  writer.StoreAsync().Completed(
+      [self, taskId, updater, writer,
+       stream](IAsyncOperation<uint32_t> const &storeOp,
+               winrt::Windows::Foundation::AsyncStatus status) mutable {
+        if (!self || taskId != self->artworkTaskId_.load()) {
+          return;
+        }
+        if (status != winrt::Windows::Foundation::AsyncStatus::Completed) {
+          return;
+        }
+        try {
+          storeOp.GetResults();
+          writer.DetachStream();
+          stream.Seek(0);
+          updater.Thumbnail(
+              RandomAccessStreamReference::CreateFromStream(stream));
+          updater.Update();
+        } catch (...) {
+        }
+      });
 }
 
 void WindowsMediaCenter::emitButtonSignal(

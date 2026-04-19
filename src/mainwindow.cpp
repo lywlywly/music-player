@@ -157,8 +157,6 @@ void MainWindow::playSong(const MSong &song) {
   backendManager->player()->play();
   sysMedia->setTitleAndArtist(QString::fromStdString(song.at("title")),
                               QString::fromStdString(song.at("artist")));
-  sysMedia->updateCurrentPosition(0);
-  sysMedia->setPlaybackState(ISystemMediaInterface::PlaybackState::Playing);
   control.play();
 }
 
@@ -228,6 +226,8 @@ void MainWindow::setUpImageAndLyrics(MSong song) {
     ui->label->setPixmap(pixmap.scaled(ui->splitter->sizes().first() - 10,
                                        ui->splitter_2->sizes().last() - 10,
                                        Qt::KeepAspectRatio));
+    sysMedia->setArtwork(QByteArray(reinterpret_cast<const char *>(data.data()),
+                                    static_cast<int>(size)));
   } else {
     ui->label->setText("No cover");
   }

@@ -6,6 +6,7 @@
 #include <QDBusAbstractAdaptor>
 #include <QDBusObjectPath>
 #include <QVariantMap>
+#include <atomic>
 
 class MprisMediaInterface;
 
@@ -79,6 +80,7 @@ public:
   void setPlaybackState(PlaybackState state) override;
   void setDuration(qint64 durationMs) override;
   void setPosition(qint64 positionMs) override;
+  void setArtwork(const QByteArray &imageData) override;
   // Called by adaptor
   void emitPlayRequested() { emit playRequested(); }
   void emitPauseRequested() { emit pauseRequested(); }
@@ -101,6 +103,8 @@ private:
   QString playbackStatusString() const;
 
   qulonglong trackIdSerial_ = 1;
+  std::atomic<uint64_t> artworkTaskId_{0};
+  QString artworkUrl_;
   MprisRootAdaptor *rootAdaptor_ = nullptr;
   MprisPlayerAdaptor *playerAdaptor_ = nullptr;
 };

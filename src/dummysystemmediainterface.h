@@ -14,5 +14,6 @@ public:
   void setPlaybackState(PlaybackState state) override {}
   void setDuration(qint64 durationMs) override {}
   void setPosition(qint64 positionMs) override {}
+  void setArtwork(const QByteArray &) override {}
 };
 #endif // DUMMYSYSTEMMEDIAINTERFACE_H

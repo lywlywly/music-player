@@ -45,6 +45,7 @@ set(PROJECT_SOURCES
   addentrydialog.cpp
   audioplayer.h
   audioplayer.cpp
+  artworkutils.h
   checksumcalculator.h
   checksumcalculator.cpp
   databasemanager.h
