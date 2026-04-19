@@ -93,9 +93,7 @@ void GstAudioPlayer::UpdatePosition() {
   }
 }
 
-void GstAudioPlayer::onBusMessage(GstBus *bus, GstMessage *msg,
-                                  gpointer user_data) {
-  Q_UNUSED(bus);
+void GstAudioPlayer::onBusMessage(GstBus *, GstMessage *msg, gpointer user_data) {
   auto *self = static_cast<GstAudioPlayer *>(user_data);
 
   switch (GST_MESSAGE_TYPE(msg)) {

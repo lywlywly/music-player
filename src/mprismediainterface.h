@@ -65,7 +65,7 @@ public slots:
   void Next();
   void Previous();
   void Seek(qlonglong offsetUs);
-  void SetPosition(const QDBusObjectPath &trackId, qlonglong positionUs);
+  void SetPosition(const QDBusObjectPath &, qlonglong positionUs);
 
 private:
   MprisMediaInterface *backend_;

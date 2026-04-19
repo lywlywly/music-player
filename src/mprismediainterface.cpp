@@ -30,9 +30,8 @@ void MprisPlayerAdaptor::Seek(qlonglong offsetUs) {
   const qlonglong targetUs = currentUs + offsetUs;
   backend_->requestSeek(targetUs / 1000);
 }
-void MprisPlayerAdaptor::SetPosition(const QDBusObjectPath &trackId,
+void MprisPlayerAdaptor::SetPosition(const QDBusObjectPath &,
                                      qlonglong positionUs) {
-  Q_UNUSED(trackId);
   backend_->requestSeek(positionUs / 1000);
 }
 

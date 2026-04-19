@@ -23,7 +23,7 @@ public:
 private:
   void UpdatePosition();
   void emitDurationIfAvailable();
-  static void onBusMessage(GstBus *bus, GstMessage *msg, gpointer user_data);
+  static void onBusMessage(GstBus *, GstMessage *msg, gpointer user_data);
   GstElement *playbin_;
   GstElement *rgvolume_; // for ReplayGain
   bool isPlaying_;

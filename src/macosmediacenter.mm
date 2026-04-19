@@ -212,8 +212,7 @@ void MacOSMediaCenter::pushNowPlayingToSystem() {
       if (baseImage != nil) {
         artwork = [[MPMediaItemArtwork alloc]
             initWithBoundsSize:baseImage.size
-                requestHandler:^NSImage *_Nonnull(CGSize size) {
-                  Q_UNUSED(size);
+                requestHandler:^NSImage *_Nonnull(CGSize) {
                   return baseImage;
                 }];
         if (artwork != nil) {
