@@ -48,6 +48,9 @@ set(PROJECT_SOURCES
   artworkutils.h
   checksumcalculator.h
   checksumcalculator.cpp
+  columndefinition.h
+  columnregistry.h
+  columnregistry.cpp
   databasemanager.h
   databasemanager.cpp
   dummysystemmediainterface.h
@@ -55,6 +58,8 @@ set(PROJECT_SOURCES
   filesystemcomparer.cpp
   gstaudioplayer.h
   gstaudioplayer.cpp
+  globalcolumnlayoutmanager.h
+  globalcolumnlayoutmanager.cpp
   ifilesystemmonitor.h
   isystemmediainterface.h
   jumpslider.h

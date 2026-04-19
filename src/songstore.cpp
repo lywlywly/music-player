@@ -69,10 +69,17 @@ void SongStore::sortByField(std::string f, int order) {
   else
     result = UCollationResult::UCOL_GREATER;
   std::stable_sort(songPKs.begin(), songPKs.end(), [&](int i, int j) {
-    icu::UnicodeString ua =
-        icu::UnicodeString::fromUTF8(library.getSongByPK(i).at(f));
-    icu::UnicodeString ub =
-        icu::UnicodeString::fromUTF8(library.getSongByPK(j).at(f));
+    const MSong &songA = library.getSongByPK(i);
+    const MSong &songB = library.getSongByPK(j);
+
+    auto itA = songA.find(f);
+    auto itB = songB.find(f);
+
+    const std::string valueA = itA == songA.end() ? std::string{} : itA->second;
+    const std::string valueB = itB == songB.end() ? std::string{} : itB->second;
+
+    icu::UnicodeString ua = icu::UnicodeString::fromUTF8(valueA);
+    icu::UnicodeString ub = icu::UnicodeString::fromUTF8(valueB);
     return collator->compare(ua, ub) == result;
   });
 

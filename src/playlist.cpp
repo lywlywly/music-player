@@ -3,24 +3,47 @@
 #include <QSqlError>
 #include <QSqlQuery>
 
+namespace {
+QString songField(const MSong &song, const char *field) {
+  auto it = song.find(field);
+  if (it == song.end()) {
+    return {};
+  }
+  return QString::fromUtf8(it->second);
+}
+} // namespace
+
 Playlist::Playlist(SongStore &&st, PlaybackQueue &queue, int pid,
+                   GlobalColumnLayoutManager &columnLayoutManager,
                    QObject *parent)
-    : store{std::move(st)}, playbackQueue{queue}, playlistId(pid) {
+    : QAbstractTableModel(parent), playlistId(pid), store{std::move(st)},
+      playbackQueue{queue}, columnLayoutManager_{columnLayoutManager} {
+  connect(&columnLayoutManager_, &GlobalColumnLayoutManager::layoutChanged,
+          this, [this]() {
+            beginResetModel();
+            endResetModel();
+          });
   load(DatabaseManager::db());
 }
 
-int Playlist::rowCount(const QModelIndex &parent) const { return songCount(); }
+int Playlist::rowCount(const QModelIndex &) const { return songCount(); }
 
-int Playlist::columnCount(const QModelIndex &parent) const {
-  return getFieldStringList().size();
+int Playlist::columnCount(const QModelIndex &) const {
+  return columnLayoutManager_.visibleColumnIds().size();
 }
 
 QVariant Playlist::data(const QModelIndex &index, int role) const {
-  if (!index.isValid() || role != Qt::DisplayRole)
-    return QVariant();
+  if (!index.isValid() || role != Qt::DisplayRole) {
+    return {};
+  }
 
-  if (index.column() == 0) {
-    int pk = store.getPkByIndex(index.row());
+  const QString columnId = columnIdAt(index.column());
+  if (columnId.isEmpty()) {
+    return {};
+  }
+
+  if (columnId == "status") {
+    const int pk = store.getPkByIndex(index.row());
     const auto &[curPk, curPl] = playbackQueue.getCurrentPk();
 
     if ((pk == curPk) && (curPl == this)) {
@@ -30,7 +53,7 @@ QVariant Playlist::data(const QModelIndex &index, int role) const {
       case PlaybackQueue::PlaybackStatus::Paused:
         return QString{"\u23F8"};
       default:
-        return QVariant{};
+        return {};
       }
     }
 
@@ -39,34 +62,70 @@ QVariant Playlist::data(const QModelIndex &index, int role) const {
       return QVariant{order};
     }
 
-    return QVariant{};
+    return {};
   }
-  if (index.column() == 1) {
-    return QString::fromUtf8(getSongByIndex(index.row()).at("artist"));
+
+  const MSong &song = getSongByIndex(index.row());
+  if (columnId == "artist") {
+    return songField(song, "artist");
   }
-  if (index.column() == 2) {
-    return QString::fromUtf8(getSongByIndex(index.row()).at("title").c_str());
+  if (columnId == "title") {
+    return songField(song, "title");
   }
-  if (index.column() == 3) {
-    return QString::fromUtf8(getSongByIndex(index.row()).at("path").c_str());
+  if (columnId == "path") {
+    return songField(song, "path");
   }
-  return QVariant{};
+
+  const std::string dynamicField = columnId.toStdString();
+  return songField(song, dynamicField.c_str());
 }
 
 QVariant Playlist::headerData(int section, Qt::Orientation orientation,
                               int role) const {
-  if (role != Qt::DisplayRole)
-    return QVariant();
-  if (orientation == Qt::Orientation::Horizontal) {
-    return fieldStringList[section];
-  } else {
-    return QString::number(section + 1);
+  if (role != Qt::DisplayRole) {
+    return {};
   }
+
+  if (orientation == Qt::Orientation::Horizontal) {
+    const QString columnId = columnIdAt(section);
+    const ColumnDefinition *definition = definitionForColumnId(columnId);
+    return definition ? QVariant{definition->title} : QVariant{columnId};
+  }
+
+  return QString::number(section + 1);
 }
 
-void Playlist::sortByField(std::string s, int i) {
-  store.sortByField(s, i);
+void Playlist::sortByColumnId(const QString &columnId, int order) {
+  const ColumnDefinition *definition = definitionForColumnId(columnId);
+  if (!definition || !definition->sortable ||
+      definition->source != ColumnSource::SongAttribute) {
+    return;
+  }
+
+  store.sortByField(columnId.toStdString(), order);
+  if (rowCount() == 0 || columnCount() == 0) {
+    return;
+  }
+
   emit dataChanged(index(0, 0), index(rowCount() - 1, columnCount() - 1));
+}
+
+void Playlist::sortByField(std::string field, int order) {
+  sortByColumnId(QString::fromStdString(field), order);
+}
+
+QString Playlist::columnIdAt(int section) const {
+  if (section < 0) {
+    return {};
+  }
+
+  const QList<QString> ids = columnLayoutManager_.visibleColumnIds();
+
+  if (section >= ids.size()) {
+    return {};
+  }
+
+  return ids[section];
 }
 
 int Playlist::songCount() const { return store.songCount(); }
@@ -133,14 +192,6 @@ const int Playlist::getIndexByPk(int pk) const {
 
 const int Playlist::getPkByIndex(int i) const { return store.getPkByIndex(i); }
 
-const QList<QString> &Playlist::getFieldStringList() const {
-  return fieldStringList;
-}
-
-void Playlist::toogleSortOrder(int column, int order) {
-  sortByField(fieldStringList[column].toStdString(), order);
-}
-
 void Playlist::registerStatusUpdateCallback() {
   std::function<void(int, Playlist *)> statusUpdate = [this](int pk,
                                                              Playlist *pl) {
@@ -148,8 +199,14 @@ void Playlist::registerStatusUpdateCallback() {
       return;
     }
 
-    int row = this->getIndexByPk(pk);
-    emit dataChanged(index(row, 0), index(row, 0));
+    const int row = this->getIndexByPk(pk);
+    const int statusColumn =
+        columnLayoutManager_.visibleColumnIds().indexOf("status");
+    if (statusColumn < 0) {
+      return;
+    }
+
+    emit dataChanged(index(row, statusColumn), index(row, statusColumn));
   };
   playbackQueue.setStatusUpdateCallback(std::move(statusUpdate));
 }
@@ -186,4 +243,9 @@ bool Playlist::load(QSqlDatabase &db) {
   lastPlayed = q.value(2).toInt();
 
   return true;
+}
+
+const ColumnDefinition *
+Playlist::definitionForColumnId(const QString &columnId) const {
+  return columnLayoutManager_.registry().findColumn(columnId);
 }

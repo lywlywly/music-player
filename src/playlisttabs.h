@@ -1,6 +1,8 @@
 #ifndef PLAYLISTTABS_H
 #define PLAYLISTTABS_H
 
+#include "columnregistry.h"
+#include "globalcolumnlayoutmanager.h"
 #include "playbackmanager.h"
 #include <QMenu>
 #include <QTableView>
@@ -29,7 +31,7 @@ public:
   QTabWidget *tabWidget() const;
   Playlist *currentPlaylist() const;
   void setUpTableView(Playlist *, QTableView *);
-  void navigateIndex(MSong song, int row, Playlist *pl);
+  void navigateIndex(MSong, int row, Playlist *pl);
 
 signals:
   void doubleClicked(const QModelIndex &index);
@@ -38,6 +40,9 @@ private:
   void onTabChanged(int index);
   void setUpCurrentPlaylist();
   void setUpPlaybackManager();
+  void applyLayoutToTableView(QTableView *tbv);
+  void persistVisibleOrder(QTableView *tbv);
+  void showHeaderColumnsMenu(QTableView *tbv, const QPoint &pos);
   bool eventFilter(QObject *obj, QEvent *event) override;
   Ui::PlaylistTabs *ui;
   QTableView *currentTableView;
@@ -49,6 +54,9 @@ private:
   PlaybackManager *control;
   Playlist *currentPlaylist_;
   QActionGroup *playbackOrderMenuActionGroup;
+  ColumnRegistry columnRegistry_;
+  GlobalColumnLayoutManager columnLayoutManager_;
+  bool applyingColumnLayout_ = false;
   // TODO: separate playlist manager class
   std::map<std::string, Playlist> playlistMap;
 };

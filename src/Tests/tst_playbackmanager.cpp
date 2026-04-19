@@ -1,6 +1,8 @@
 #include <QObject>
 #include <QTest>
 
+#include "../columnregistry.h"
+#include "../globalcolumnlayoutmanager.h"
 #include "../playbackmanager.h"
 #include "../playbackqueue.h"
 #include "../playlist.h"
@@ -12,7 +14,9 @@ public:
   PlaybackQueue queue;
   PlaybackManager manager{queue};
   SongLibrary lb;
-  Playlist pl{SongStore{lb}, queue};
+  ColumnRegistry columnRegistry;
+  GlobalColumnLayoutManager columnLayoutManager{columnRegistry};
+  Playlist pl{SongStore{lb}, queue, 1, columnLayoutManager};
 
 signals:
 private slots:
