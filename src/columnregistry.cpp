@@ -7,6 +7,11 @@ bool isBuiltInSongAttribute(const ColumnDefinition &definition) {
   return definition.source == ColumnSource::SongAttribute &&
          !definition.id.startsWith("attr:");
 }
+
+bool isDynamicSongAttribute(const ColumnDefinition &definition) {
+  return definition.source == ColumnSource::SongAttribute &&
+         definition.id.startsWith("attr:");
+}
 } // namespace
 
 ColumnRegistry::ColumnRegistry() {
@@ -51,6 +56,17 @@ QList<ColumnDefinition> ColumnRegistry::definitions() const {
   return definitions_;
 }
 
+QList<ColumnDefinition> ColumnRegistry::customTagDefinitions() const {
+  QList<ColumnDefinition> result;
+  result.reserve(definitions_.size());
+  for (const ColumnDefinition &definition : definitions_) {
+    if (isDynamicSongAttribute(definition)) {
+      result.push_back(definition);
+    }
+  }
+  return result;
+}
+
 QList<ColumnDefinition> ColumnRegistry::songAttributeDefinitions() const {
   QList<ColumnDefinition> result;
   result.reserve(definitions_.size());
@@ -80,10 +96,13 @@ QList<QString> ColumnRegistry::defaultOrderedIds() const {
 }
 
 bool ColumnRegistry::loadDynamicColumns(QSqlDatabase &db) {
+  resetDynamicColumns();
+
   QSqlQuery query(db);
   if (!query.exec(R"(
         SELECT key, display_name, value_type, sortable, visible_default, width_default
         FROM attribute_definitions
+        WHERE source IN ('user', 'custom_tag')
     )")) {
     qWarning() << "ColumnRegistry loadDynamicColumns error:"
                << query.lastError().text();
@@ -109,9 +128,121 @@ bool ColumnRegistry::loadDynamicColumns(QSqlDatabase &db) {
   return true;
 }
 
+bool ColumnRegistry::upsertCustomTagDefinition(
+    QSqlDatabase &db, const ColumnDefinition &definition) const {
+  if (definition.source != ColumnSource::SongAttribute ||
+      !definition.id.startsWith("attr:")) {
+    qWarning() << "upsertCustomTagDefinition: invalid definition id/source"
+               << definition.id;
+    return false;
+  }
+
+  const QString key = definition.id.mid(QStringLiteral("attr:").size());
+  if (key.isEmpty()) {
+    qWarning() << "upsertCustomTagDefinition: empty key";
+    return false;
+  }
+  if (isBuiltInSongAttributeKey(key)) {
+    qWarning() << "upsertCustomTagDefinition: key collides with built-in field"
+               << key;
+    return false;
+  }
+
+  QSqlQuery query(db);
+  query.prepare(R"(
+      INSERT INTO attribute_definitions(
+          key, display_name, value_type, source, sortable, filterable,
+          visible_default, width_default, enum_values_json
+      ) VALUES(
+          :key, :display_name, :value_type, :source, :sortable, :filterable,
+          :visible_default, :width_default, NULL
+      )
+      ON CONFLICT(key) DO UPDATE SET
+          display_name=excluded.display_name,
+          value_type=excluded.value_type,
+          source=excluded.source,
+          sortable=excluded.sortable,
+          filterable=excluded.filterable,
+          visible_default=excluded.visible_default,
+          width_default=excluded.width_default
+  )");
+  query.bindValue(":key", key);
+  query.bindValue(":display_name", definition.title);
+  query.bindValue(":value_type",
+                  columnValueTypeToStorageString(definition.valueType));
+  query.bindValue(":source", "custom_tag");
+  query.bindValue(":sortable", definition.sortable ? 1 : 0);
+  query.bindValue(":filterable", 1);
+  query.bindValue(":visible_default", definition.visibleByDefault ? 1 : 0);
+  query.bindValue(":width_default",
+                  definition.defaultWidth > 0 ? definition.defaultWidth : 140);
+  if (!query.exec()) {
+    qWarning() << "upsertCustomTagDefinition failed:" << query.lastError();
+    return false;
+  }
+
+  return true;
+}
+
+bool ColumnRegistry::removeCustomTagDefinition(QSqlDatabase &db,
+                                               const QString &columnId) const {
+  if (!columnId.startsWith("attr:")) {
+    qWarning() << "removeCustomTagDefinition: invalid column id" << columnId;
+    return false;
+  }
+
+  const QString key = columnId.mid(QStringLiteral("attr:").size());
+  if (key.isEmpty()) {
+    qWarning() << "removeCustomTagDefinition: empty key";
+    return false;
+  }
+
+  QSqlQuery deleteDefinition(db);
+  deleteDefinition.prepare(R"(
+      DELETE FROM attribute_definitions
+      WHERE key=:key AND source IN ('user', 'custom_tag')
+  )");
+  deleteDefinition.bindValue(":key", key);
+  if (!deleteDefinition.exec()) {
+    qWarning() << "removeCustomTagDefinition definition delete failed:"
+               << deleteDefinition.lastError();
+    return false;
+  }
+
+  QSqlQuery deleteValues(db);
+  deleteValues.prepare(R"(
+      DELETE FROM song_attributes
+      WHERE key=:key
+  )");
+  deleteValues.bindValue(":key", key);
+  if (!deleteValues.exec()) {
+    qWarning() << "removeCustomTagDefinition value delete failed:"
+               << deleteValues.lastError();
+    return false;
+  }
+
+  return true;
+}
+
 void ColumnRegistry::add(const ColumnDefinition &definition) {
   idToIndex_.insert(definition.id, definitions_.size());
   definitions_.push_back(definition);
+}
+
+void ColumnRegistry::resetDynamicColumns() {
+  QList<ColumnDefinition> builtIns;
+  builtIns.reserve(definitions_.size());
+  for (const ColumnDefinition &definition : definitions_) {
+    if (!isDynamicSongAttribute(definition)) {
+      builtIns.push_back(definition);
+    }
+  }
+
+  definitions_ = std::move(builtIns);
+  idToIndex_.clear();
+  for (int i = 0; i < definitions_.size(); ++i) {
+    idToIndex_.insert(definitions_[i].id, i);
+  }
 }
 
 void ColumnRegistry::addOrUpdateDynamicColumn(

@@ -12,6 +12,7 @@ private slots:
   void builtInDefinitions_areAvailable();
   void builtInSongAttributeKey_onlyTrueForBuiltIns();
   void loadDynamicColumns_loadsAndNormalizes();
+  void loadDynamicColumns_replacesRemovedDynamicColumns();
 };
 
 void TestColumnRegistry::builtInDefinitions_areAvailable() {
@@ -74,6 +75,12 @@ void TestColumnRegistry::loadDynamicColumns_loadsAndNormalizes() {
         "(key, display_name, value_type, source, sortable, visible_default, "
         "width_default) "
         "VALUES ('rate', 'Rate', 'number', 'user', 1, 1, 0)"));
+    QVERIFY(q.exec(
+        "INSERT INTO attribute_definitions"
+        "(key, display_name, value_type, source, sortable, visible_default, "
+        "width_default) "
+        "VALUES ('computed_score', 'Computed Score', 'number', 'computed', 1, "
+        "1, 100)"));
 
     QVERIFY(registry.loadDynamicColumns(db));
 
@@ -91,6 +98,44 @@ void TestColumnRegistry::loadDynamicColumns_loadsAndNormalizes() {
     QCOMPARE(rate->valueType, ColumnValueType::Number);
     QVERIFY(rate->visibleByDefault);
     QCOMPARE(rate->defaultWidth, 140);
+
+    QVERIFY(registry.findColumn("attr:computed_score") == nullptr);
+  }
+
+  QSqlDatabase::removeDatabase(connectionName);
+}
+
+void TestColumnRegistry::loadDynamicColumns_replacesRemovedDynamicColumns() {
+  ColumnRegistry registry;
+  const QString connectionName = "test_columnregistry_reload_connection";
+  {
+    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
+    db.setDatabaseName(":memory:");
+    QVERIFY2(db.open(), "failed to open in-memory sqlite database");
+
+    QSqlQuery q(db);
+    QVERIFY(q.exec("CREATE TABLE attribute_definitions ("
+                   "key TEXT PRIMARY KEY,"
+                   "display_name TEXT NOT NULL,"
+                   "value_type TEXT NOT NULL,"
+                   "source TEXT NOT NULL,"
+                   "sortable INTEGER NOT NULL DEFAULT 1,"
+                   "filterable INTEGER NOT NULL DEFAULT 1,"
+                   "visible_default INTEGER NOT NULL DEFAULT 0,"
+                   "width_default INTEGER NOT NULL DEFAULT 140,"
+                   "enum_values_json TEXT"
+                   ")"));
+    QVERIFY(q.exec(
+        "INSERT INTO attribute_definitions"
+        "(key, display_name, value_type, source) "
+        "VALUES ('rating', 'Rating', 'number', 'custom_tag')"));
+
+    QVERIFY(registry.loadDynamicColumns(db));
+    QVERIFY(registry.findColumn("attr:rating") != nullptr);
+
+    QVERIFY(q.exec("DELETE FROM attribute_definitions WHERE key='rating'"));
+    QVERIFY(registry.loadDynamicColumns(db));
+    QVERIFY(registry.findColumn("attr:rating") == nullptr);
   }
 
   QSqlDatabase::removeDatabase(connectionName);

@@ -19,16 +19,22 @@ public:
   bool hasColumn(const QString &id) const;
   bool isBuiltInSongAttributeKey(const QString &id) const;
   QList<ColumnDefinition> definitions() const;
+  QList<ColumnDefinition> customTagDefinitions() const;
   // Contract: for non-dynamic SongAttribute columns, id must match DB table
   // `songs` column name exactly.
   QList<ColumnDefinition> songAttributeDefinitions() const;
   QList<QString> songAttributeColumnIds() const;
   QList<QString> defaultOrderedIds() const;
   bool loadDynamicColumns(QSqlDatabase &db);
+  bool upsertCustomTagDefinition(QSqlDatabase &db,
+                                 const ColumnDefinition &definition) const;
+  bool removeCustomTagDefinition(QSqlDatabase &db,
+                                 const QString &columnId) const;
   void addOrUpdateDynamicColumn(const ColumnDefinition &definition);
 
 private:
   void add(const ColumnDefinition &definition);
+  void resetDynamicColumns();
 
   QList<ColumnDefinition> definitions_;
   QHash<QString, int> idToIndex_;

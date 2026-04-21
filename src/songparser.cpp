@@ -1,5 +1,6 @@
 #include "songparser.h"
 #include "columnregistry.h"
+#include "utils.h"
 #include <QDebug>
 #include <cctype>
 #include <string>
@@ -15,30 +16,6 @@ extern "C" {
 }
 
 namespace {
-std::string canonicalizeDynamicKey(std::string key) {
-  std::string out;
-  out.reserve(key.size());
-  bool prevUnderscore = false;
-
-  for (unsigned char ch : key) {
-    if (std::isalnum(ch)) {
-      out.push_back(static_cast<char>(std::tolower(ch)));
-      prevUnderscore = false;
-      continue;
-    }
-    if (!prevUnderscore) {
-      out.push_back('_');
-      prevUnderscore = true;
-    }
-  }
-
-  while (!out.empty() && out.front() == '_')
-    out.erase(out.begin());
-  while (!out.empty() && out.back() == '_')
-    out.pop_back();
-  return out;
-}
-
 bool isBuiltInTagKey(const std::string &key, const ColumnRegistry &registry) {
   return registry.isBuiltInSongAttributeKey(QString::fromStdString(key));
 }
@@ -90,7 +67,7 @@ MSong SongParser::parse(const std::string &filepath,
       }
 
       const std::string rawKey = it->first.to8Bit(true);
-      const std::string key = canonicalizeDynamicKey(rawKey);
+      const std::string key = util::canonicalizeTagKey(rawKey);
       if (key.empty()) {
         continue;
       }

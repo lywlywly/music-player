@@ -24,6 +24,7 @@ set(TEST_NAMES
     dummysystemmediainterface
     mainwindow
     playbackqueue
+    settingsdialog_ui
     songstore
     playlist
     playlisttabs
@@ -36,6 +37,10 @@ endif()
 SETUP_TESTS(${TEST_NAMES})
 
 set_tests_properties(mainwindow PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
+
+set_tests_properties(settingsdialog_ui PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
 )
 

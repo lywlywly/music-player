@@ -43,6 +43,7 @@ private slots:
 
   void addToLibrary_sameFilepathUpdatesExistingSong();
   void loadFromDatabase_loadsBuiltInAndDynamicAttributes();
+  void loadFromDatabase_removesUnknownDynamicAttributes();
   void refreshSongFromFile_usesInjectedParserAndSyncsDb();
   void refreshSongsFromFilepaths_dedupesAndReportsProgress();
   void appendAndRemovePlaylistItems();
@@ -140,6 +141,29 @@ void TestSongLibrary::loadFromDatabase_loadsBuiltInAndDynamicAttributes() {
   QCOMPARE(song.at("attr:date_added").text,
            std::string("2022-11-13 06:45:23+00:00"));
   QCOMPARE(song.at("attr:date_added").type, ColumnValueType::DateTime);
+}
+
+void TestSongLibrary::loadFromDatabase_removesUnknownDynamicAttributes() {
+  QSqlDatabase &db = databaseManager_->db();
+  QSqlQuery q(db);
+  QVERIFY(
+      q.exec("INSERT INTO songs(song_id, title, artist, album, discnumber, "
+             "tracknumber, date, genre, filepath) "
+             "VALUES (8, 'Song 8', 'Artist 8', 'Album 8', 1, 4, '2022-11-14', "
+             "'Rock', '/tmp/song-8.mp3')"));
+  QVERIFY(q.exec(
+      "INSERT INTO song_attributes(song_id, key, value_text, value_type) "
+      "VALUES (8, 'orphan_tag', 'stale', 'text')"));
+
+  library_->loadFromDatabase();
+
+  const MSong &song = library_->getSongByPK(8);
+  QVERIFY(!song.contains("attr:orphan_tag"));
+
+  QVERIFY(
+      q.exec("SELECT COUNT(*) FROM song_attributes WHERE key='orphan_tag'"));
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toInt(), 0);
 }
 
 void TestSongLibrary::refreshSongFromFile_usesInjectedParserAndSyncsDb() {

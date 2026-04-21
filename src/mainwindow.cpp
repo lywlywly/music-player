@@ -109,7 +109,7 @@ void MainWindow::setUpPlaylist() {
 
 void MainWindow::initSettings() {
   connect(ui->actionSettings, &QAction::triggered, this, [this]() {
-    SettingsDialog dialog(this);
+    SettingsDialog dialog(columnRegistry_, databaseManager_, this);
     connect(&dialog, &SettingsDialog::backendChanged, this,
             [this](PlaybackBackendManager::Backend backend) {
               if (backendManager->currentBackend() != backend) {
@@ -118,6 +118,12 @@ void MainWindow::initSettings() {
                 setUpPlaybackBackend();
               }
             });
+    connect(&dialog, &SettingsDialog::customFieldsChanged, this, [this]() {
+      if (!columnRegistry_.loadDynamicColumns(databaseManager_.db())) {
+        qFatal("initSettings: failed to reload dynamic columns");
+      }
+      columnLayoutManager_.refreshFromRegistry();
+    });
     dialog.exec();
   });
 }

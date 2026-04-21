@@ -214,9 +214,10 @@ void SongLibrary::loadDynamicAttributes() {
            attrQuery.lastError().text().toUtf8().data());
   }
 
+  std::unordered_set<QString> unknownKeys;
   while (attrQuery.next()) {
     const int songId = attrQuery.value(0).toInt();
-    const std::string key = attrQuery.value(1).toString().toStdString();
+    const QString key = attrQuery.value(1).toString();
     const std::string valueText = attrQuery.value(2).toString().toStdString();
     if (songId < 0) {
       qFatal("loadDynamicAttributes: negative song_id=%d", songId);
@@ -224,14 +225,31 @@ void SongLibrary::loadDynamicAttributes() {
     if (songId >= static_cast<int>(songs.size())) {
       qFatal("loadDynamicAttributes: song_id out of range: %d", songId);
     }
-    const std::string columnId = std::string("attr:") + key;
-    const ColumnDefinition *definition =
-        columnRegistry_.findColumn(QString::fromStdString(columnId));
+    const QString columnId = QStringLiteral("attr:") + key;
+    const ColumnDefinition *definition = columnRegistry_.findColumn(columnId);
     if (!definition) {
-      qFatal("loadDynamicAttributes: unknown dynamic column id: %s",
-             columnId.c_str());
+      qWarning() << "loadDynamicAttributes: removing stale dynamic attribute"
+                 << columnId;
+      unknownKeys.insert(key);
+      continue;
     }
-    songs[songId][columnId] = FieldValue(valueText, definition->valueType);
+    songs[songId][columnId.toStdString()] =
+        FieldValue(valueText, definition->valueType);
+  }
+
+  if (!unknownKeys.empty()) {
+    QSqlQuery deleteUnknown(db);
+    deleteUnknown.prepare(R"(
+        DELETE FROM song_attributes
+        WHERE key=:key
+    )");
+    for (const QString &key : unknownKeys) {
+      deleteUnknown.bindValue(":key", key);
+      if (!deleteUnknown.exec()) {
+        qFatal("loadDynamicAttributes delete stale attributes failed: %s",
+               deleteUnknown.lastError().text().toUtf8().data());
+      }
+    }
   }
 }
 
@@ -243,9 +261,9 @@ bool SongLibrary::loadPlaylistState(int playlistId, int &lastPlayed,
   }
 
   QSqlDatabase &db = databaseManager_.db();
-  const QString playlistName =
-      (playlistId == 1) ? QStringLiteral("Default Playlist")
-                        : QString("Playlist %1").arg(playlistId);
+  const QString playlistName = (playlistId == 1)
+                                   ? QStringLiteral("Default Playlist")
+                                   : QString("Playlist %1").arg(playlistId);
 
   QSqlQuery ensurePlaylist(db);
   ensurePlaylist.prepare(
@@ -388,7 +406,8 @@ void SongLibrary::removePlaylistItemsInDb(int playlistId) {
       QStringLiteral("remove_playlist_items_%1")
           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
   std::thread([dbPath, deleteSql, connectionName]() {
-    QSqlDatabase workerDb = QSqlDatabase::addDatabase("QSQLITE", connectionName);
+    QSqlDatabase workerDb =
+        QSqlDatabase::addDatabase("QSQLITE", connectionName);
     workerDb.setDatabaseName(dbPath);
     if (!workerDb.open()) {
       qWarning() << "removePlaylistItemsInDb worker open failed:"

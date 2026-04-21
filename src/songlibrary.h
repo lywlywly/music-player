@@ -15,8 +15,8 @@
 using MSong = std::unordered_map<std::string, FieldValue>;
 class DatabaseManager;
 #ifdef MYPLAYER_TESTING
-using SongParseFn = std::function<MSong(const std::string &,
-                                        const ColumnRegistry &)>;
+using SongParseFn =
+    std::function<MSong(const std::string &, const ColumnRegistry &)>;
 #endif
 
 // SongLibrary is the canonical repository for song metadata in memory and in
@@ -77,6 +77,10 @@ public:
 
 private:
   void loadBuiltInSongs();
+  // Loads dynamic song attributes from DB table `song_attributes` into memory.
+  // Attributes whose `key` no longer has a matching definition in
+  // `attribute_definitions` are treated as stale: they are skipped in memory
+  // and deleted from DB instead of aborting the load.
   void loadDynamicAttributes();
   int ensureSongInDb(const MSong &song);
   // Syncs built-in song fields in memory and DB for a known song_id.
