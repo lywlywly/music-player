@@ -34,6 +34,7 @@ private:
   void positionChanged(qint64 progress);
   void durationChanged(qint64 duration);
   void statusChanged(QMediaPlayer::MediaStatus status);
+  void updatePlaybackTimeStatus();
   void updateImageSize();
   void setUpImageAndLyrics(MSong song);
   void open();
@@ -74,5 +75,7 @@ private:
   QPixmap pixmap;
   QActionGroup *playbackOrderMenuActionGroup;
   ISystemMediaInterface *sysMedia;
+  qint64 currentDurationMs_ = 0;
+  qint64 currentPositionMs_ = 0;
 };
 #endif // MAINWINDOW_H

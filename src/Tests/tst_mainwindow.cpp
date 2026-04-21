@@ -8,12 +8,14 @@
 #include <QSettings>
 #include <QSignalSpy>
 #include <QSlider>
+#include <QStatusBar>
 #include <QTableView>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QUrl>
 #include <QUuid>
 
+#include "../dummyaudioplayer.h"
 #include "../dummysystemmediainterface.h"
 #include "../mainwindow.h"
 #include "../playbackbackendmanager.h"
@@ -290,19 +292,26 @@ void TestMainWindow::backendSignals_updateUiAndSystemMedia() {
   QVERIFY(backend != nullptr);
   AudioPlayer *player = backend->player();
   QVERIFY(player != nullptr);
+  DummyAudioPlayer *dummyPlayer = qobject_cast<DummyAudioPlayer *>(player);
+  QVERIFY(dummyPlayer != nullptr);
   QSlider *slider = window_->findChild<QSlider *>("horizontalSlider");
   QVERIFY(slider != nullptr);
+  QStatusBar *statusBar = window_->findChild<QStatusBar *>("statusbar");
+  QVERIFY(statusBar != nullptr);
 
   const QString wav = workDir_->filePath("signal-song.wav");
   QVERIFY(writeSilentWav(wav));
 
+  dummyPlayer->setDurationForTest(125000);
   player->setSource(QUrl::fromLocalFile(wav));
-  QTRY_COMPARE(slider->maximum(), 1000);
-  QTRY_COMPARE(media->stateForTest().durationMs, 1000LL);
+  QTRY_COMPARE(slider->maximum(), 125000);
+  QTRY_COMPARE(media->stateForTest().durationMs, 125000LL);
+  QTRY_COMPARE(statusBar->currentMessage(), QString());
 
-  player->setPosition(345);
-  QTRY_COMPARE(slider->value(), 345);
-  QTRY_COMPARE(media->stateForTest().positionMs, 345LL);
+  player->setPosition(65000);
+  QTRY_COMPARE(slider->value(), 65000);
+  QTRY_COMPARE(media->stateForTest().positionMs, 65000LL);
+  QTRY_COMPARE(statusBar->currentMessage(), QString());
 }
 
 void TestMainWindow::systemMediaToggleRequest_togglesPlayback() {
@@ -313,11 +322,20 @@ void TestMainWindow::systemMediaToggleRequest_togglesPlayback() {
   DummySystemMediaInterface *media =
       window_->findChild<DummySystemMediaInterface *>();
   QVERIFY(media != nullptr);
+  QStatusBar *statusBar = window_->findChild<QStatusBar *>("statusbar");
+  QVERIFY(statusBar != nullptr);
 
   const QString wav = workDir_->filePath("toggle-song.wav");
   QVERIFY(writeSilentWav(wav));
   playlist->addSong(makeSong("Song", "Artist", wav));
   playlist->setLastPlayed(playlist->getPkByIndex(0));
+  PlaybackBackendManager *backend =
+      window_->findChild<PlaybackBackendManager *>();
+  QVERIFY(backend != nullptr);
+  DummyAudioPlayer *dummyPlayer =
+      qobject_cast<DummyAudioPlayer *>(backend->player());
+  QVERIFY(dummyPlayer != nullptr);
+  dummyPlayer->setDurationForTest(125000);
 
   const int statusCol = statusColumn(playlist);
   QVERIFY(statusCol >= 0);
@@ -325,15 +343,28 @@ void TestMainWindow::systemMediaToggleRequest_togglesPlayback() {
   media->requestPlayForTest();
   QTRY_COMPARE(statusAt(playlist, 0, statusCol), QString::fromUtf8("\u25B6"));
 
+  backend->player()->setPosition(65000);
+  QTRY_COMPARE(statusBar->currentMessage(), QString("01:05 / 02:05"));
+
   media->requestToggleForTest();
   QTRY_COMPARE(statusAt(playlist, 0, statusCol), QString::fromUtf8("\u23F8"));
   QTRY_COMPARE(media->stateForTest().playbackState,
                ISystemMediaInterface::PlaybackState::Paused);
+  QTRY_COMPARE(statusBar->currentMessage(), QString("01:05 / 02:05"));
 
   media->requestToggleForTest();
   QTRY_COMPARE(statusAt(playlist, 0, statusCol), QString::fromUtf8("\u25B6"));
   QTRY_COMPARE(media->stateForTest().playbackState,
                ISystemMediaInterface::PlaybackState::Playing);
+  QTRY_COMPARE(statusBar->currentMessage(), QString("01:05 / 02:05"));
+
+  media->requestPauseForTest();
+  QTRY_COMPARE(statusBar->currentMessage(), QString("01:05 / 02:05"));
+
+  QAction *stopAction = window_->findChild<QAction *>("actionStop");
+  QVERIFY(stopAction != nullptr);
+  stopAction->trigger();
+  QTRY_COMPARE(statusBar->currentMessage(), QString());
 }
 
 void TestMainWindow::sliderReleased_invokesSeekFlow() {

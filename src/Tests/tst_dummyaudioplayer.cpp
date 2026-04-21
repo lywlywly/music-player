@@ -24,6 +24,7 @@ void TestDummyAudioPlayer::initTestCase() {
 
 void TestDummyAudioPlayer::setSource_nonEmpty_emitsDurationPositionAndLoaded() {
   DummyAudioPlayer player;
+  player.setDurationForTest(125000);
   QSignalSpy durationSpy(&player, &AudioPlayer::durationChanged);
   QSignalSpy positionSpy(&player, &AudioPlayer::positionChanged);
   QSignalSpy statusSpy(&player, &AudioPlayer::mediaStatusChanged);
@@ -31,7 +32,7 @@ void TestDummyAudioPlayer::setSource_nonEmpty_emitsDurationPositionAndLoaded() {
   player.setSource(QUrl::fromLocalFile("/tmp/dummy-a.wav"));
 
   QCOMPARE(durationSpy.count(), 1);
-  QCOMPARE(durationSpy.first().at(0).toLongLong(), 1000LL);
+  QCOMPARE(durationSpy.first().at(0).toLongLong(), 125000LL);
   QCOMPARE(positionSpy.count(), 1);
   QCOMPARE(positionSpy.first().at(0).toLongLong(), 0LL);
   QCOMPARE(statusSpy.count(), 1);

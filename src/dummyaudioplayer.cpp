@@ -34,3 +34,7 @@ void DummyAudioPlayer::setPosition(qint64 position) {
   positionMs_ = position;
   emit positionChanged(positionMs_);
 }
+
+void DummyAudioPlayer::setDurationForTest(qint64 durationMs) {
+  durationMs_ = durationMs;
+}

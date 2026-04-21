@@ -22,7 +22,28 @@
 #include <QProgressDialog>
 #include <QSettings>
 #include <QSqlDatabase>
+#include <QStatusBar>
 #include <QStandardPaths>
+
+namespace {
+QString formatPlaybackTime(qint64 milliseconds) {
+  const qint64 totalSeconds = std::max<qint64>(0, milliseconds / 1000);
+  const qint64 hours = totalSeconds / 3600;
+  const qint64 minutes = (totalSeconds % 3600) / 60;
+  const qint64 seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return QStringLiteral("%1:%2:%3")
+        .arg(hours)
+        .arg(minutes, 2, 10, QLatin1Char('0'))
+        .arg(seconds, 2, 10, QLatin1Char('0'));
+  }
+
+  return QStringLiteral("%1:%2")
+      .arg(minutes, 2, 10, QLatin1Char('0'))
+      .arg(seconds, 2, 10, QLatin1Char('0'));
+}
+} // namespace
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), ui(new Ui::MainWindow), control{playbackQueue_},
@@ -30,6 +51,7 @@ MainWindow::MainWindow(QWidget *parent)
       databaseManager_(columnRegistry_),
       songLibrary(columnRegistry_, databaseManager_), lyricsManager{this} {
   ui->setupUi(this);
+  updatePlaybackTimeStatus();
   setUpMenuBar();
   setUpPlaylist();
   initSettings();
@@ -195,6 +217,7 @@ void MainWindow::playSong(const MSong &song) {
       QString::fromStdString(activeSong.at("title").text),
       QString::fromStdString(activeSong.at("artist").text));
   control.play();
+  updatePlaybackTimeStatus();
 }
 
 void MainWindow::next() {
@@ -224,6 +247,7 @@ void MainWindow::play() {
   } else {
     backendManager->player()->play();
     control.play();
+    updatePlaybackTimeStatus();
     sysMedia->setPlaybackState(ISystemMediaInterface::PlaybackState::Playing);
   }
 }
@@ -233,6 +257,7 @@ void MainWindow::pause() {
     return;
   backendManager->player()->pause();
   control.pause();
+  updatePlaybackTimeStatus();
   sysMedia->setPlaybackState(ISystemMediaInterface::PlaybackState::Paused);
 }
 
@@ -246,6 +271,7 @@ void MainWindow::toggle() {
 void MainWindow::stop() {
   backendManager->player()->stop();
   control.stop();
+  updatePlaybackTimeStatus();
   sysMedia->setPlaybackState(ISystemMediaInterface::PlaybackState::Stopped);
 }
 
@@ -295,14 +321,28 @@ void MainWindow::addEntry() {
 }
 
 void MainWindow::durationChanged(qint64 newDuration) {
+  currentDurationMs_ = newDuration;
   ui->horizontalSlider->setMaximum(newDuration);
+  updatePlaybackTimeStatus();
   sysMedia->setDuration(newDuration);
 }
 
 void MainWindow::positionChanged(qint64 progress) {
+  currentPositionMs_ = progress;
   if (!ui->horizontalSlider->isSliderDown())
     ui->horizontalSlider->setValue(progress);
+  updatePlaybackTimeStatus();
   sysMedia->updateCurrentPosition(progress);
+}
+
+void MainWindow::updatePlaybackTimeStatus() {
+  if (control.getStatus() == PlaybackQueue::PlaybackStatus::None) {
+    statusBar()->clearMessage();
+    return;
+  }
+  statusBar()->showMessage(QStringLiteral("%1 / %2")
+                               .arg(formatPlaybackTime(currentPositionMs_),
+                                    formatPlaybackTime(currentDurationMs_)));
 }
 
 void MainWindow::seek(int mseconds) {
