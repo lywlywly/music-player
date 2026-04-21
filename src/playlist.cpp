@@ -1,7 +1,4 @@
 #include "playlist.h"
-#include "databasemanager.h"
-#include <QSqlError>
-#include <QSqlQuery>
 
 namespace {
 QString songField(const MSong &song, const char *field) {
@@ -9,21 +6,21 @@ QString songField(const MSong &song, const char *field) {
   if (it == song.end()) {
     return {};
   }
-  return QString::fromUtf8(it->second);
+  return QString::fromStdString(it->second.text);
 }
 } // namespace
 
-Playlist::Playlist(SongStore &&st, PlaybackQueue &queue, int pid,
+Playlist::Playlist(SongStore &&st, PlaybackQueue &queue, int initialLastPlayed,
                    GlobalColumnLayoutManager &columnLayoutManager,
                    QObject *parent)
-    : QAbstractTableModel(parent), playlistId(pid), store{std::move(st)},
-      playbackQueue{queue}, columnLayoutManager_{columnLayoutManager} {
+    : QAbstractTableModel(parent), store{std::move(st)}, playbackQueue{queue},
+      lastPlayed(initialLastPlayed),
+      columnLayoutManager_{columnLayoutManager} {
   connect(&columnLayoutManager_, &GlobalColumnLayoutManager::layoutChanged,
           this, [this]() {
             beginResetModel();
             endResetModel();
           });
-  load(DatabaseManager::db());
 }
 
 int Playlist::rowCount(const QModelIndex &) const { return songCount(); }
@@ -66,18 +63,8 @@ QVariant Playlist::data(const QModelIndex &index, int role) const {
   }
 
   const MSong &song = getSongByIndex(index.row());
-  if (columnId == "artist") {
-    return songField(song, "artist");
-  }
-  if (columnId == "title") {
-    return songField(song, "title");
-  }
-  if (columnId == "path") {
-    return songField(song, "path");
-  }
-
-  const std::string dynamicField = columnId.toStdString();
-  return songField(song, dynamicField.c_str());
+  const std::string field = columnId.toStdString();
+  return songField(song, field.c_str());
 }
 
 QVariant Playlist::headerData(int section, Qt::Orientation orientation,
@@ -133,7 +120,8 @@ int Playlist::songCount() const { return store.songCount(); }
 bool Playlist::empty() const { return songCount() == 0; }
 
 void Playlist::addSong(MSong &&s) {
-  beginInsertRows(QModelIndex(), songCount(), songCount());
+  const int row = songCount();
+  beginInsertRows(QModelIndex(), row, row);
   store.addSong(std::move(s));
   endInsertRows();
 
@@ -145,16 +133,13 @@ void Playlist::addSongs(std::vector<MSong> &&items) {
   if (items.empty())
     return;
 
-  beginInsertRows(QModelIndex(), rowCount(),
-                  rowCount() + static_cast<int>(items.size()) - 1);
-
   for (auto &s : items) {
+    const int row = songCount();
+    beginInsertRows(QModelIndex(), row, row);
     store.addSong(std::move(s));
+    endInsertRows();
   }
-
-  endInsertRows();
-  items = {}; // clear the vector as if we moved it because we are taking rvalue
-              // reference
+  items = {}; // clear consumed input
 
   if (sizeChangeCallback)
     sizeChangeCallback(songCount());
@@ -227,22 +212,45 @@ void Playlist::setLastPlayed(int newLastPlayed) { lastPlayed = newLastPlayed; }
 
 int Playlist::getLastPlayed() const { return lastPlayed; }
 
-bool Playlist::load(QSqlDatabase &db) {
-  if (!store.loadAll(db))
-    return false;
+void Playlist::refreshMetadataFromFiles(
+    const std::function<void(int current, int total)> &progressCallback) {
+  const int totalRows = songCount();
+  std::vector<std::string> filepaths;
+  filepaths.reserve(totalRows);
 
-  QSqlQuery q(db);
+  for (int row = 0; row < totalRows; ++row) {
+    const MSong &song = getSongByIndex(row);
+    auto it = song.find("filepath");
+    if (it == song.end()) {
+      qFatal("refreshMetadataFromFiles: missing filepath at row=%d", row);
+    }
+    if (it->second.text.empty()) {
+      qFatal("refreshMetadataFromFiles: empty filepath at row=%d", row);
+    }
+    filepaths.push_back(it->second.text);
+  }
 
-  if (!q.exec(R"(
-        SELECT playlist_id, name, last_played
-        FROM playlists
-        WHERE playlist_id=1
-    )"))
-    qDebug() << q.lastError().text();
-  q.next();
-  lastPlayed = q.value(2).toInt();
+  beginResetModel();
+  store.refreshSongsFromFilepaths(filepaths, progressCallback);
+  endResetModel();
+}
 
-  return true;
+void Playlist::emitSongDataChangedByFilepath(const std::string &filepath) {
+  if (filepath.empty()) {
+    qFatal("emitSongDataChangedByFilepath: filepath is empty");
+  }
+  if (rowCount() == 0 || columnCount() == 0) {
+    return;
+  }
+
+  for (int row = 0; row < rowCount(); ++row) {
+    const MSong &song = getSongByIndex(row);
+    auto it = song.find("filepath");
+    if (it == song.end() || it->second.text != filepath) {
+      continue;
+    }
+    emit dataChanged(index(row, 0), index(row, columnCount() - 1));
+  }
 }
 
 const ColumnDefinition *

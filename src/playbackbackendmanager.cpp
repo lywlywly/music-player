@@ -1,7 +1,9 @@
 #include "playbackbackendmanager.h"
+#ifdef MYPLAYER_TESTING
+#include "dummyaudioplayer.h"
+#endif
 #include "gstaudioplayer.h"
 #include "qtaudioplayer.h"
-#include <QCoreApplication>
 #include <QDebug>
 
 PlaybackBackendManager::PlaybackBackendManager(Backend backend, QObject *parent)
@@ -38,10 +40,17 @@ void PlaybackBackendManager::setBackend(Backend backend) {
 #endif
 
   createBackend(backend);
-  backend_ = backend;
 }
 
 void PlaybackBackendManager::createBackend(Backend backend) {
+#ifdef MYPLAYER_TESTING
+  if (qEnvironmentVariableIntValue("MYPLAYER_USE_DUMMY_AUDIO_PLAYER") != 0) {
+    player_ = new DummyAudioPlayer(this);
+    backend_ = backend;
+    return;
+  }
+#endif
+
 #if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
   if (backend == Backend::GStreamer) {
     startGlibLoop();

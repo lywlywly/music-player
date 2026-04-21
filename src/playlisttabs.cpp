@@ -1,34 +1,42 @@
 #include "playlisttabs.h"
 #include "ui_playlisttabs.h"
+#include <QApplication>
 #include <QActionGroup>
 #include <QHeaderView>
 #include <QKeyEvent>
+#include <QProgressDialog>
 #include <QSignalBlocker>
+#include <QtGlobal>
 
 PlaylistTabs::PlaylistTabs(QWidget *parent)
-    : QWidget(parent), ui(new Ui::PlaylistTabs),
-      columnLayoutManager_(columnRegistry_, this) {
+    : QWidget(parent), ui(new Ui::PlaylistTabs) {
   ui->setupUi(this);
 }
 
 PlaylistTabs::~PlaylistTabs() { delete ui; }
 
 void PlaylistTabs::init(SongLibrary *s, PlaybackQueue *p, PlaybackManager *c,
-                        QActionGroup *a) {
+                        QActionGroup *a, ColumnRegistry *registry,
+                        GlobalColumnLayoutManager *layoutManager) {
   songLibrary = s;
   playbackQueue_ = p;
   control = c;
   playbackOrderMenuActionGroup = a;
+  Q_ASSERT(registry != nullptr);
+  Q_ASSERT(layoutManager != nullptr);
+  columnRegistry_ = registry;
+  columnLayoutManager_ = layoutManager;
   setUpPlaylist();
   setUpPlaybackManager();
   setUpCurrentPlaylist();
-  setUpTableView(currentPlaylist_, currentTableView);
 }
 
 void PlaylistTabs::setUpPlaylist() {
   // context menu
   playNextAction_ = playlistContextMenu.addAction("Play Next");
   playEndAction_ = playlistContextMenu.addAction("Add to Playback Queue");
+  playlistContextMenu.addSeparator();
+  clearPlaylistAction_ = playlistContextMenu.addAction("Clear Playlist");
   // tabs
   ui->tabWidget->tabBar()->setContextMenuPolicy(Qt::CustomContextMenu);
   connect(ui->tabWidget->tabBar(), &QTabBar::customContextMenuRequested, this,
@@ -36,15 +44,13 @@ void PlaylistTabs::setUpPlaylist() {
   connect(ui->tabWidget, &QTabWidget::currentChanged, this,
           &PlaylistTabs::onTabChanged);
   ui->tabWidget->setTabText(0, "Default");
-  // default playlist
-  playlistMap.emplace(
-      std::piecewise_construct, std::forward_as_tuple("Default"),
-      std::forward_as_tuple(SongStore{*songLibrary, 1}, *playbackQueue_, 1,
-                            columnLayoutManager_));
+
   QWidget *tabWidget = ui->tabWidget->widget(0);
   currentTableView = tabWidget->findChild<QTableView *>();
-  currentPlaylist_ = &playlistMap.at("Default");
-  currentPlaylist_->registerStatusUpdateCallback();
+  if (!currentTableView) {
+    qFatal("setUpPlaylist: missing default table view");
+  }
+  currentPlaylist_ = &createPlaylist("Default", 1, currentTableView);
 }
 
 void PlaylistTabs::navigateIndex(MSong, int row, Playlist *pl) {
@@ -60,6 +66,16 @@ void PlaylistTabs::navigateIndex(MSong, int row, Playlist *pl) {
 
 Playlist *PlaylistTabs::currentPlaylist() const { return currentPlaylist_; }
 
+void PlaylistTabs::notifySongDataChangedInAllPlaylists(
+    const std::string &filepath) {
+  if (filepath.empty()) {
+    return;
+  }
+  for (auto &[name, playlist] : playlistMap) {
+    playlist.emitSongDataChangedByFilepath(filepath);
+  }
+}
+
 void PlaylistTabs::setUpPlaybackManager() {
   connect(playbackOrderMenuActionGroup, &QActionGroup::triggered, this,
           [this](QAction *) {
@@ -67,23 +83,30 @@ void PlaylistTabs::setUpPlaybackManager() {
             QString selectedText = checked->text();
             control->setPolicy(string2Policy(selectedText));
           });
-  connect(playNextAction_, &QAction::triggered, this, [&]() {
+  connect(playNextAction_, &QAction::triggered, this, [this]() {
     QModelIndex index = playNextAction_->data().value<QModelIndex>();
     control->queueStart(index.row());
   });
-  connect(playEndAction_, &QAction::triggered, this, [&]() {
-    QModelIndex index = playNextAction_->data().value<QModelIndex>();
+  connect(playEndAction_, &QAction::triggered, this, [this]() {
+    QModelIndex index = playEndAction_->data().value<QModelIndex>();
     control->queueEnd(index.row());
+  });
+  connect(clearPlaylistAction_, &QAction::triggered, this, [this]() {
+    if (currentPlaylist_) {
+      currentPlaylist_->clear();
+    }
   });
 }
 
 void PlaylistTabs::onCustomContextMenuRequested(const QPoint &pos) {
   QModelIndex index = currentTableView->indexAt(pos);
-  if (!index.isValid())
-    return;
-
-  playNextAction_->setData(QVariant::fromValue(index));
-  playEndAction_->setData(QVariant::fromValue(index));
+  const bool hasRow = index.isValid();
+  playNextAction_->setEnabled(hasRow);
+  playEndAction_->setEnabled(hasRow);
+  if (hasRow) {
+    playNextAction_->setData(QVariant::fromValue(index));
+    playEndAction_->setData(QVariant::fromValue(index));
+  }
 
   playlistContextMenu.exec(currentTableView->viewport()->mapToGlobal(pos));
 }
@@ -94,10 +117,13 @@ void PlaylistTabs::onTabContextMenuRequested(const QPoint &pos) {
 
   QMenu menu(this);
   QAction *addAction = menu.addAction("Add New Playlist");
+  QAction *refreshAction = nullptr;
   QAction *removeAction = nullptr;
 
-  if (index != -1)
+  if (index != -1) {
+    refreshAction = menu.addAction("Refresh Playlist Metadata");
     removeAction = menu.addAction("Remove Tab");
+  }
 
   QAction *selected = menu.exec(tabBar->mapToGlobal(pos));
 
@@ -109,16 +135,11 @@ void PlaylistTabs::onTabContextMenuRequested(const QPoint &pos) {
     QString newPlaylistName = getNewPlaylistName();
     ui->tabWidget->addTab(newTab, newPlaylistName);
     int newPid = playlistMap.size() + 1;
-    playlistMap.emplace(
-        std::piecewise_construct,
-        std::forward_as_tuple(std::string(newPlaylistName.toStdString())),
-        std::forward_as_tuple(SongStore{*songLibrary, newPid}, *playbackQueue_,
-                              newPid, columnLayoutManager_));
-    Playlist &pl = playlistMap.at(newPlaylistName.toStdString());
-
-    setUpTableView(&pl, tbv);
-    pl.registerStatusUpdateCallback();
-  } else if (selected == removeAction) {
+    createPlaylist(newPlaylistName, newPid, tbv);
+  } else if (selected == refreshAction && index != -1) {
+    const QString playlistName = ui->tabWidget->tabText(index);
+    refreshPlaylistMetadata(&playlistMap.at(playlistName.toStdString()));
+  } else if (selected == removeAction && index != -1) {
     std::string txt = ui->tabWidget->tabText(index).toStdString();
     ui->tabWidget->removeTab(index);
     playlistMap.erase(txt);
@@ -127,7 +148,6 @@ void PlaylistTabs::onTabContextMenuRequested(const QPoint &pos) {
 
 void PlaylistTabs::onTabChanged(int index) {
   QString text = ui->tabWidget->tabText(index);
-  qDebug() << "Switched to tab" << index << ":" << text;
   currentPlaylist_ = &playlistMap.at(text.toStdString());
   QWidget *tab = ui->tabWidget->widget(index);
 
@@ -163,14 +183,14 @@ void PlaylistTabs::setUpTableView(Playlist *pl, QTableView *tbv) {
   header->setContextMenuPolicy(Qt::CustomContextMenu);
 
   connect(header, &QHeaderView::sectionClicked, this, [this, tbv, pl](int idx) {
-    const QList<QString> visibleIds = columnLayoutManager_.visibleColumnIds();
+    const QList<QString> visibleIds = columnLayoutManager_->visibleColumnIds();
     if (idx < 0 || idx >= visibleIds.size()) {
       tbv->horizontalHeader()->setSortIndicatorShown(false);
       return;
     }
 
     const QString &columnId = visibleIds[idx];
-    const ColumnDefinition *definition = columnRegistry_.findColumn(columnId);
+    const ColumnDefinition *definition = columnRegistry_->findColumn(columnId);
     if (!definition || !definition->sortable) {
       tbv->horizontalHeader()->setSortIndicatorShown(false);
       return;
@@ -193,23 +213,46 @@ void PlaylistTabs::setUpTableView(Playlist *pl, QTableView *tbv) {
               return;
             }
             const QList<QString> visibleIds =
-                columnLayoutManager_.visibleColumnIds();
+                columnLayoutManager_->visibleColumnIds();
             if (logicalIndex < 0 || logicalIndex >= visibleIds.size()) {
               return;
             }
             const QString &columnId = visibleIds[logicalIndex];
-            columnLayoutManager_.setColumnWidth(columnId, newSize);
+            columnLayoutManager_->setColumnWidth(columnId, newSize);
           });
 
   connect(header, &QHeaderView::customContextMenuRequested, this,
           [this, tbv](const QPoint &pos) { showHeaderColumnsMenu(tbv, pos); });
 
-  connect(&columnLayoutManager_, &GlobalColumnLayoutManager::layoutChanged,
-          this, [this, tbv]() { applyLayoutToTableView(tbv); });
+  connect(columnLayoutManager_, &GlobalColumnLayoutManager::layoutChanged, tbv,
+          [this, tbv]() { applyLayoutToTableView(tbv); });
 
   connect(tbv, &QTableView::doubleClicked, this, &PlaylistTabs::doubleClicked);
 
   applyLayoutToTableView(tbv);
+}
+
+Playlist &PlaylistTabs::createPlaylist(const QString &playlistName,
+                                       int playlistId, QTableView *tbv) {
+  SongStore store{*songLibrary, playlistId};
+  int lastPlayed = 1;
+  if (!store.loadPlaylistState(lastPlayed)) {
+    qFatal("createPlaylist: failed to load playlist state");
+  }
+
+  auto [it, inserted] = playlistMap.emplace(
+      std::piecewise_construct,
+      std::forward_as_tuple(playlistName.toStdString()),
+      std::forward_as_tuple(std::move(store), *playbackQueue_, lastPlayed,
+                            *columnLayoutManager_));
+  if (!inserted) {
+    qFatal("createPlaylist: duplicate playlist name");
+  }
+
+  Playlist &playlist = it->second;
+  setUpTableView(&playlist, tbv);
+  playlist.registerStatusUpdateCallback();
+  return playlist;
 }
 
 QString PlaylistTabs::getNewPlaylistName() {
@@ -258,10 +301,10 @@ void PlaylistTabs::applyLayoutToTableView(QTableView *tbv) {
   applyingColumnLayout_ = true;
   {
     QSignalBlocker blocker(header);
-    const QList<QString> visibleIds = columnLayoutManager_.visibleColumnIds();
+    const QList<QString> visibleIds = columnLayoutManager_->visibleColumnIds();
     for (int col = 0; col < visibleIds.size(); ++col) {
       const QString &columnId = visibleIds[col];
-      tbv->setColumnWidth(col, columnLayoutManager_.columnWidth(columnId));
+      tbv->setColumnWidth(col, columnLayoutManager_->columnWidth(columnId));
     }
     header->setSortIndicatorShown(false);
   }
@@ -270,7 +313,7 @@ void PlaylistTabs::applyLayoutToTableView(QTableView *tbv) {
 
 void PlaylistTabs::persistVisibleOrder(QTableView *tbv) {
   const QList<QString> currentVisibleIds =
-      columnLayoutManager_.visibleColumnIds();
+      columnLayoutManager_->visibleColumnIds();
   const int count = currentVisibleIds.size();
   if (count <= 0) {
     return;
@@ -295,25 +338,25 @@ void PlaylistTabs::persistVisibleOrder(QTableView *tbv) {
     }
   }
 
-  for (const QString &id : columnLayoutManager_.allOrderedColumnIds()) {
-    if (!columnLayoutManager_.isColumnVisible(id)) {
+  for (const QString &id : columnLayoutManager_->allOrderedColumnIds()) {
+    if (!columnLayoutManager_->isColumnVisible(id)) {
       newOrder.push_back(id);
     }
   }
 
-  columnLayoutManager_.setOrder(newOrder);
+  columnLayoutManager_->setOrder(newOrder);
 }
 
 void PlaylistTabs::showHeaderColumnsMenu(QTableView *tbv, const QPoint &pos) {
 
   QMenu menu(this);
-  for (const QString &id : columnLayoutManager_.allOrderedColumnIds()) {
-    const ColumnDefinition *definition = columnRegistry_.findColumn(id);
+  for (const QString &id : columnLayoutManager_->allOrderedColumnIds()) {
+    const ColumnDefinition *definition = columnRegistry_->findColumn(id);
     const QString title = definition ? definition->title : id;
 
     QAction *action = menu.addAction(title);
     action->setCheckable(true);
-    action->setChecked(columnLayoutManager_.isColumnVisible(id));
+    action->setChecked(columnLayoutManager_->isColumnVisible(id));
     action->setData(id);
   }
 
@@ -325,11 +368,12 @@ void PlaylistTabs::showHeaderColumnsMenu(QTableView *tbv, const QPoint &pos) {
   const QString selectedId = selected->data().toString();
   const bool shouldBeVisible = selected->isChecked();
 
-  if (!shouldBeVisible && columnLayoutManager_.visibleColumnIds().size() <= 1) {
+  if (!shouldBeVisible &&
+      columnLayoutManager_->visibleColumnIds().size() <= 1) {
     return;
   }
 
-  columnLayoutManager_.setColumnVisible(selectedId, shouldBeVisible);
+  columnLayoutManager_->setColumnVisible(selectedId, shouldBeVisible);
 }
 
 bool PlaylistTabs::eventFilter(QObject *obj, QEvent *event) {
@@ -344,4 +388,19 @@ bool PlaylistTabs::eventFilter(QObject *obj, QEvent *event) {
     }
   }
   return QObject::eventFilter(obj, event);
+}
+
+void PlaylistTabs::refreshPlaylistMetadata(Playlist *playlist) {
+  QProgressDialog progressDialog("Refreshing playlist metadata...", QString{},
+                                 0, playlist->songCount(), this);
+  progressDialog.setWindowModality(Qt::WindowModal);
+  progressDialog.setCancelButton(nullptr);
+  progressDialog.setMinimumDuration(0);
+  progressDialog.setValue(0);
+  playlist->refreshMetadataFromFiles([&](int current, int total) {
+    progressDialog.setMaximum(total);
+    progressDialog.setValue(current);
+    QApplication::processEvents();
+  });
+  progressDialog.setValue(progressDialog.maximum());
 }

@@ -18,6 +18,9 @@ QList<QString> GlobalColumnLayoutManager::visibleColumnIds() const {
   QList<QString> ids;
   ids.reserve(orderedIds_.size());
   for (const QString &id : orderedIds_) {
+    if (!registry_.hasColumn(id)) {
+      continue;
+    }
     if (!hiddenIds_.contains(id)) {
       ids.push_back(id);
     }
@@ -91,6 +94,42 @@ void GlobalColumnLayoutManager::setOrder(const QList<QString> &orderedIds) {
   emit layoutChanged();
 }
 
+void GlobalColumnLayoutManager::refreshFromRegistry() {
+  const QList<QString> oldOrder = orderedIds_;
+  const QSet<QString> oldHidden = hiddenIds_;
+  const QSet<QString> oldOrderSet(oldOrder.begin(), oldOrder.end());
+
+  orderedIds_ = normalizeOrder(orderedIds_);
+  const QSet<QString> currentIds(orderedIds_.begin(), orderedIds_.end());
+
+  for (auto it = hiddenIds_.begin(); it != hiddenIds_.end();) {
+    if (!currentIds.contains(*it)) {
+      it = hiddenIds_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
+  for (const QString &id : orderedIds_) {
+    if (!oldOrderSet.contains(id)) {
+      const ColumnDefinition *def = registry_.findColumn(id);
+      if (def && !def->visibleByDefault) {
+        hiddenIds_.insert(id);
+      }
+    }
+  }
+
+  if (visibleColumnIds().isEmpty() && !orderedIds_.isEmpty()) {
+    hiddenIds_.remove(orderedIds_.front());
+  }
+
+  const bool changed = (orderedIds_ != oldOrder) || (hiddenIds_ != oldHidden);
+  if (changed) {
+    persist();
+    emit layoutChanged();
+  }
+}
+
 const ColumnRegistry &GlobalColumnLayoutManager::registry() const {
   return registry_;
 }
@@ -99,24 +138,22 @@ void GlobalColumnLayoutManager::load() {
   QSettings settings;
   QStringList orderList = settings.value(kOrderKey).toStringList();
   const bool firstRunLayout = orderList.isEmpty();
+  bool changed = firstRunLayout;
 
   if (firstRunLayout) {
     orderedIds_ = registry_.defaultOrderedIds();
   } else {
-    QList<QString> loadedOrder;
-    loadedOrder.reserve(orderList.size());
+    orderedIds_.clear();
+    orderedIds_.reserve(orderList.size());
     for (const QString &id : orderList) {
-      loadedOrder.push_back(id);
+      orderedIds_.push_back(id);
     }
-    orderedIds_ = normalizeOrder(loadedOrder);
   }
 
   hiddenIds_.clear();
   const QStringList hiddenList = settings.value(kHiddenKey).toStringList();
   for (const QString &id : hiddenList) {
-    if (registry_.hasColumn(id)) {
-      hiddenIds_.insert(id);
-    }
+    hiddenIds_.insert(id);
   }
   if (firstRunLayout) {
     for (const ColumnDefinition &definition : registry_.definitions()) {
@@ -128,7 +165,10 @@ void GlobalColumnLayoutManager::load() {
   if (visibleColumnIds().isEmpty()) {
     const QList<QString> defaults = registry_.defaultOrderedIds();
     if (!defaults.isEmpty()) {
-      hiddenIds_.remove(defaults.front());
+      if (hiddenIds_.contains(defaults.front())) {
+        hiddenIds_.remove(defaults.front());
+        changed = true;
+      }
     }
   }
 
@@ -143,7 +183,9 @@ void GlobalColumnLayoutManager::load() {
     }
   }
 
-  persist();
+  if (changed) {
+    persist();
+  }
 }
 
 void GlobalColumnLayoutManager::persist() const {

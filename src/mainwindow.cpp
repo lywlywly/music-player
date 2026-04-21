@@ -2,27 +2,33 @@
 
 #include "./ui_mainwindow.h"
 #include "addentrydialog.h"
+#ifdef MYPLAYER_TESTING
+#include "dummysystemmediainterface.h"
+#endif
 #ifdef Q_OS_MACOS
 #include "macosmediacenter.h"
 #elif defined(Q_OS_LINUX)
 #include "mprismediainterface.h"
 #elif defined(Q_OS_WIN)
 #include "windowsmediacenter.h"
-#else
-#include "dummysystemmediainterface.h"
 #endif
 #include "databasemanager.h"
 #include "settingsdialog.h"
 #include "songparser.h"
 #include <QActionGroup>
+#include <QApplication>
 #include <QDebug>
 #include <QFileDialog>
+#include <QProgressDialog>
 #include <QSettings>
+#include <QSqlDatabase>
 #include <QStandardPaths>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), ui(new Ui::MainWindow), control{playbackQueue_},
-      lyricsManager{this} {
+      columnLayoutManager_(columnRegistry_, this),
+      databaseManager_(columnRegistry_),
+      songLibrary(columnRegistry_, databaseManager_), lyricsManager{this} {
   ui->setupUi(this);
   setUpMenuBar();
   setUpPlaylist();
@@ -35,15 +41,22 @@ MainWindow::MainWindow(QWidget *parent)
 }
 
 void MainWindow::setupSystemMediaInterface() {
-#ifdef Q_OS_MACOS
-  sysMedia = new MacOSMediaCenter(this);
-#elif defined(Q_OS_LINUX)
-  sysMedia = new MprisMediaInterface(this);
-#elif defined(Q_OS_WIN)
-  sysMedia = new WindowsMediaCenter(static_cast<quintptr>(winId()), this);
-#else
-  sysMedia = new DummySystemMediaInterface(this);
+#ifdef MYPLAYER_TESTING
+  if (qEnvironmentVariableIntValue("MYPLAYER_USE_DUMMY_MEDIA_INTERFACE") != 0) {
+    sysMedia = new DummySystemMediaInterface(this);
+  } else
 #endif
+  {
+#ifdef Q_OS_MACOS
+    sysMedia = new MacOSMediaCenter(this);
+#elif defined(Q_OS_LINUX)
+    sysMedia = new MprisMediaInterface(this);
+#elif defined(Q_OS_WIN)
+    sysMedia = new WindowsMediaCenter(static_cast<quintptr>(winId()), this);
+#else
+    qFatal("setupSystemMediaInterface: unsupported platform");
+#endif
+  }
 
   connect(sysMedia, &ISystemMediaInterface::playRequested, this,
           &MainWindow::play);
@@ -71,9 +84,15 @@ void MainWindow::setUpMenuBar() {
 
 void MainWindow::setUpPlaylist() {
   playlistTabs = ui->playlistTabs;
-  songLibrary.loadAll(DatabaseManager::db());
+  QSqlDatabase &db = databaseManager_.db();
+  if (!columnRegistry_.loadDynamicColumns(db)) {
+    qFatal("setUpPlaylist: failed to load dynamic columns");
+  }
+  columnLayoutManager_.refreshFromRegistry();
+  songLibrary.loadFromDatabase();
   playlistTabs->init(&songLibrary, &playbackQueue_, &control,
-                     playbackOrderMenuActionGroup);
+                     playbackOrderMenuActionGroup, &columnRegistry_,
+                     &columnLayoutManager_);
   connect(playlistTabs, &PlaylistTabs::doubleClicked, [this](QModelIndex i) {
     MSong song = control.playIndex(i.row());
     playSong(song);
@@ -122,6 +141,9 @@ void MainWindow::setUpPlaybackActions() {
   connect(ui->actionPause, &QAction::triggered, this, &MainWindow::pause);
   connect(ui->pause_button, &QAbstractButton::clicked, this,
           &MainWindow::pause);
+  connect(ui->actionStop, &QAction::triggered, this, &MainWindow::stop);
+  connect(ui->actionNext, &QAction::triggered, this, &MainWindow::next);
+  connect(ui->actionPrevious, &QAction::triggered, this, &MainWindow::prev);
   connect(ui->stop_button, &QAbstractButton::clicked, this, &MainWindow::stop);
   connect(ui->next_button, &QAbstractButton::clicked, this, &MainWindow::next);
   connect(ui->prev_button, &QAbstractButton::clicked, this, &MainWindow::prev);
@@ -153,10 +175,19 @@ void MainWindow::setUpPlaybackBackend() {
 }
 
 void MainWindow::playSong(const MSong &song) {
-  backendManager->player()->setSource(QString::fromStdString(song.at("path")));
+  const std::string filepath = song.at("filepath").text;
+  if (filepath.empty()) {
+    qFatal("playSong: filepath is empty");
+  }
+  const MSong &activeSong = songLibrary.refreshSongFromFile(filepath);
+  playlistTabs->notifySongDataChangedInAllPlaylists(filepath);
+
+  backendManager->player()->setSource(
+      QString::fromStdString(activeSong.at("filepath").text));
   backendManager->player()->play();
-  sysMedia->setTitleAndArtist(QString::fromStdString(song.at("title")),
-                              QString::fromStdString(song.at("artist")));
+  sysMedia->setTitleAndArtist(
+      QString::fromStdString(activeSong.at("title").text),
+      QString::fromStdString(activeSong.at("artist").text));
   control.play();
 }
 
@@ -219,8 +250,8 @@ void MainWindow::navigateIndex(MSong song, int row, Playlist *pl) {
 
 void MainWindow::setUpImageAndLyrics(MSong song) {
   lyricsManager.setLyrics(
-      lyricsLoader.getLyrics(song.at("title"), song.at("artist")));
-  auto [data, size] = SongParser::extractCoverImage(song.at("path"));
+      lyricsLoader.getLyrics(song.at("title").text, song.at("artist").text));
+  auto [data, size] = SongParser::extractCoverImage(song.at("filepath").text);
   if (size > 0) {
     pixmap.loadFromData(data.data(), size);
     ui->label->setPixmap(pixmap.scaled(ui->splitter->sizes().first() - 10,
@@ -252,8 +283,8 @@ void MainWindow::addEntry() {
   addEntryDialog->setAttribute(Qt::WA_DeleteOnClose);
   QObject::connect(addEntryDialog, &AddEntryDialog::entryStringEntered,
                    [this](const QString &text) {
-                     playlistTabs->currentPlaylist()->addSong(
-                         SongParser::parse(text.toStdString()));
+                     playlistTabs->currentPlaylist()->addSong(SongParser::parse(
+                         text.toStdString(), columnRegistry_));
                    });
 }
 
@@ -306,7 +337,7 @@ void MainWindow::open() {
       R"(Audio Files (*.mp3 *.flac *.m4a *.wav *.ogg *.opus *.alac);;All Files (*.*))");
   for (const QString &s : fileName) {
     playlistTabs->currentPlaylist()->addSong(
-        SongParser::parse(s.toStdString()));
+        SongParser::parse(s.toStdString(), columnRegistry_));
   }
 }
 
@@ -323,10 +354,24 @@ void MainWindow::openFolder() {
   QStringList filters = {"*.mp3", "*.flac", "*.m4a", "*.wav",
                          "*.ogg", "*.opus", "*.alac"};
   const QStringList files = dir.entryList(filters, QDir::Files);
+
+  QProgressDialog progressDialog("Loading songs from folder...", QString{}, 0,
+                                 static_cast<int>(files.size()), this);
+  progressDialog.setWindowModality(Qt::WindowModal);
+  progressDialog.setCancelButton(nullptr);
+  progressDialog.setMinimumDuration(0);
+  progressDialog.setValue(0);
+
   std::vector<MSong> songs;
-  for (const QString &s : files) {
-    songs.push_back(SongParser::parse(dir.absoluteFilePath(s).toStdString()));
+  songs.reserve(static_cast<size_t>(files.size()));
+  for (int i = 0; i < files.size(); ++i) {
+    const QString &s = files[i];
+    songs.push_back(SongParser::parse(dir.absoluteFilePath(s).toStdString(),
+                                      columnRegistry_));
+    progressDialog.setValue(i + 1);
+    QApplication::processEvents();
   }
+  progressDialog.setValue(static_cast<int>(files.size()));
   playlistTabs->currentPlaylist()->addSongs(std::move(songs));
 }
 

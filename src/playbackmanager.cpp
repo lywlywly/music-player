@@ -63,18 +63,16 @@ void PlaybackManager::stop() {
 }
 
 void PlaybackManager::queueEnd(int currentIndex) {
-  int pk = playlist->getPkByIndex(currentIndex);
-  queue.addLast(pk, playlist);
+  queue.addLast(playlist->getPkByIndex(currentIndex), playlist);
 }
 
 void PlaybackManager::queueStart(int currentIndex) {
-  int pk = playlist->getPkByIndex(currentIndex);
-  queue.addNext(pk, playlist);
+  queue.addNext(playlist->getPkByIndex(currentIndex), playlist);
 }
 
-void PlaybackManager::enqueueWeak(int i) { this->candidateWeak = i; }
+void PlaybackManager::enqueueWeak(int i) { candidateWeak = i; }
 
-void PlaybackManager::setView(Playlist *view) { this->playlist = view; }
+void PlaybackManager::setView(Playlist *view) { playlist = view; }
 
 void PlaybackManager::setPolicy(Policy policyEnum) {
   switch (policyEnum) {

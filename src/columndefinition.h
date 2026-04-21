@@ -5,7 +5,35 @@
 
 enum class ColumnSource { SongAttribute, Computed };
 
-enum class ColumnValueType { Text, Number, DateTime };
+enum class ColumnValueType { Text, Number, DateTime, Boolean };
+
+inline QString columnValueTypeToStorageString(ColumnValueType valueType) {
+  switch (valueType) {
+  case ColumnValueType::Number:
+    return QStringLiteral("number");
+  case ColumnValueType::DateTime:
+    return QStringLiteral("date");
+  case ColumnValueType::Boolean:
+    return QStringLiteral("boolean");
+  case ColumnValueType::Text:
+  default:
+    return QStringLiteral("text");
+  }
+}
+
+inline ColumnValueType
+columnValueTypeFromStorageString(const QString &storageValue) {
+  if (storageValue == QStringLiteral("number")) {
+    return ColumnValueType::Number;
+  }
+  if (storageValue == QStringLiteral("date")) {
+    return ColumnValueType::DateTime;
+  }
+  if (storageValue == QStringLiteral("boolean")) {
+    return ColumnValueType::Boolean;
+  }
+  return ColumnValueType::Text;
+}
 
 struct ColumnDefinition {
   QString id;

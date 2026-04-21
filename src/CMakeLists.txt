@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 project(my_player LANGUAGES CXX)
 
+option(BUILD_TESTING "Build tests" OFF)
+
 if(APPLE)
   enable_language(OBJCXX)
 endif()
@@ -53,7 +55,8 @@ set(PROJECT_SOURCES
   columnregistry.cpp
   databasemanager.h
   databasemanager.cpp
-  dummysystemmediainterface.h
+  fieldvalue.h
+  fieldvalue.cpp
   filesystemcomparer.h
   filesystemcomparer.cpp
   gstaudioplayer.h
@@ -96,14 +99,20 @@ set(PROJECT_SOURCES
   settingsdialog.cpp
   songlibrary.h
   songlibrary.cpp
-  songloader.h
-  songloader.cpp
   songparser.h
   songparser.cpp
   songstore.h
   songstore.cpp
   utils.h
 )
+
+if(BUILD_TESTING)
+  list(APPEND PROJECT_SOURCES
+    dummyaudioplayer.h
+    dummyaudioplayer.cpp
+    dummysystemmediainterface.h
+  )
+endif()
 
 if(NOT WIN32)
   list(APPEND PROJECT_SOURCES
@@ -189,4 +198,6 @@ if(APPLE)
   )
 endif()
 
-add_subdirectory(Tests)
+if(BUILD_TESTING)
+  add_subdirectory(Tests)
+endif()

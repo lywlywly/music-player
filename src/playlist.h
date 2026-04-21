@@ -7,10 +7,13 @@
 #include "songstore.h"
 #include <QAbstractTableModel>
 
+// Qt table model for one playlist. It adapts SongStore data to QTableView,
+// renders the computed status column from PlaybackQueue, and reacts to global
+// column-layout changes.
 class Playlist : public QAbstractTableModel {
   Q_OBJECT
 public:
-  explicit Playlist(SongStore &&, PlaybackQueue &, int,
+  explicit Playlist(SongStore &&, PlaybackQueue &, int initialLastPlayed,
                     GlobalColumnLayoutManager &columnLayoutManager,
                     QObject *parent = nullptr);
   int rowCount(const QModelIndex & = QModelIndex()) const override;
@@ -21,12 +24,14 @@ public:
                       int role) const override;
   void sortByColumnId(const QString &columnId, int order = 0);
   void sortByField(std::string, int = 0);
-  QString columnIdAt(int section) const;
   int songCount() const;
   bool empty() const;
   void addSong(MSong &&);
   void addSongs(std::vector<MSong> &&);
   void removeSong(int);
+  // Clears all rows from this Qt model and its backing SongStore. For
+  // persistent playlists, SongStore also removes DB table `playlist_items`
+  // rows; songs remain in DB table `songs`.
   void clear();
   const MSong &getSongByPk(int) const;
   const MSong &getSongByIndex(int) const;
@@ -42,12 +47,23 @@ public:
   void unsetSizeChangeCallback() const;
   void setLastPlayed(int newLastPlayed);
   int getLastPlayed() const;
-  bool load(QSqlDatabase &);
+  // Re-parses metadata for all songs currently in this playlist and writes the
+  // refreshed values back to in-memory song data and database tables. The model
+  // is reset around the operation. progressCallback is called after each
+  // processed song with (current, total), and is intended for progress UI
+  // updates (for example, a progress dialog). Assumes every row has a valid
+  // non-empty `filepath`; missing/empty filepath is treated as fatal.
+  void refreshMetadataFromFiles(
+      const std::function<void(int current, int total)> &progressCallback = {});
+  // Emits row data-changed notifications for rows matching filepath in this
+  // model. This refreshes view data without mutating the underlying song map.
+  // No-op when the model is empty or no row matches filepath.
+  void emitSongDataChangedByFilepath(const std::string &filepath);
 
 private:
   const ColumnDefinition *definitionForColumnId(const QString &columnId) const;
+  QString columnIdAt(int section) const;
 
-  int playlistId;
   SongStore store;
   PlaybackQueue &playbackQueue;
   int lastPlayed = 1;

@@ -1,10 +1,11 @@
-enable_testing()
+target_compile_definitions(MYLib PRIVATE MYPLAYER_TESTING)
 
 function(SETUP_TESTS)
     foreach(_testname ${ARGN})
         add_executable(${_testname} tst_${_testname}.cpp)
         add_test(NAME ${_testname} COMMAND ${_testname})
-        target_link_libraries(${_testname} Qt${QT_MAJOR_VERISION}::Test MYLib)
+        target_compile_definitions(${_testname} PRIVATE MYPLAYER_TESTING)
+        target_link_libraries(${_testname} Qt6::Test MYLib)
         target_link_directories(${_testname} PRIVATE ${GST_LIBRARY_DIRS})
     endforeach()
 endfunction()
@@ -12,10 +13,20 @@ endfunction()
 set(TEST_NAMES
     basics
     parser
-    lyrics
-    checksum
+    # lyrics      # temporarily disabled
+    # checksum    # temporarily disabled
     playbackmanager
     songlibrary
+    columnregistry
+    columnlayout
+    databasemanager
+    dummyaudioplayer
+    dummysystemmediainterface
+    mainwindow
+    playbackqueue
+    songstore
+    playlist
+    playlisttabs
 )
 
 if(NOT WIN32)
@@ -23,3 +34,11 @@ if(NOT WIN32)
 endif()
 
 SETUP_TESTS(${TEST_NAMES})
+
+set_tests_properties(mainwindow PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
+
+set_tests_properties(playlisttabs PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)

@@ -6,6 +6,8 @@
 #include <QObject>
 #include <QSet>
 
+// Stores global playlist-column layout in QSettings (order, visibility, width),
+// normalizes it against the current registry, and emits layoutChanged().
 class GlobalColumnLayoutManager : public QObject {
   Q_OBJECT
 
@@ -20,6 +22,11 @@ public:
   int columnWidth(const QString &id) const;
   void setColumnWidth(const QString &id, int width);
   void setOrder(const QList<QString> &orderedIds);
+  // Used at startup after the registry is loaded from DB. It normalizes the
+  // persisted layout against current columns (drop unknown ids, append new
+  // ids, apply defaults for new columns, keep at least one visible), then
+  // persists and emits layoutChanged() only if order/visibility changed.
+  void refreshFromRegistry();
   const ColumnRegistry &registry() const;
 
 signals:

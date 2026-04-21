@@ -1,0 +1,11 @@
+{
+  "cases": [
+    {
+      "file": "example/song.mp3",
+      "expect": {
+        "title": "Example Title",
+        "artist": "Example Artist"
+      }
+    }
+  ]
+}

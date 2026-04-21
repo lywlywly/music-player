@@ -1,0 +1,5 @@
+# Keep parser test audio fixtures out of git.
+*
+!.gitignore
+!README.md
+!parser_cases.example.json

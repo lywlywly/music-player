@@ -8,6 +8,9 @@
 #include "playbackmanager.h"
 #include "playlist.h"
 #include "playlisttabs.h"
+#include "columnregistry.h"
+#include "databasemanager.h"
+#include "globalcolumnlayoutmanager.h"
 #include "songlibrary.h"
 #include <QMainWindow>
 
@@ -61,6 +64,9 @@ private:
   PlaybackBackendManager *backendManager;
   PlaybackQueue playbackQueue_;
   PlaybackManager control;
+  ColumnRegistry columnRegistry_;
+  GlobalColumnLayoutManager columnLayoutManager_;
+  DatabaseManager databaseManager_;
   SongLibrary songLibrary;
   PlaylistTabs *playlistTabs;
   LyricsLoader lyricsLoader;   // TODO: use value type

@@ -1,6 +1,6 @@
 #include "songstore.h"
-#include <QSqlError>
-#include <QSqlQuery>
+#include <optional>
+#include <stdexcept>
 #include <unicode/coll.h>
 #include <unicode/locid.h>
 
@@ -12,34 +12,96 @@ icu::Locale loc = icu::Locale::forLanguageTag("zh-u-kr-latn-hani-hrkt", status);
 std::unique_ptr<icu::Collator> collator(icu::Collator::createInstance(loc,
                                                                       status));
 
+namespace {
+struct SortValue {
+  bool missing = false;
+  FieldValue field;
+};
+
+bool compareText(const std::string &a, const std::string &b, bool ascending) {
+  icu::UnicodeString ua = icu::UnicodeString::fromUTF8(a);
+  icu::UnicodeString ub = icu::UnicodeString::fromUTF8(b);
+  const UCollationResult cmp =
+      static_cast<UCollationResult>(collator->compare(ua, ub));
+  return ascending ? (cmp == UCOL_LESS) : (cmp == UCOL_GREATER);
+}
+
+std::optional<bool> compareTyped(const SortValue &a, const SortValue &b,
+                                 bool ascending) {
+  if (a.field.type != b.field.type) {
+    return std::nullopt;
+  }
+
+  if (a.field.type == ColumnValueType::Number) {
+    if (a.field.typed.number == b.field.typed.number) {
+      return false;
+    }
+    return ascending ? (a.field.typed.number < b.field.typed.number)
+                     : (a.field.typed.number > b.field.typed.number);
+  }
+
+  if (a.field.type == ColumnValueType::DateTime) {
+    if (a.field.typed.epochMs == b.field.typed.epochMs) {
+      return false;
+    }
+    return ascending ? (a.field.typed.epochMs < b.field.typed.epochMs)
+                     : (a.field.typed.epochMs > b.field.typed.epochMs);
+  }
+
+  if (a.field.type == ColumnValueType::Boolean) {
+    if (a.field.typed.boolean == b.field.typed.boolean) {
+      return false;
+    }
+    return ascending ? (a.field.typed.boolean < b.field.typed.boolean)
+                     : (a.field.typed.boolean > b.field.typed.boolean);
+  }
+
+  return std::nullopt;
+}
+
+SortValue resolveSortValue(const SongLibrary &library, int songPk,
+                           const std::string &columnId) {
+  const MSong &song = library.getSongByPK(songPk);
+  auto it = song.find(columnId);
+  if (it == song.end()) {
+    return {true, FieldValue{}};
+  }
+
+  return {false, it->second};
+}
+} // namespace
+
 SongStore::SongStore(SongLibrary &lib, int pid)
     : library{lib}, playlistId{pid} {}
 
 int SongStore::songCount() const { return songPKs.size(); }
 
 void SongStore::addSong(MSong &&s) {
-  int s1 = library.addTolibrary(std::move(s));
-  songPKs.push_back(s1);
-  if (indices.size() < s1 + 1)
-    indices.resize(s1 + 1, -1);
-  indices[s1] = songPKs.size() - 1;
+  const int songId = library.addTolibrary(std::move(s));
+  songPKs.push_back(songId);
+  if (indices.size() < songId + 1)
+    indices.resize(songId + 1, -1);
+  indices[songId] = songPKs.size() - 1;
+  if (playlistId > 0) {
+    library.appendSongToPlaylistInDb(playlistId, songId, songPKs.size());
+  }
 }
 
 void SongStore::removeSongByPk(int pk) {
-  int i = indices[pk];
-  songPKs.erase(songPKs.begin() + i); // TODO: lazy delete
-  indices[pk] = -1;
+  removeSongByIndex(indices.at(pk));
 }
 
 void SongStore::removeSongByIndex(int i) {
-  int pk = songPKs[i];
-  songPKs.erase(songPKs.begin() + i); // TODO: lazy delete
-  indices[pk] = -1;
+  songPKs.erase(songPKs.begin() + i);
+  rebuildIndices();
 }
 
 void SongStore::clear() {
   songPKs.clear();
   indices.clear();
+  if (playlistId > 0) {
+    library.removePlaylistItemsInDb(playlistId);
+  }
 }
 
 const MSong &SongStore::getSongByPk(int pk) const {
@@ -53,9 +115,9 @@ const MSong &SongStore::getSongByIndex(int i) const {
   return library.getSongByPK(songPKs.at(i));
 }
 
-const int SongStore::getPkByIndex(int i) const { return songPKs.at(i); }
+int SongStore::getPkByIndex(int i) const { return songPKs.at(i); }
 
-const int SongStore::getIndexByPk(int pk) const {
+int SongStore::getIndexByPk(int pk) const {
   if (indices[pk] == -1) {
     throw std::logic_error("Key not in view");
   }
@@ -63,64 +125,55 @@ const int SongStore::getIndexByPk(int pk) const {
 }
 
 void SongStore::sortByField(std::string f, int order) {
-  UCollationResult result;
-  if (order == 0)
-    result = UCollationResult::UCOL_LESS;
-  else
-    result = UCollationResult::UCOL_GREATER;
+  const bool ascending = (order == 0);
+
   std::stable_sort(songPKs.begin(), songPKs.end(), [&](int i, int j) {
-    const MSong &songA = library.getSongByPK(i);
-    const MSong &songB = library.getSongByPK(j);
+    const SortValue valueA = resolveSortValue(library, i, f);
+    const SortValue valueB = resolveSortValue(library, j, f);
 
-    auto itA = songA.find(f);
-    auto itB = songB.find(f);
+    if (valueA.missing != valueB.missing) {
+      // Missing values always last.
+      return !valueA.missing;
+    }
+    if (valueA.missing && valueB.missing) {
+      return false;
+    }
 
-    const std::string valueA = itA == songA.end() ? std::string{} : itA->second;
-    const std::string valueB = itB == songB.end() ? std::string{} : itB->second;
+    if (const std::optional<bool> typed =
+            compareTyped(valueA, valueB, ascending);
+        typed.has_value()) {
+      return typed.value();
+    }
 
-    icu::UnicodeString ua = icu::UnicodeString::fromUTF8(valueA);
-    icu::UnicodeString ub = icu::UnicodeString::fromUTF8(valueB);
-    return collator->compare(ua, ub) == result;
+    return compareText(valueA.field.text, valueB.field.text, ascending);
   });
 
-  std::fill(indices.begin(), indices.end(), -1);
-
-  for (size_t i = 0; i < songPKs.size(); ++i) {
-    indices[songPKs[i]] = i;
-  }
+  rebuildIndices();
 }
 
 const std::vector<int> &SongStore::getSongsView() const { return songPKs; }
 
 const std::vector<int> &SongStore::getIndices() const { return indices; }
 
-bool SongStore::loadAll(QSqlDatabase &db) {
-  songPKs.clear();
-  indices.clear();
+void SongStore::refreshSongsFromFilepaths(
+    const std::vector<std::string> &filepaths,
+    const std::function<void(int current, int total)> &progressCallback) {
+  library.refreshSongsFromFilepaths(filepaths, progressCallback);
+}
 
-  QSqlQuery q(db);
-
-  q.prepare(
-      R"(
-            SELECT song_id
-            FROM playlist_items
-            WHERE playlist_id = :pid
-            ORDER BY position ASC
-        )");
-  q.bindValue(":pid", playlistId);
-
-  if (!q.exec()) {
-    qWarning() << "loadFromDatabase failed:" << q.lastError().text();
+bool SongStore::loadPlaylistState(int &lastPlayed) {
+  if (!library.loadPlaylistState(playlistId, lastPlayed, songPKs)) {
     return false;
   }
 
-  while (q.next()) {
-    int songId = q.value(0).toInt();
-    songPKs.push_back(songId);
-  }
+  rebuildIndices();
+  return true;
+}
 
+void SongStore::rebuildIndices() {
   if (songPKs.empty()) {
-    return true;
+    indices.clear();
+    return;
   }
 
   int maxPk = 0;
@@ -134,6 +187,4 @@ bool SongStore::loadAll(QSqlDatabase &db) {
     int pk = songPKs[row];
     indices[pk] = row;
   }
-
-  return true;
 }
