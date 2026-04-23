@@ -2,7 +2,11 @@
 #define QTAUDIOPLAYER_H
 
 #include "audioplayer.h"
+#include <QAudioDevice>
+#include <QAudioOutput>
+#include <QMediaDevices>
 #include <QObject>
+#include <memory>
 #include <qmediaplayer.h>
 
 class QtAudioPlayer : public AudioPlayer {
@@ -10,8 +14,6 @@ class QtAudioPlayer : public AudioPlayer {
 public:
   explicit QtAudioPlayer(QObject *parent = nullptr);
 
-  // AudioPlayer interface
-public:
   void play() override;
   void pause() override;
   void stop() override;
@@ -19,7 +21,12 @@ public:
   void setPosition(qint64 position) override;
 
 private:
-  QMediaPlayer p;
+  void createPlaybackObjects();
+  void handleAudioOutputsChanged();
+
+  std::unique_ptr<QMediaPlayer> player_;
+  QAudioOutput *audioOutput_ = nullptr;
+  QMediaDevices mediaDevices_;
 };
 
 #endif // QTAUDIOPLAYER_H
