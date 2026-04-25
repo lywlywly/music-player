@@ -1,5 +1,6 @@
 #include <QObject>
 #include <QTest>
+#include <unordered_map>
 
 #include "../columnregistry.h"
 #include "../libraryexpression.h"
@@ -71,9 +72,48 @@ ExprPtr makeNot(ExprPtr child) {
   return std::make_unique<NotExpr>(std::move(child));
 }
 
+ExprPtr makeLiteral(std::string text) {
+  return std::make_unique<LiteralExpr>(
+      ExprRuntimeValue::fromText(std::move(text)));
+}
+
+ExprPtr makeBoolLiteral(bool value) {
+  return std::make_unique<LiteralExpr>(ExprRuntimeValue::fromBool(value));
+}
+
+ExprPtr makeNumberLiteral(double value) {
+  return std::make_unique<LiteralExpr>(ExprRuntimeValue::fromNumber(value));
+}
+
+ExprPtr makeIf(ExprPtr condition, ExprPtr thenExpr, ExprPtr elseExpr) {
+  return std::make_unique<IfExpr>(std::move(condition), std::move(thenExpr),
+                                  std::move(elseExpr));
+}
+
+ExprPtr makeExprComparison(ExprPtr left, std::string valueText,
+                           ExprOperatorPtr op = makeIsOperator()) {
+  ExprValue value;
+  value.kind = ExprValue::Kind::Scalar;
+  value.values.push_back(std::move(valueText));
+  return std::make_unique<ComparisonExpr>(std::move(left), std::move(op),
+                                          std::move(value));
+}
+
 ExprToken makeToken(ExprTokenKind kind, std::string text, int start, int end) {
   return ExprToken{kind, std::move(text), start, end};
 }
+
+struct TestEvalContext final : LibraryExprEvalContext {
+  std::unordered_map<std::string, FieldValue> values;
+
+  const FieldValue *fieldValue(std::string_view fieldId) const override {
+    auto it = values.find(std::string(fieldId));
+    if (it == values.end()) {
+      return nullptr;
+    }
+    return &it->second;
+  }
+};
 } // namespace
 
 class TestLibraryExpression : public QObject {
@@ -82,6 +122,7 @@ class TestLibraryExpression : public QObject {
 private slots:
   void tokenize_basicExpression();
   void tokenize_quotedList();
+  void tokenize_ifThenElse();
   void tokenize_unterminatedQuotedValue();
   void parse_singleClause();
   void parse_equalsAlias();
@@ -98,12 +139,37 @@ private slots:
   void parse_numericValueForNumericField();
   void parse_relationalOperators();
   void parse_notOperator();
+  void parse_ifThenElse();
+  void parse_ifThenElseBooleanBranch();
+  void parse_ifThenElseNumericBranch();
+  void evaluate_ifThenElse();
+  void evaluate_ifThenElseBooleanBranch();
+  void evaluate_ifThenElseNumericBranch();
+  void evaluate_ifExprUsedByAnd();
+  void evaluate_ifExprUsedByOr();
+  void evaluate_ifExprUsedByNot();
+  void parse_ifExprComparedWithIsText();
+  void evaluate_ifExprComparedWithIsText();
+  void evaluate_ifExprComparedWithIsNumber();
+  void evaluate_ifExprComparedWithIsBool();
+  void evaluate_ifExprComparedWithHasText();
+  void evaluate_ifExprComparedWithInList();
+  void evaluate_ifExprSupportsAllTextOperators();
+  void evaluate_ifExprSupportsAllNumberOperators();
+  void evaluate_nestedIfHasComparedWithIsBool();
+  void reject_ifExprComparedWithIsDifferentType();
+  void reject_ifWithNonBooleanCondition();
+  void reject_ifWithMismatchedBranchTypes();
+  void reject_nestedBooleanOpInIfBranch();
   void reject_unknownField();
   void reject_computedField();
   void reject_missingOperatorOrValue();
   void reject_trailingBooleanOperator();
   void reject_missingClosingParenthesis();
   void reject_ambiguousKeywordInValue();
+  void reject_andWithNonBooleanOperand();
+  void reject_orWithNonBooleanOperand();
+  void reject_notWithNonBooleanOperand();
   void reject_unterminatedQuotedValue();
   void reject_unsupportedComparisonForms();
   void reject_invalidTypedValue();
@@ -151,6 +217,25 @@ void TestLibraryExpression::tokenize_quotedList() {
       makeToken(ExprTokenKind::Identifier, "jazz", 23, 27),
       makeToken(ExprTokenKind::RBracket, "]", 27, 28),
       makeToken(ExprTokenKind::End, "", 28, 28),
+  };
+
+  QCOMPARE(tokens, expected);
+}
+
+void TestLibraryExpression::tokenize_ifThenElse() {
+  const std::vector<ExprToken> tokens = tokenizeLibraryExpression(
+      QStringLiteral("IF artist IS a THEN \"lossless\" ELSE \"lossy\""));
+
+  const std::vector<ExprToken> expected = {
+      makeToken(ExprTokenKind::KeywordIf, "IF", 0, 2),
+      makeToken(ExprTokenKind::Identifier, "artist", 3, 9),
+      makeToken(ExprTokenKind::KeywordIs, "IS", 10, 12),
+      makeToken(ExprTokenKind::Identifier, "a", 13, 14),
+      makeToken(ExprTokenKind::KeywordThen, "THEN", 15, 19),
+      makeToken(ExprTokenKind::StringLiteral, "lossless", 20, 30),
+      makeToken(ExprTokenKind::KeywordElse, "ELSE", 31, 35),
+      makeToken(ExprTokenKind::StringLiteral, "lossy", 36, 43),
+      makeToken(ExprTokenKind::End, "", 43, 43),
   };
 
   QCOMPARE(tokens, expected);
@@ -381,6 +466,426 @@ void TestLibraryExpression::parse_notOperator() {
   QVERIFY(*result.expr == *expected);
 }
 
+void TestLibraryExpression::parse_ifThenElse() {
+  ColumnRegistry registry;
+
+  ExprParseResult result = parseLibraryExpression(
+      QStringLiteral("IF artist IS a THEN \"lossless\" ELSE \"lossy\""),
+      registry);
+
+  QVERIFY(result.ok());
+  ExprPtr expected = makeIf(makeComparison("artist", "artist", "a"),
+                            makeLiteral("lossless"), makeLiteral("lossy"));
+  QVERIFY(*result.expr == *expected);
+}
+
+void TestLibraryExpression::parse_ifThenElseBooleanBranch() {
+  ColumnRegistry registry;
+
+  ExprParseResult result = parseLibraryExpression(
+      QStringLiteral("IF artist IS a THEN true ELSE false"), registry);
+
+  QVERIFY(result.ok());
+  ExprPtr expected = makeIf(makeComparison("artist", "artist", "a"),
+                            makeBoolLiteral(true), makeBoolLiteral(false));
+  QVERIFY(*result.expr == *expected);
+}
+
+void TestLibraryExpression::parse_ifThenElseNumericBranch() {
+  ColumnRegistry registry;
+
+  ExprParseResult result = parseLibraryExpression(
+      QStringLiteral("IF artist IS a THEN 1.5 ELSE 2"), registry);
+
+  QVERIFY(result.ok());
+  ExprPtr expected = makeIf(makeComparison("artist", "artist", "a"),
+                            makeNumberLiteral(1.5), makeNumberLiteral(2.0));
+  QVERIFY(*result.expr == *expected);
+}
+
+void TestLibraryExpression::evaluate_ifThenElse() {
+  ColumnRegistry registry;
+
+  ExprParseResult result = parseLibraryExpression(
+      QStringLiteral("IF artist IS a THEN \"lossless\" ELSE \"lossy\""),
+      registry);
+  QVERIFY(result.ok());
+
+  TestEvalContext context;
+  context.values.emplace("artist", FieldValue("a", ColumnValueType::Text));
+
+  ExprRuntimeValue trueValue = result.expr->evaluateValue(context);
+  QVERIFY(trueValue.isText());
+  QCOMPARE(QString::fromStdString(trueValue.textValue()),
+           QStringLiteral("lossless"));
+
+  context.values["artist"] = FieldValue("b", ColumnValueType::Text);
+  ExprRuntimeValue falseValue = result.expr->evaluateValue(context);
+  QVERIFY(falseValue.isText());
+  QCOMPARE(QString::fromStdString(falseValue.textValue()),
+           QStringLiteral("lossy"));
+}
+
+void TestLibraryExpression::evaluate_ifThenElseBooleanBranch() {
+  ColumnRegistry registry;
+
+  ExprParseResult result = parseLibraryExpression(
+      QStringLiteral("IF artist IS a THEN true ELSE false"), registry);
+  QVERIFY(result.ok());
+
+  TestEvalContext context;
+  context.values.emplace("artist", FieldValue("a", ColumnValueType::Text));
+
+  ExprRuntimeValue trueValue = result.expr->evaluateValue(context);
+  QVERIFY(trueValue.isBool());
+  QVERIFY(trueValue.boolValueOrFalse());
+
+  context.values["artist"] = FieldValue("b", ColumnValueType::Text);
+  ExprRuntimeValue falseValue = result.expr->evaluateValue(context);
+  QVERIFY(falseValue.isBool());
+  QVERIFY(!falseValue.boolValueOrFalse());
+}
+
+void TestLibraryExpression::evaluate_ifThenElseNumericBranch() {
+  ColumnRegistry registry;
+
+  ExprParseResult result = parseLibraryExpression(
+      QStringLiteral("IF artist IS a THEN 1.5 ELSE 2"), registry);
+  QVERIFY(result.ok());
+
+  TestEvalContext context;
+  context.values.emplace("artist", FieldValue("a", ColumnValueType::Text));
+
+  ExprRuntimeValue trueValue = result.expr->evaluateValue(context);
+  QVERIFY(trueValue.isNumber());
+  QCOMPARE(trueValue.numberValue(), 1.5);
+
+  context.values["artist"] = FieldValue("b", ColumnValueType::Text);
+  ExprRuntimeValue falseValue = result.expr->evaluateValue(context);
+  QVERIFY(falseValue.isNumber());
+  QCOMPARE(falseValue.numberValue(), 2.0);
+}
+
+void TestLibraryExpression::evaluate_ifExprUsedByAnd() {
+  ColumnRegistry registry;
+
+  ExprParseResult result = parseLibraryExpression(
+      QStringLiteral("(IF artist IS a THEN true ELSE false) AND genre IS rock"),
+      registry);
+  QVERIFY(result.ok());
+
+  TestEvalContext context;
+  context.values.emplace("artist", FieldValue("a", ColumnValueType::Text));
+  context.values.emplace("genre", FieldValue("rock", ColumnValueType::Text));
+  QVERIFY(result.expr->evaluate(context));
+
+  context.values["artist"] = FieldValue("b", ColumnValueType::Text);
+  QVERIFY(!result.expr->evaluate(context));
+}
+
+void TestLibraryExpression::evaluate_ifExprUsedByOr() {
+  ColumnRegistry registry;
+
+  ExprParseResult result = parseLibraryExpression(
+      QStringLiteral("(IF artist IS a THEN true ELSE false) OR genre IS rock"),
+      registry);
+  QVERIFY(result.ok());
+
+  TestEvalContext context;
+  context.values.emplace("artist", FieldValue("b", ColumnValueType::Text));
+  context.values.emplace("genre", FieldValue("jazz", ColumnValueType::Text));
+  QVERIFY(!result.expr->evaluate(context));
+
+  context.values["artist"] = FieldValue("a", ColumnValueType::Text);
+  QVERIFY(result.expr->evaluate(context));
+}
+
+void TestLibraryExpression::evaluate_ifExprUsedByNot() {
+  ColumnRegistry registry;
+
+  ExprParseResult result = parseLibraryExpression(
+      QStringLiteral("NOT (IF artist IS a THEN true ELSE false)"), registry);
+  QVERIFY(result.ok());
+
+  TestEvalContext context;
+  context.values.emplace("artist", FieldValue("a", ColumnValueType::Text));
+  QVERIFY(!result.expr->evaluate(context));
+
+  context.values["artist"] = FieldValue("b", ColumnValueType::Text);
+  QVERIFY(result.expr->evaluate(context));
+}
+
+void TestLibraryExpression::parse_ifExprComparedWithIsText() {
+  ColumnRegistry registry;
+
+  ExprParseResult result = parseLibraryExpression(
+      QStringLiteral("(IF artist IS a THEN b/c ELSE c) IS b/c"), registry);
+  QVERIFY(result.ok());
+
+  ExprPtr expected =
+      makeExprComparison(makeIf(makeComparison("artist", "artist", "a"),
+                                makeLiteral("b/c"), makeLiteral("c")),
+                         "b/c");
+  QVERIFY(*result.expr == *expected);
+}
+
+void TestLibraryExpression::evaluate_ifExprComparedWithIsText() {
+  ColumnRegistry registry;
+
+  ExprParseResult result = parseLibraryExpression(
+      QStringLiteral("(IF artist IS a THEN b/c ELSE c) IS b/c"), registry);
+  QVERIFY(result.ok());
+
+  TestEvalContext context;
+  context.values.emplace("artist", FieldValue("a", ColumnValueType::Text));
+  QVERIFY(result.expr->evaluate(context));
+
+  context.values["artist"] = FieldValue("b", ColumnValueType::Text);
+  QVERIFY(!result.expr->evaluate(context));
+}
+
+void TestLibraryExpression::evaluate_ifExprComparedWithIsNumber() {
+  ColumnRegistry registry;
+
+  ExprParseResult result = parseLibraryExpression(
+      QStringLiteral("(IF artist IS a THEN 1 ELSE 2) IS 2"), registry);
+  QVERIFY(result.ok());
+
+  TestEvalContext context;
+  context.values.emplace("artist", FieldValue("a", ColumnValueType::Text));
+  QVERIFY(!result.expr->evaluate(context));
+
+  context.values["artist"] = FieldValue("b", ColumnValueType::Text);
+  QVERIFY(result.expr->evaluate(context));
+}
+
+void TestLibraryExpression::evaluate_ifExprComparedWithIsBool() {
+  ColumnRegistry registry;
+
+  ExprParseResult result = parseLibraryExpression(
+      QStringLiteral("(IF artist IS a THEN true ELSE false) IS false"),
+      registry);
+  QVERIFY(result.ok());
+
+  TestEvalContext context;
+  context.values.emplace("artist", FieldValue("a", ColumnValueType::Text));
+  QVERIFY(!result.expr->evaluate(context));
+
+  context.values["artist"] = FieldValue("b", ColumnValueType::Text);
+  QVERIFY(result.expr->evaluate(context));
+}
+
+void TestLibraryExpression::evaluate_ifExprComparedWithHasText() {
+  ColumnRegistry registry;
+
+  ExprParseResult result = parseLibraryExpression(
+      QStringLiteral("(IF artist IS a THEN b / c ELSE d / e) HAS b"), registry);
+  QVERIFY(result.ok());
+
+  TestEvalContext context;
+  context.values.emplace("artist", FieldValue("a", ColumnValueType::Text));
+  QVERIFY(result.expr->evaluate(context));
+
+  context.values["artist"] = FieldValue("x", ColumnValueType::Text);
+  QVERIFY(!result.expr->evaluate(context));
+}
+
+void TestLibraryExpression::evaluate_ifExprComparedWithInList() {
+  ColumnRegistry registry;
+
+  ExprParseResult result = parseLibraryExpression(
+      QStringLiteral("(IF artist IS a THEN 1 ELSE 2) IN [2, 3]"), registry);
+  QVERIFY(result.ok());
+
+  TestEvalContext context;
+  context.values.emplace("artist", FieldValue("a", ColumnValueType::Text));
+  QVERIFY(!result.expr->evaluate(context));
+
+  context.values["artist"] = FieldValue("x", ColumnValueType::Text);
+  QVERIFY(result.expr->evaluate(context));
+}
+
+void TestLibraryExpression::evaluate_ifExprSupportsAllTextOperators() {
+  ColumnRegistry registry;
+  TestEvalContext context;
+  context.values.emplace("artist", FieldValue("a", ColumnValueType::Text));
+
+  const QString base = QStringLiteral("(IF artist IS a THEN b / c ELSE d / e)");
+
+  {
+    ExprParseResult result =
+        parseLibraryExpression(base + QStringLiteral(" IS b / c"), registry);
+    QVERIFY(result.ok());
+    QVERIFY(result.expr->evaluate(context));
+  }
+  {
+    ExprParseResult result =
+        parseLibraryExpression(base + QStringLiteral(" = b / c"), registry);
+    QVERIFY(result.ok());
+    QVERIFY(result.expr->evaluate(context));
+  }
+  {
+    ExprParseResult result =
+        parseLibraryExpression(base + QStringLiteral(" HAS b"), registry);
+    QVERIFY(result.ok());
+    QVERIFY(result.expr->evaluate(context));
+  }
+  {
+    ExprParseResult result = parseLibraryExpression(
+        base + QStringLiteral(" IN [x, b / c]"), registry);
+    QVERIFY(result.ok());
+    QVERIFY(result.expr->evaluate(context));
+  }
+
+  context.values["artist"] = FieldValue("x", ColumnValueType::Text);
+  {
+    ExprParseResult result =
+        parseLibraryExpression(base + QStringLiteral(" IS b / c"), registry);
+    QVERIFY(result.ok());
+    QVERIFY(!result.expr->evaluate(context));
+  }
+  {
+    ExprParseResult result =
+        parseLibraryExpression(base + QStringLiteral(" HAS b"), registry);
+    QVERIFY(result.ok());
+    QVERIFY(!result.expr->evaluate(context));
+  }
+}
+
+void TestLibraryExpression::evaluate_ifExprSupportsAllNumberOperators() {
+  ColumnRegistry registry;
+  TestEvalContext context;
+  context.values.emplace("artist", FieldValue("a", ColumnValueType::Text));
+
+  const QString base = QStringLiteral("(IF artist IS a THEN 10 ELSE 20)");
+
+  {
+    ExprParseResult result =
+        parseLibraryExpression(base + QStringLiteral(" IS 10"), registry);
+    QVERIFY(result.ok());
+    QVERIFY(result.expr->evaluate(context));
+  }
+  {
+    ExprParseResult result =
+        parseLibraryExpression(base + QStringLiteral(" = 10"), registry);
+    QVERIFY(result.ok());
+    QVERIFY(result.expr->evaluate(context));
+  }
+  {
+    ExprParseResult result =
+        parseLibraryExpression(base + QStringLiteral(" IN [5, 10]"), registry);
+    QVERIFY(result.ok());
+    QVERIFY(result.expr->evaluate(context));
+  }
+  {
+    ExprParseResult result =
+        parseLibraryExpression(base + QStringLiteral(" IN [9..11]"), registry);
+    QVERIFY(result.ok());
+    QVERIFY(result.expr->evaluate(context));
+  }
+  {
+    ExprParseResult result =
+        parseLibraryExpression(base + QStringLiteral(" < 11"), registry);
+    QVERIFY(result.ok());
+    QVERIFY(result.expr->evaluate(context));
+  }
+  {
+    ExprParseResult result =
+        parseLibraryExpression(base + QStringLiteral(" <= 10"), registry);
+    QVERIFY(result.ok());
+    QVERIFY(result.expr->evaluate(context));
+  }
+  {
+    ExprParseResult result =
+        parseLibraryExpression(base + QStringLiteral(" > 9"), registry);
+    QVERIFY(result.ok());
+    QVERIFY(result.expr->evaluate(context));
+  }
+  {
+    ExprParseResult result =
+        parseLibraryExpression(base + QStringLiteral(" >= 10"), registry);
+    QVERIFY(result.ok());
+    QVERIFY(result.expr->evaluate(context));
+  }
+
+  context.values["artist"] = FieldValue("x", ColumnValueType::Text);
+  {
+    ExprParseResult result =
+        parseLibraryExpression(base + QStringLiteral(" < 11"), registry);
+    QVERIFY(result.ok());
+    QVERIFY(!result.expr->evaluate(context));
+  }
+  {
+    ExprParseResult result =
+        parseLibraryExpression(base + QStringLiteral(" >= 20"), registry);
+    QVERIFY(result.ok());
+    QVERIFY(result.expr->evaluate(context));
+  }
+}
+
+void TestLibraryExpression::evaluate_nestedIfHasComparedWithIsBool() {
+  ColumnRegistry registry;
+
+  ExprParseResult isTrue = parseLibraryExpression(
+      QStringLiteral("((IF artist IS a THEN b / c ELSE d / e) HAS b) IS true"),
+      registry);
+  QVERIFY(isTrue.ok());
+
+  ExprParseResult isFalse = parseLibraryExpression(
+      QStringLiteral("((IF artist IS a THEN b / c ELSE d / e) HAS b) IS false"),
+      registry);
+  QVERIFY(isFalse.ok());
+
+  TestEvalContext context;
+  context.values.emplace("artist", FieldValue("a", ColumnValueType::Text));
+  QVERIFY(isTrue.expr->evaluate(context));
+  QVERIFY(!isFalse.expr->evaluate(context));
+
+  context.values["artist"] = FieldValue("x", ColumnValueType::Text);
+  QVERIFY(!isTrue.expr->evaluate(context));
+  QVERIFY(isFalse.expr->evaluate(context));
+}
+
+void TestLibraryExpression::reject_ifExprComparedWithIsDifferentType() {
+  ColumnRegistry registry;
+
+  ExprParseResult result = parseLibraryExpression(
+      QStringLiteral("(IF artist IS a THEN 1 ELSE 2) IS two"), registry);
+  QVERIFY(!result.ok());
+  QVERIFY(result.error.message.contains("not valid"));
+}
+
+void TestLibraryExpression::reject_ifWithNonBooleanCondition() {
+  ColumnRegistry registry;
+
+  ExprParseResult result = parseLibraryExpression(
+      QStringLiteral("IF \"x\" THEN \"a\" ELSE \"b\""), registry);
+
+  QVERIFY(!result.ok());
+  QVERIFY(result.error.message.contains("condition must be boolean"));
+}
+
+void TestLibraryExpression::reject_ifWithMismatchedBranchTypes() {
+  ColumnRegistry registry;
+
+  ExprParseResult result = parseLibraryExpression(
+      QStringLiteral("IF artist IS a THEN 1 ELSE \"b\""), registry);
+
+  QVERIFY(!result.ok());
+  QVERIFY(result.error.message.contains("same type"));
+}
+
+void TestLibraryExpression::reject_nestedBooleanOpInIfBranch() {
+  ColumnRegistry registry;
+
+  ExprParseResult result = parseLibraryExpression(
+      QStringLiteral("IF artist IS a THEN (\"x\" OR genre IS rock) ELSE \"y\""),
+      registry);
+
+  QVERIFY(!result.ok());
+  QVERIFY(result.error.message.contains("OR operands must be boolean"));
+}
+
 void TestLibraryExpression::reject_unknownField() {
   ColumnRegistry registry;
 
@@ -406,9 +911,9 @@ void TestLibraryExpression::reject_missingOperatorOrValue() {
 
   ExprParseResult missingOperator =
       parseLibraryExpression(QStringLiteral("artist pop"), registry);
-  QVERIFY(!missingOperator.ok());
-  QVERIFY(missingOperator.error.message.contains("Expected"));
-  QVERIFY(missingOperator.error.message.contains("operator"));
+  QVERIFY(missingOperator.ok());
+  ExprPtr missingOperatorExpected = makeLiteral("artist pop");
+  QVERIFY(*missingOperator.expr == *missingOperatorExpected);
 
   ExprParseResult missingValue =
       parseLibraryExpression(QStringLiteral("artist IS"), registry);
@@ -443,8 +948,37 @@ void TestLibraryExpression::reject_ambiguousKeywordInValue() {
       QStringLiteral("artist IS hall AND oates"), registry);
 
   QVERIFY(!result.ok());
-  QVERIFY(!result.error.message.isEmpty());
-  QVERIFY(result.error.position >= 0);
+  QVERIFY(result.error.message.contains("AND operands must be boolean"));
+}
+
+void TestLibraryExpression::reject_andWithNonBooleanOperand() {
+  ColumnRegistry registry;
+
+  ExprParseResult result =
+      parseLibraryExpression(QStringLiteral("\"x\" AND artist IS a"), registry);
+
+  QVERIFY(!result.ok());
+  QVERIFY(result.error.message.contains("AND operands must be boolean"));
+}
+
+void TestLibraryExpression::reject_orWithNonBooleanOperand() {
+  ColumnRegistry registry;
+
+  ExprParseResult result =
+      parseLibraryExpression(QStringLiteral("artist IS a OR \"x\""), registry);
+
+  QVERIFY(!result.ok());
+  QVERIFY(result.error.message.contains("OR operands must be boolean"));
+}
+
+void TestLibraryExpression::reject_notWithNonBooleanOperand() {
+  ColumnRegistry registry;
+
+  ExprParseResult result =
+      parseLibraryExpression(QStringLiteral("NOT \"x\""), registry);
+
+  QVERIFY(!result.ok());
+  QVERIFY(result.error.message.contains("NOT operand must be boolean"));
 }
 
 void TestLibraryExpression::reject_unterminatedQuotedValue() {

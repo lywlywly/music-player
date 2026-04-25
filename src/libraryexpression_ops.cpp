@@ -5,6 +5,7 @@
 
 namespace {
 int compareFieldValue(const FieldValue &fieldValue, std::string_view exprValue);
+FieldValue fieldValueFromRuntime(const ExprRuntimeValue &runtimeValue);
 
 bool fieldHasValue(const std::string &fieldText, const std::string &exprValue) {
   const QStringList parts =
@@ -84,6 +85,21 @@ int compareFieldValue(const FieldValue &fieldValue,
     return 0;
   }
   }
+}
+
+FieldValue fieldValueFromRuntime(const ExprRuntimeValue &runtimeValue) {
+  if (runtimeValue.isBool()) {
+    return FieldValue(std::get<bool>(runtimeValue.value) ? "true" : "false",
+                      ColumnValueType::Boolean);
+  }
+  if (runtimeValue.isNumber()) {
+    return FieldValue(
+        QString::number(std::get<double>(runtimeValue.value), 'g', 17)
+            .toStdString(),
+        ColumnValueType::Number);
+  }
+  return FieldValue(std::get<std::string>(runtimeValue.value),
+                    ColumnValueType::Text);
 }
 } // namespace
 
@@ -243,14 +259,26 @@ std::string GteOperator::displayName() const { return ">="; }
 ComparisonExpr::ComparisonExpr(ExprFieldRef fieldRef, ExprOperatorPtr exprOp,
                                ExprValue exprValue)
     : field(std::move(fieldRef)), op(std::move(exprOp)),
-      value(std::move(exprValue)) {}
+      value(std::move(exprValue)), hasFieldRef(true) {}
 
-bool ComparisonExpr::evaluate(const LibraryExprEvalContext &context) const {
-  const FieldValue *fieldValue = context.fieldValue(field.resolvedColumnId);
-  if (!fieldValue) {
-    return false;
+ComparisonExpr::ComparisonExpr(ExprPtr leftExpression, ExprOperatorPtr exprOp,
+                               ExprValue exprValue)
+    : leftExpr(std::move(leftExpression)), op(std::move(exprOp)),
+      value(std::move(exprValue)), hasFieldRef(false) {}
+
+ExprRuntimeValue
+ComparisonExpr::evaluateValue(const LibraryExprEvalContext &context) const {
+  if (hasFieldRef) {
+    const FieldValue *fieldValue = context.fieldValue(field.resolvedColumnId);
+    if (!fieldValue) {
+      return ExprRuntimeValue::fromBool(false);
+    }
+    return ExprRuntimeValue::fromBool(op->evaluate(*fieldValue, value));
   }
-  return op->evaluate(*fieldValue, value);
+
+  const ExprRuntimeValue leftValue = leftExpr->evaluateValue(context);
+  const FieldValue convertedLeft = fieldValueFromRuntime(leftValue);
+  return ExprRuntimeValue::fromBool(op->evaluate(convertedLeft, value));
 }
 
 bool ComparisonExpr::equals(const Expr &other) const {
@@ -258,18 +286,31 @@ bool ComparisonExpr::equals(const Expr &other) const {
   if (!comparison) {
     return false;
   }
-  return field.exprFieldName == comparison->field.exprFieldName &&
-         field.resolvedColumnId == comparison->field.resolvedColumnId &&
-         field.valueType == comparison->field.valueType &&
-         *op == *comparison->op && value.kind == comparison->value.kind &&
+  if (hasFieldRef != comparison->hasFieldRef) {
+    return false;
+  }
+  if (hasFieldRef) {
+    if (field.exprFieldName != comparison->field.exprFieldName ||
+        field.resolvedColumnId != comparison->field.resolvedColumnId ||
+        field.valueType != comparison->field.valueType) {
+      return false;
+    }
+  } else {
+    if (!leftExpr->equals(*comparison->leftExpr)) {
+      return false;
+    }
+  }
+  return *op == *comparison->op && value.kind == comparison->value.kind &&
          value.values == comparison->value.values;
 }
 
 AndExpr::AndExpr(ExprPtr leftExpr, ExprPtr rightExpr)
     : left(std::move(leftExpr)), right(std::move(rightExpr)) {}
 
-bool AndExpr::evaluate(const LibraryExprEvalContext &context) const {
-  return left->evaluate(context) && right->evaluate(context);
+ExprRuntimeValue
+AndExpr::evaluateValue(const LibraryExprEvalContext &context) const {
+  return ExprRuntimeValue::fromBool(left->evaluate(context) &&
+                                    right->evaluate(context));
 }
 
 bool AndExpr::equals(const Expr &other) const {
@@ -283,8 +324,10 @@ bool AndExpr::equals(const Expr &other) const {
 OrExpr::OrExpr(ExprPtr leftExpr, ExprPtr rightExpr)
     : left(std::move(leftExpr)), right(std::move(rightExpr)) {}
 
-bool OrExpr::evaluate(const LibraryExprEvalContext &context) const {
-  return left->evaluate(context) || right->evaluate(context);
+ExprRuntimeValue
+OrExpr::evaluateValue(const LibraryExprEvalContext &context) const {
+  return ExprRuntimeValue::fromBool(left->evaluate(context) ||
+                                    right->evaluate(context));
 }
 
 bool OrExpr::equals(const Expr &other) const {
@@ -297,8 +340,9 @@ bool OrExpr::equals(const Expr &other) const {
 
 NotExpr::NotExpr(ExprPtr childExpr) : child(std::move(childExpr)) {}
 
-bool NotExpr::evaluate(const LibraryExprEvalContext &context) const {
-  return !child->evaluate(context);
+ExprRuntimeValue
+NotExpr::evaluateValue(const LibraryExprEvalContext &context) const {
+  return ExprRuntimeValue::fromBool(!child->evaluate(context));
 }
 
 bool NotExpr::equals(const Expr &other) const {
@@ -307,4 +351,42 @@ bool NotExpr::equals(const Expr &other) const {
     return false;
   }
   return child->equals(*notExpr->child);
+}
+
+LiteralExpr::LiteralExpr(ExprRuntimeValue runtimeValue)
+    : value(std::move(runtimeValue)) {}
+
+ExprRuntimeValue
+LiteralExpr::evaluateValue(const LibraryExprEvalContext &) const {
+  return value;
+}
+
+bool LiteralExpr::equals(const Expr &other) const {
+  const auto *literal = dynamic_cast<const LiteralExpr *>(&other);
+  if (!literal) {
+    return false;
+  }
+  return value.value == literal->value.value;
+}
+
+IfExpr::IfExpr(ExprPtr conditionExpr, ExprPtr thenBranch, ExprPtr elseBranch)
+    : condition(std::move(conditionExpr)), thenExpr(std::move(thenBranch)),
+      elseExpr(std::move(elseBranch)) {}
+
+ExprRuntimeValue
+IfExpr::evaluateValue(const LibraryExprEvalContext &context) const {
+  if (condition->evaluate(context)) {
+    return thenExpr->evaluateValue(context);
+  }
+  return elseExpr->evaluateValue(context);
+}
+
+bool IfExpr::equals(const Expr &other) const {
+  const auto *ifExpr = dynamic_cast<const IfExpr *>(&other);
+  if (!ifExpr) {
+    return false;
+  }
+  return condition->equals(*ifExpr->condition) &&
+         thenExpr->equals(*ifExpr->thenExpr) &&
+         elseExpr->equals(*ifExpr->elseExpr);
 }

@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 struct ExprValue {
@@ -33,6 +34,40 @@ struct ExprFieldRef {
 struct LibraryExprEvalContext {
   virtual ~LibraryExprEvalContext() = default;
   virtual const FieldValue *fieldValue(std::string_view fieldId) const = 0;
+};
+
+struct ExprRuntimeValue {
+  std::variant<bool, std::string, double> value = false;
+
+  static ExprRuntimeValue fromBool(bool booleanValue) {
+    ExprRuntimeValue runtimeValue;
+    runtimeValue.value = booleanValue;
+    return runtimeValue;
+  }
+
+  static ExprRuntimeValue fromText(std::string textValue) {
+    ExprRuntimeValue runtimeValue;
+    runtimeValue.value = std::move(textValue);
+    return runtimeValue;
+  }
+
+  static ExprRuntimeValue fromNumber(double numberValue) {
+    ExprRuntimeValue runtimeValue;
+    runtimeValue.value = numberValue;
+    return runtimeValue;
+  }
+
+  bool isBool() const { return std::holds_alternative<bool>(value); }
+  bool isText() const { return std::holds_alternative<std::string>(value); }
+  bool isNumber() const { return std::holds_alternative<double>(value); }
+  bool boolValueOrFalse() const {
+    if (!isBool()) {
+      return false;
+    }
+    return std::get<bool>(value);
+  }
+  const std::string &textValue() const { return std::get<std::string>(value); }
+  double numberValue() const { return std::get<double>(value); }
 };
 
 struct ExprOperator {
@@ -108,7 +143,11 @@ struct GteOperator final : ExprOperator {
 
 struct Expr {
   virtual ~Expr() = default;
-  virtual bool evaluate(const LibraryExprEvalContext &context) const = 0;
+  virtual ExprRuntimeValue
+  evaluateValue(const LibraryExprEvalContext &context) const = 0;
+  bool evaluate(const LibraryExprEvalContext &context) const {
+    return evaluateValue(context).boolValueOrFalse();
+  }
   virtual bool equals(const Expr &other) const = 0;
 };
 
@@ -119,13 +158,18 @@ inline bool operator==(const Expr &left, const Expr &right) {
 using ExprPtr = std::unique_ptr<Expr>;
 
 struct ComparisonExpr final : Expr {
+  ExprPtr leftExpr;
   ExprFieldRef field;
   ExprOperatorPtr op;
   ExprValue value;
+  bool hasFieldRef = false;
 
   ComparisonExpr(ExprFieldRef fieldRef, ExprOperatorPtr exprOp,
                  ExprValue exprValue);
-  bool evaluate(const LibraryExprEvalContext &context) const override;
+  ComparisonExpr(ExprPtr leftExpression, ExprOperatorPtr exprOp,
+                 ExprValue exprValue);
+  ExprRuntimeValue
+  evaluateValue(const LibraryExprEvalContext &context) const override;
   bool equals(const Expr &other) const override;
 };
 
@@ -134,7 +178,8 @@ struct AndExpr final : Expr {
   ExprPtr right;
 
   AndExpr(ExprPtr leftExpr, ExprPtr rightExpr);
-  bool evaluate(const LibraryExprEvalContext &context) const override;
+  ExprRuntimeValue
+  evaluateValue(const LibraryExprEvalContext &context) const override;
   bool equals(const Expr &other) const override;
 };
 
@@ -143,7 +188,8 @@ struct OrExpr final : Expr {
   ExprPtr right;
 
   OrExpr(ExprPtr leftExpr, ExprPtr rightExpr);
-  bool evaluate(const LibraryExprEvalContext &context) const override;
+  ExprRuntimeValue
+  evaluateValue(const LibraryExprEvalContext &context) const override;
   bool equals(const Expr &other) const override;
 };
 
@@ -151,7 +197,28 @@ struct NotExpr final : Expr {
   ExprPtr child;
 
   explicit NotExpr(ExprPtr childExpr);
-  bool evaluate(const LibraryExprEvalContext &context) const override;
+  ExprRuntimeValue
+  evaluateValue(const LibraryExprEvalContext &context) const override;
+  bool equals(const Expr &other) const override;
+};
+
+struct LiteralExpr final : Expr {
+  ExprRuntimeValue value;
+
+  explicit LiteralExpr(ExprRuntimeValue runtimeValue);
+  ExprRuntimeValue
+  evaluateValue(const LibraryExprEvalContext &context) const override;
+  bool equals(const Expr &other) const override;
+};
+
+struct IfExpr final : Expr {
+  ExprPtr condition;
+  ExprPtr thenExpr;
+  ExprPtr elseExpr;
+
+  IfExpr(ExprPtr conditionExpr, ExprPtr thenBranch, ExprPtr elseBranch);
+  ExprRuntimeValue
+  evaluateValue(const LibraryExprEvalContext &context) const override;
   bool equals(const Expr &other) const override;
 };
 

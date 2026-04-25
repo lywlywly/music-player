@@ -163,7 +163,7 @@ void TestLibrarySearchDialogUi::
   QCOMPARE(resultsTable->model()->rowCount(), 0);
   QVERIFY(errorLabel->isVisible());
   QVERIFY(errorLabel->text().contains("Expected"));
-  QVERIFY(errorLabel->text().contains("operator"));
+  QVERIFY(errorLabel->text().contains("field name"));
 }
 
 void TestLibrarySearchDialogUi::createPlaylistButton_emitsMatchingSongIds() {

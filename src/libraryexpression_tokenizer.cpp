@@ -113,6 +113,12 @@ tokenizeLibraryExpression(const QString &expressionText) {
       kind = ExprTokenKind::KeywordHas;
     } else if (upper == QStringLiteral("IN")) {
       kind = ExprTokenKind::KeywordIn;
+    } else if (upper == QStringLiteral("IF")) {
+      kind = ExprTokenKind::KeywordIf;
+    } else if (upper == QStringLiteral("THEN")) {
+      kind = ExprTokenKind::KeywordThen;
+    } else if (upper == QStringLiteral("ELSE")) {
+      kind = ExprTokenKind::KeywordElse;
     }
     tokens.push_back({kind, text, start, i});
   }
