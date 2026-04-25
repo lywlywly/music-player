@@ -3,16 +3,25 @@
 
 #include "columnregistry.h"
 #include "fieldvalue.h"
+#include "libraryexpression.h"
 #include <QSqlDatabase>
+#include <QString>
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#ifdef MYPLAYER_TESTING
-#include <functional>
-#endif
 
 using MSong = std::unordered_map<std::string, FieldValue>;
+
+inline QString songFieldText(const MSong &song, const std::string &field) {
+  auto it = song.find(field);
+  if (it == song.end()) {
+    return QStringLiteral("");
+  }
+  return QString::fromStdString(it->second.text);
+}
+
 class DatabaseManager;
 #ifdef MYPLAYER_TESTING
 using SongParseFn =
@@ -38,6 +47,8 @@ public:
   // add to library if not exists, else do nothing, return primary key
   int addTolibrary(MSong &&);
   const MSong &getSongByPK(int) const;
+  ExprParseResult parseLibraryExpression(const QString &expressionText) const;
+  std::vector<int> search(const Expr &expression) const;
   std::vector<int> query(std::string) const;
   const std::vector<int> &registerQuery(std::string) const;
   void unregisterQuery(std::string) const;

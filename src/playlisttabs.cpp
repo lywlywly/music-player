@@ -1,7 +1,7 @@
 #include "playlisttabs.h"
 #include "ui_playlisttabs.h"
-#include <QApplication>
 #include <QActionGroup>
+#include <QApplication>
 #include <QHeaderView>
 #include <QKeyEvent>
 #include <QProgressDialog>
@@ -66,6 +66,17 @@ void PlaylistTabs::navigateIndex(MSong, int row, Playlist *pl) {
 
 Playlist *PlaylistTabs::currentPlaylist() const { return currentPlaylist_; }
 
+void PlaylistTabs::createNewPlaylistTabFromSongIds(const QList<int> &songIds) {
+  if (songIds.isEmpty()) {
+    return;
+  }
+
+  Playlist &playlist = addPlaylistTab(getNewPlaylistName(), nextPlaylistId());
+  for (int songId : songIds) {
+    playlist.addSongByPk(songId);
+  }
+}
+
 void PlaylistTabs::notifySongDataChangedInAllPlaylists(
     const std::string &filepath) {
   if (filepath.empty()) {
@@ -128,14 +139,7 @@ void PlaylistTabs::onTabContextMenuRequested(const QPoint &pos) {
   QAction *selected = menu.exec(tabBar->mapToGlobal(pos));
 
   if (selected == addAction) {
-    QWidget *newTab = new QWidget;
-    QGridLayout *layout = new QGridLayout(newTab);
-    QTableView *tbv = new QTableView(this);
-    layout->addWidget(tbv);
-    QString newPlaylistName = getNewPlaylistName();
-    ui->tabWidget->addTab(newTab, newPlaylistName);
-    int newPid = playlistMap.size() + 1;
-    createPlaylist(newPlaylistName, newPid, tbv);
+    addPlaylistTab(getNewPlaylistName(), nextPlaylistId());
   } else if (selected == refreshAction && index != -1) {
     const QString playlistName = ui->tabWidget->tabText(index);
     refreshPlaylistMetadata(&playlistMap.at(playlistName.toStdString()));
@@ -254,6 +258,21 @@ Playlist &PlaylistTabs::createPlaylist(const QString &playlistName,
   playlist.registerStatusUpdateCallback();
   return playlist;
 }
+
+Playlist &PlaylistTabs::addPlaylistTab(const QString &playlistName,
+                                       int playlistId) {
+  QWidget *newTab = new QWidget;
+  QGridLayout *layout = new QGridLayout(newTab);
+  QTableView *tbv = new QTableView(this);
+  layout->addWidget(tbv);
+  qDebug() << "add playlist:" << playlistName;
+  ui->tabWidget->addTab(newTab, playlistName);
+  Playlist &playlist = createPlaylist(playlistName, playlistId, tbv);
+  ui->tabWidget->setCurrentWidget(newTab);
+  return playlist;
+}
+
+int PlaylistTabs::nextPlaylistId() { return nextPlaylistId_++; }
 
 QString PlaylistTabs::getNewPlaylistName() {
   if (playlistMap.find("New Playlist") == playlistMap.end())

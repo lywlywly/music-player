@@ -2,6 +2,7 @@
 #include <QDataStream>
 #include <QDir>
 #include <QFile>
+#include <QLineEdit>
 #include <QMainWindow>
 #include <QObject>
 #include <QPushButton>
@@ -17,6 +18,7 @@
 
 #include "../dummyaudioplayer.h"
 #include "../dummysystemmediainterface.h"
+#include "../librarysearchdialog.h"
 #include "../mainwindow.h"
 #include "../playbackbackendmanager.h"
 #include "../playlisttabs.h"
@@ -105,6 +107,8 @@ private slots:
   void playlistTableBackspace_removesSelectedRow();
   void queueActions_fromContextMenu_areWired();
   void playbackOrderMenuActions_areExclusive();
+  void librarySearchAction_opensDialog();
+  void librarySearchDialog_canCreateNewPlaylistTabFromResults();
 
 private:
   MainWindow *window_ = nullptr;
@@ -463,6 +467,60 @@ void TestMainWindow::playbackOrderMenuActions_areExclusive() {
     QTRY_VERIFY(c.checked->isChecked());
     QVERIFY(!c.unchecked->isChecked());
   }
+}
+
+void TestMainWindow::librarySearchAction_opensDialog() {
+  QAction *searchAction = window_->findChild<QAction *>("actionSearch");
+  QVERIFY(searchAction != nullptr);
+
+  searchAction->trigger();
+
+  QTRY_VERIFY(window_->findChild<LibrarySearchDialog *>() != nullptr);
+}
+
+void TestMainWindow::librarySearchDialog_canCreateNewPlaylistTabFromResults() {
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(tabs != nullptr);
+  Playlist *playlist = tabs->currentPlaylist();
+  QVERIFY(playlist != nullptr);
+
+  const QString wav1 = workDir_->filePath("search-tab-song1.wav");
+  const QString wav2 = workDir_->filePath("search-tab-song2.wav");
+  const QString wav3 = workDir_->filePath("search-tab-song3.wav");
+  QVERIFY(writeSilentWav(wav1));
+  QVERIFY(writeSilentWav(wav2));
+  QVERIFY(writeSilentWav(wav3));
+
+  playlist->addSong(makeSong("Song1", "Artist", wav1));
+  playlist->addSong(makeSong("Song2", "Artist", wav2));
+  playlist->addSong(makeSong("Song3", "Artist", wav3));
+
+  QAction *searchAction = window_->findChild<QAction *>("actionSearch");
+  QVERIFY(searchAction != nullptr);
+  searchAction->trigger();
+
+  LibrarySearchDialog *dialog = window_->findChild<LibrarySearchDialog *>();
+  QTRY_VERIFY(dialog != nullptr);
+
+  QLineEdit *expressionEdit = dialog->findChild<QLineEdit *>("expression_edit");
+  QPushButton *searchButton = dialog->findChild<QPushButton *>("search_button");
+  QPushButton *createPlaylistButton =
+      dialog->findChild<QPushButton *>("create_playlist_button");
+  QVERIFY(expressionEdit != nullptr);
+  QVERIFY(searchButton != nullptr);
+  QVERIFY(createPlaylistButton != nullptr);
+
+  expressionEdit->setText("title IS song2");
+  QTest::mouseClick(searchButton, Qt::LeftButton);
+  QTRY_VERIFY(createPlaylistButton->isEnabled());
+
+  const int oldTabCount = tabs->tabWidget()->count();
+  QTest::mouseClick(createPlaylistButton, Qt::LeftButton);
+
+  QTRY_COMPARE(tabs->tabWidget()->count(), oldTabCount + 1);
+  QTRY_COMPARE(tabs->currentPlaylist()->songCount(), 1);
+  QCOMPARE(tabs->currentPlaylist()->getSongByIndex(0).at("title").text,
+           std::string("Song2"));
 }
 
 QTEST_MAIN(TestMainWindow)

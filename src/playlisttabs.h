@@ -33,6 +33,7 @@ public:
   QAction *playEndAction() const;
   QTabWidget *tabWidget() const;
   Playlist *currentPlaylist() const;
+  void createNewPlaylistTabFromSongIds(const QList<int> &songIds);
   void setUpTableView(Playlist *, QTableView *);
   void navigateIndex(MSong, int row, Playlist *pl);
   // Emits row data-changed notifications for this filepath in every playlist
@@ -46,6 +47,8 @@ signals:
 private:
   Playlist &createPlaylist(const QString &playlistName, int playlistId,
                            QTableView *tbv);
+  Playlist &addPlaylistTab(const QString &playlistName, int playlistId);
+  int nextPlaylistId();
   void onTabChanged(int index);
   void setUpCurrentPlaylist();
   void setUpPlaybackManager();
@@ -68,6 +71,7 @@ private:
   ColumnRegistry *columnRegistry_ = nullptr;
   GlobalColumnLayoutManager *columnLayoutManager_ = nullptr;
   bool applyingColumnLayout_ = false;
+  int nextPlaylistId_ = 2;
   // TODO: separate playlist manager class
   std::map<std::string, Playlist> playlistMap;
 };

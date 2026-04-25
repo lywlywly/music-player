@@ -1,21 +1,10 @@
 #include "playlist.h"
 
-namespace {
-QString songField(const MSong &song, const char *field) {
-  auto it = song.find(field);
-  if (it == song.end()) {
-    return {};
-  }
-  return QString::fromStdString(it->second.text);
-}
-} // namespace
-
 Playlist::Playlist(SongStore &&st, PlaybackQueue &queue, int initialLastPlayed,
                    GlobalColumnLayoutManager &columnLayoutManager,
                    QObject *parent)
     : QAbstractTableModel(parent), store{std::move(st)}, playbackQueue{queue},
-      lastPlayed(initialLastPlayed),
-      columnLayoutManager_{columnLayoutManager} {
+      lastPlayed(initialLastPlayed), columnLayoutManager_{columnLayoutManager} {
   connect(&columnLayoutManager_, &GlobalColumnLayoutManager::layoutChanged,
           this, [this]() {
             beginResetModel();
@@ -64,7 +53,7 @@ QVariant Playlist::data(const QModelIndex &index, int role) const {
 
   const MSong &song = getSongByIndex(index.row());
   const std::string field = columnId.toStdString();
-  return songField(song, field.c_str());
+  return songFieldText(song, field);
 }
 
 QVariant Playlist::headerData(int section, Qt::Orientation orientation,
@@ -75,7 +64,8 @@ QVariant Playlist::headerData(int section, Qt::Orientation orientation,
 
   if (orientation == Qt::Orientation::Horizontal) {
     const QString columnId = columnIdAt(section);
-    const ColumnDefinition *definition = definitionForColumnId(columnId);
+    const ColumnDefinition *definition =
+        columnLayoutManager_.registry().findColumn(columnId);
     return definition ? QVariant{definition->title} : QVariant{columnId};
   }
 
@@ -83,7 +73,8 @@ QVariant Playlist::headerData(int section, Qt::Orientation orientation,
 }
 
 void Playlist::sortByColumnId(const QString &columnId, int order) {
-  const ColumnDefinition *definition = definitionForColumnId(columnId);
+  const ColumnDefinition *definition =
+      columnLayoutManager_.registry().findColumn(columnId);
   if (!definition || !definition->sortable ||
       definition->source != ColumnSource::SongAttribute) {
     return;
@@ -123,6 +114,16 @@ void Playlist::addSong(MSong &&s) {
   const int row = songCount();
   beginInsertRows(QModelIndex(), row, row);
   store.addSong(std::move(s));
+  endInsertRows();
+
+  if (sizeChangeCallback)
+    sizeChangeCallback(songCount());
+}
+
+void Playlist::addSongByPk(int songPk) {
+  const int row = songCount();
+  beginInsertRows(QModelIndex(), row, row);
+  store.addSongByPk(songPk);
   endInsertRows();
 
   if (sizeChangeCallback)
@@ -251,9 +252,4 @@ void Playlist::emitSongDataChangedByFilepath(const std::string &filepath) {
     }
     emit dataChanged(index(row, 0), index(row, columnCount() - 1));
   }
-}
-
-const ColumnDefinition *
-Playlist::definitionForColumnId(const QString &columnId) const {
-  return columnLayoutManager_.registry().findColumn(columnId);
 }

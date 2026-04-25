@@ -6,8 +6,20 @@
 #include <string>
 
 struct FieldValue {
+  // Declared field type from column definition.
   ColumnValueType type = ColumnValueType::Text;
+
+  // Canonical string representation loaded from DB/tag/query input.
+  // Presence checks should use this field: an empty text means "no value".
   std::string text;
+
+  // Parsed typed cache for non-text fields.
+  // Number   -> typed.number
+  // DateTime -> typed.epochMs (Unix epoch milliseconds)
+  // Boolean  -> typed.boolean
+  //
+  // Note: this cache alone is not a reliable presence signal because failed
+  // parses keep default values. Use `text.empty()` to test value presence.
   union {
     double number;
     int64_t epochMs;
@@ -23,6 +35,8 @@ struct FieldValue {
   void assign(const std::string &textValue, ColumnValueType valueType);
   static FieldValue fromDefinition(const ColumnDefinition *definition,
                                    const std::string &textValue);
+  static bool canConvert(const std::string &textValue,
+                         ColumnValueType valueType);
   bool operator==(const FieldValue &other) const;
   operator const std::string &() const { return text; }
 };

@@ -1,6 +1,9 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
+#include "columnregistry.h"
+#include "databasemanager.h"
+#include "globalcolumnlayoutmanager.h"
 #include "isystemmediainterface.h"
 #include "lyricsloader.h"
 #include "lyricsmanager.h"
@@ -8,9 +11,6 @@
 #include "playbackmanager.h"
 #include "playlist.h"
 #include "playlisttabs.h"
-#include "columnregistry.h"
-#include "databasemanager.h"
-#include "globalcolumnlayoutmanager.h"
 #include "songlibrary.h"
 #include <QMainWindow>
 
@@ -58,6 +58,7 @@ private:
   void setUpPlaybackActions();
   void setUpPlaylist();
   void setUpMenuBar();
+  void openLibrarySearchDialog();
   // TODO: remove song from current playlist, check if any other playlist
   // references the song, if no, remove from library
   void removeSong();

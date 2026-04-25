@@ -14,6 +14,7 @@ public:
   // Assumes DB write preconditions are satisfied; on violation/write failure,
   // process crashes via qFatal.
   void addSong(MSong &&);
+  void addSongByPk(int songPk);
   // remove song by Pk
   void removeSongByPk(int);
   // remove song by index (current order)
@@ -28,9 +29,9 @@ public:
   int getPkByIndex(int) const;
   int getIndexByPk(int) const;
   void sortByField(std::string, int = 0);
-  std::vector<int> query(std::string);
-  std::vector<int> &queryView(std::string);
-  std::vector<const std::string *> queryField(std::string);
+  std::vector<int> expression(std::string);
+  std::vector<int> &expressionView(std::string);
+  std::vector<const std::string *> expressionField(std::string);
   const std::vector<int> &getSongsView() const;
   const std::vector<int> &getIndices() const;
   void refreshSongsFromFilepaths(

@@ -13,6 +13,7 @@
 #include "windowsmediacenter.h"
 #endif
 #include "databasemanager.h"
+#include "librarysearchdialog.h"
 #include "settingsdialog.h"
 #include "songparser.h"
 #include <QActionGroup>
@@ -22,8 +23,8 @@
 #include <QProgressDialog>
 #include <QSettings>
 #include <QSqlDatabase>
-#include <QStatusBar>
 #include <QStandardPaths>
+#include <QStatusBar>
 
 namespace {
 QString formatPlaybackTime(qint64 milliseconds) {
@@ -102,6 +103,8 @@ void MainWindow::setUpMenuBar() {
     playbackOrderMenuActionGroup->addAction(act);
   }
   ui->actionDefault->setChecked(true);
+  connect(ui->actionSearch, &QAction::triggered, this,
+          &MainWindow::openLibrarySearchDialog);
 }
 
 void MainWindow::setUpPlaylist() {
@@ -131,8 +134,11 @@ void MainWindow::setUpPlaylist() {
 
 void MainWindow::initSettings() {
   connect(ui->actionSettings, &QAction::triggered, this, [this]() {
-    SettingsDialog dialog(columnRegistry_, databaseManager_, this);
-    connect(&dialog, &SettingsDialog::backendChanged, this,
+    SettingsDialog *dialog =
+        new SettingsDialog(columnRegistry_, databaseManager_, this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setModal(true);
+    connect(dialog, &SettingsDialog::backendChanged, this,
             [this](PlaybackBackendManager::Backend backend) {
               if (backendManager->currentBackend() != backend) {
                 backendManager->setBackend(backend);
@@ -140,13 +146,13 @@ void MainWindow::initSettings() {
                 setUpPlaybackBackend();
               }
             });
-    connect(&dialog, &SettingsDialog::customFieldsChanged, this, [this]() {
+    connect(dialog, &SettingsDialog::customFieldsChanged, this, [this]() {
       if (!columnRegistry_.loadDynamicColumns(databaseManager_.db())) {
         qFatal("initSettings: failed to reload dynamic columns");
       }
       columnLayoutManager_.refreshFromRegistry();
     });
-    dialog.exec();
+    dialog->show();
   });
 }
 
@@ -340,8 +346,8 @@ void MainWindow::updatePlaybackTimeStatus() {
     statusBar()->clearMessage();
     return;
   }
-  statusBar()->showMessage(QStringLiteral("%1 / %2")
-                               .arg(formatPlaybackTime(currentPositionMs_),
+  statusBar()->showMessage(
+      QStringLiteral("%1 / %2").arg(formatPlaybackTime(currentPositionMs_),
                                     formatPlaybackTime(currentDurationMs_)));
 }
 
@@ -419,6 +425,15 @@ void MainWindow::openFolder() {
   }
   progressDialog.setValue(static_cast<int>(files.size()));
   playlistTabs->currentPlaylist()->addSongs(std::move(songs));
+}
+
+void MainWindow::openLibrarySearchDialog() {
+  LibrarySearchDialog *dialog =
+      new LibrarySearchDialog(songLibrary, columnLayoutManager_, this);
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  connect(dialog, &LibrarySearchDialog::createPlaylistRequested, playlistTabs,
+          &PlaylistTabs::createNewPlaylistTabFromSongIds);
+  dialog->show();
 }
 
 MainWindow::~MainWindow() { delete ui; }

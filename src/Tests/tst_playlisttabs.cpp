@@ -64,6 +64,7 @@ private slots:
   void navigateIndex_selectsTargetRow();
   void notifySongDataChangedInAllPlaylists_notifiesMatchingRows();
   void customContextMenu_bindsRowIntoQueueActions();
+  void createNewPlaylistTabFromSongIds_createsTabAndCopiesSongs();
 
 private:
   ColumnRegistry *registry_ = nullptr;
@@ -204,6 +205,25 @@ void TestPlaylistTabs::customContextMenu_bindsRowIntoQueueActions() {
   tabs_->onCustomContextMenuRequested(QPoint(-100, -100));
   QVERIFY(!tabs_->playNextAction()->isEnabled());
   QVERIFY(!tabs_->playEndAction()->isEnabled());
+}
+
+void TestPlaylistTabs::
+    createNewPlaylistTabFromSongIds_createsTabAndCopiesSongs() {
+  Playlist *pl = tabs_->currentPlaylist();
+  QVERIFY(pl != nullptr);
+  pl->addSong(makeSong("A", "Artist", "/tmp/pt-search-a.mp3", "1"));
+  pl->addSong(makeSong("B", "Artist", "/tmp/pt-search-b.mp3", "2"));
+
+  const QList<int> songIds = {pl->getPkByIndex(0), pl->getPkByIndex(1)};
+  tabs_->createNewPlaylistTabFromSongIds(songIds);
+
+  QCOMPARE(tabs_->tabWidget()->count(), 2);
+  QCOMPARE(tabs_->tabWidget()->currentIndex(), 1);
+  Playlist *newPlaylist = tabs_->currentPlaylist();
+  QVERIFY(newPlaylist != nullptr);
+  QCOMPARE(newPlaylist->songCount(), 2);
+  QCOMPARE(newPlaylist->getSongByIndex(0).at("title").text, std::string("A"));
+  QCOMPARE(newPlaylist->getSongByIndex(1).at("title").text, std::string("B"));
 }
 
 QTEST_MAIN(TestPlaylistTabs)

@@ -78,6 +78,14 @@ int SongStore::songCount() const { return songPKs.size(); }
 
 void SongStore::addSong(MSong &&s) {
   const int songId = library.addTolibrary(std::move(s));
+  addSongByPk(songId);
+}
+
+void SongStore::addSongByPk(int songId) {
+  if (songId < 0) {
+    qFatal("addSongByPk: invalid song id=%d", songId);
+  }
+  static_cast<void>(library.getSongByPK(songId));
   songPKs.push_back(songId);
   if (indices.size() < songId + 1)
     indices.resize(songId + 1, -1);
@@ -87,9 +95,7 @@ void SongStore::addSong(MSong &&s) {
   }
 }
 
-void SongStore::removeSongByPk(int pk) {
-  removeSongByIndex(indices.at(pk));
-}
+void SongStore::removeSongByPk(int pk) { removeSongByIndex(indices.at(pk)); }
 
 void SongStore::removeSongByIndex(int i) {
   songPKs.erase(songPKs.begin() + i);

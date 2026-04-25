@@ -32,13 +32,21 @@ void SongLibrary::loadFromDatabase() {
 }
 
 namespace {
-QString songFieldOrEmpty(const MSong &song, const std::string &key) {
-  auto it = song.find(key);
-  if (it == song.end()) {
-    return QStringLiteral("");
+class SongLibraryExprEvalContext final : public LibraryExprEvalContext {
+public:
+  explicit SongLibraryExprEvalContext(const MSong &song) : song_(song) {}
+
+  const FieldValue *fieldValue(std::string_view fieldId) const override {
+    auto it = song_.find(std::string(fieldId));
+    if (it == song_.end()) {
+      return nullptr;
+    }
+    return &it->second;
   }
-  return QString::fromStdString(it->second.text);
-}
+
+private:
+  const MSong &song_;
+};
 } // namespace
 
 int SongLibrary::addTolibrary(MSong &&s) {
@@ -80,6 +88,27 @@ int SongLibrary::addTolibrary(MSong &&s) {
   syncDynamicAttributesBySongId(songId, songs[songId]);
 
   return songId;
+}
+
+ExprParseResult
+SongLibrary::parseLibraryExpression(const QString &expressionText) const {
+  return ::parseLibraryExpression(expressionText, columnRegistry_);
+}
+
+std::vector<int> SongLibrary::search(const Expr &expression) const {
+  std::vector<int> matches;
+  matches.reserve(songs.size());
+  for (int songId = 0; songId < static_cast<int>(songs.size()); ++songId) {
+    const MSong &song = songs[songId];
+    if (song.empty()) {
+      continue;
+    }
+    SongLibraryExprEvalContext context(song);
+    if (expression.evaluate(context)) {
+      matches.push_back(songId);
+    }
+  }
+  return matches;
 }
 
 std::vector<int> SongLibrary::query(std::string artist) const {
@@ -453,7 +482,7 @@ int SongLibrary::ensureSongInDb(const MSong &song) {
                      .arg(columnNames.join(", "), placeholders.join(", ")));
   for (const QString &columnId : columns) {
     const std::string key = columnId.toStdString();
-    const QString value = songFieldOrEmpty(song, key);
+    const QString value = songFieldText(song, key);
     insert.bindValue(":" + columnId, value);
   }
   if (!insert.exec()) {
@@ -488,7 +517,7 @@ void SongLibrary::syncBuiltInFieldsBySongId(int songId, const MSong &song) {
                          .arg(assignments.join(", ")));
   for (const QString &columnId : columns) {
     const std::string key = columnId.toStdString();
-    const QString value = songFieldOrEmpty(song, key);
+    const QString value = songFieldText(song, key);
     updateSong.bindValue(":" + columnId, value);
 
     const ColumnDefinition *definition = columnRegistry_.findColumn(columnId);

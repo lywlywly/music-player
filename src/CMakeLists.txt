@@ -66,6 +66,18 @@ set(PROJECT_SOURCES
   ifilesystemmonitor.h
   isystemmediainterface.h
   jumpslider.h
+  libraryexpression.h
+  libraryexpression_tokenizer.h
+  libraryexpression_tokenizer.cpp
+  libraryexpression_parser.h
+  libraryexpression_parser.cpp
+  libraryexpression_ops.h
+  libraryexpression_ops.cpp
+  librarysearchdialog.ui
+  librarysearchdialog.h
+  librarysearchdialog.cpp
+  librarysearchresultsmodel.h
+  librarysearchresultsmodel.cpp
   lyricsloader.h
   lyricsloader.cpp
   lyricsmanager.h
@@ -176,6 +188,7 @@ if(APPLE)
   target_link_libraries(
     MYLib
     ${CMAKE_SOURCE_DIR}/lib/libefsw-static-debug.a
+    "-framework CoreAudio"
     "-framework Foundation"
     "-framework MediaPlayer"
   )
@@ -199,5 +212,6 @@ if(APPLE)
 endif()
 
 if(BUILD_TESTING)
+  enable_testing()
   add_subdirectory(Tests)
 endif()

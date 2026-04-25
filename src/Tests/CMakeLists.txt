@@ -22,6 +22,8 @@ set(TEST_NAMES
     databasemanager
     dummyaudioplayer
     dummysystemmediainterface
+    libraryexpression
+    librarysearchdialog_ui
     mainwindow
     playbackqueue
     settingsdialog_ui
@@ -41,6 +43,10 @@ set_tests_properties(mainwindow PROPERTIES
 )
 
 set_tests_properties(settingsdialog_ui PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
+
+set_tests_properties(librarysearchdialog_ui PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
 )
 

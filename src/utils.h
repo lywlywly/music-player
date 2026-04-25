@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <string>
+#include <string_view>
 
 namespace util {
 
@@ -16,6 +17,15 @@ inline std::filesystem::path getHomePath() {
   const char *home = std::getenv("HOME");
 #endif
   return home ? std::filesystem::path(home) : std::filesystem::path{};
+}
+
+inline QString normalizedText(const QString &text) {
+  return text.trimmed().toLower();
+}
+
+inline std::string normalizedText(std::string_view text) {
+  return normalizedText(QString::fromStdString(std::string(text)))
+      .toStdString();
 }
 
 inline bool createDirectory(const std::filesystem::path &path) {

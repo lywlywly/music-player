@@ -16,7 +16,8 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
   - ✅ Random (avoid too-recent items)
   - ⬜ Random by album/artist
 - ⬜ Media folder monitoring
-- ⬜ Search query patterns
+- 🟡 Search expressions
+  - See [Search Expressions](#search-expressions)
 - ⬜ Playback statistics
   - ⬜ Cloud sync for playback statistics
 - ⬜ CLI tool and headless mode
@@ -30,3 +31,11 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
 - `QMediaPlayer` seek accuracy on macOS:
   <https://forum.qt.io/topic/107671/qmediaplayer-unable-to-seek-accurately-on-macos>
 - Custom slider allows movement when no value is set
+
+## Search Expressions
+
+- Implemented: boolean operators (`AND`/`OR`/`NOT`), parentheses, comparison operators (`IS`/`=`, `HAS`, `IN`, `<`, `<=`, `>`, `>=`), and list/range values.
+- Implemented: typed conversion/comparison for numeric, datetime, and boolean fields.
+- Next: evolve this into a fully typed expression system so non-boolean value expressions are first-class.
+- Later goal example: `IF encoding IN [flac, alac, pcm, wavpack] THEN "lossless" ELSE "lossy"`.
+- Compatibility goal: keep current query syntax valid as a subset while extending the language.

@@ -1,4 +1,5 @@
 #include "fieldvalue.h"
+#include "utils.h"
 #include <QDate>
 #include <QDateTime>
 #include <QRegularExpression>
@@ -75,7 +76,7 @@ bool parseDateTime(const std::string &text, int64_t &out) {
 }
 
 bool parseBoolean(const std::string &text, bool &out) {
-  const QString normalized = QString::fromStdString(text).trimmed().toLower();
+  const std::string normalized = util::normalizedText(text);
   if (normalized == "yes" || normalized == "true" || normalized == "1") {
     out = true;
     return true;
@@ -149,6 +150,27 @@ FieldValue FieldValue::fromDefinition(const ColumnDefinition *definition,
   const ColumnValueType type =
       definition ? definition->valueType : ColumnValueType::Text;
   return FieldValue(textValue, type);
+}
+
+bool FieldValue::canConvert(const std::string &textValue,
+                            ColumnValueType valueType) {
+  switch (valueType) {
+  case ColumnValueType::Number: {
+    double parsed = 0.0;
+    return parseNumber(textValue, parsed);
+  }
+  case ColumnValueType::DateTime: {
+    int64_t parsed = 0;
+    return parseDateTime(textValue, parsed);
+  }
+  case ColumnValueType::Boolean: {
+    bool parsed = false;
+    return parseBoolean(textValue, parsed);
+  }
+  case ColumnValueType::Text:
+  default:
+    return true;
+  }
 }
 
 bool FieldValue::operator==(const FieldValue &other) const {

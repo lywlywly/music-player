@@ -27,6 +27,7 @@ public:
   int songCount() const;
   bool empty() const;
   void addSong(MSong &&);
+  void addSongByPk(int songPk);
   void addSongs(std::vector<MSong> &&);
   void removeSong(int);
   // Clears all rows from this Qt model and its backing SongStore. For
@@ -61,7 +62,6 @@ public:
   void emitSongDataChangedByFilepath(const std::string &filepath);
 
 private:
-  const ColumnDefinition *definitionForColumnId(const QString &columnId) const;
   QString columnIdAt(int section) const;
 
   SongStore store;
