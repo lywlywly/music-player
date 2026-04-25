@@ -23,12 +23,10 @@ private:
 };
 
 void TestColumnLayout::init() {
-  orgName_ =
-      QStringLiteral("music-player-tests-%1")
-          .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
-  appName_ =
-      QStringLiteral("column-layout-tests-%1")
-          .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+  orgName_ = QStringLiteral("music-player-tests-%1")
+                 .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+  appName_ = QStringLiteral("column-layout-tests-%1")
+                 .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
   QCoreApplication::setOrganizationName(orgName_);
   QCoreApplication::setApplicationName(appName_);
   QSettings settings;
@@ -58,20 +56,22 @@ void TestColumnLayout::persistsOrderVisibilityAndWidth() {
   QCOMPARE(ids[2], QString("status"));
 }
 
-void TestColumnLayout::refreshFromRegistry_addsNewColumnWithDefaultVisibility() {
+void TestColumnLayout::
+    refreshFromRegistry_addsNewColumnWithDefaultVisibility() {
   ColumnRegistry registry;
   GlobalColumnLayoutManager manager(registry);
 
   registry.addOrUpdateDynamicColumn(
       {"attr:rating", "Rating", ColumnSource::SongAttribute,
-       ColumnValueType::Number, true, false, 120});
+       ColumnValueType::Number, "", true, false, 120});
   manager.refreshFromRegistry();
 
   QVERIFY(manager.allOrderedColumnIds().contains("attr:rating"));
   QCOMPARE(manager.isColumnVisible("attr:rating"), false);
 }
 
-void TestColumnLayout::refreshFromRegistry_removesUnknownIdsAndKeepsVisibleColumn() {
+void TestColumnLayout::
+    refreshFromRegistry_removesUnknownIdsAndKeepsVisibleColumn() {
   QSettings settings;
   settings.setValue("playlist/columns/order",
                     QStringList{"status", "artist", "attr:ghost"});

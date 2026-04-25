@@ -2,6 +2,7 @@
 #include "databasemanager.h"
 #include "songparser.h"
 #include <QDebug>
+#include <QSet>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QUuid>
@@ -29,6 +30,7 @@ SongLibrary::SongLibrary(const ColumnRegistry &columnRegistry,
 void SongLibrary::loadFromDatabase() {
   loadBuiltInSongs();
   loadDynamicAttributes();
+  loadComputedValues();
 }
 
 namespace {
@@ -47,6 +49,52 @@ public:
 private:
   const MSong &song_;
 };
+
+FieldValue fieldValueFromRuntime(const ExprRuntimeValue &runtimeValue,
+                                 ColumnValueType valueType, bool &ok) {
+  ok = true;
+  switch (valueType) {
+  case ColumnValueType::Text:
+    if (runtimeValue.isText()) {
+      return FieldValue(runtimeValue.textValue(), ColumnValueType::Text);
+    }
+    if (runtimeValue.isBool()) {
+      return FieldValue(runtimeValue.boolValueOrFalse() ? "true" : "false",
+                        ColumnValueType::Text);
+    }
+    return FieldValue(
+        QString::number(runtimeValue.numberValue(), 'g', 17).toStdString(),
+        ColumnValueType::Text);
+  case ColumnValueType::Number:
+    if (!runtimeValue.isNumber()) {
+      ok = false;
+      return {};
+    }
+    return FieldValue(
+        QString::number(runtimeValue.numberValue(), 'g', 17).toStdString(),
+        ColumnValueType::Number);
+  case ColumnValueType::Boolean:
+    if (!runtimeValue.isBool()) {
+      ok = false;
+      return {};
+    }
+    return FieldValue(runtimeValue.boolValueOrFalse() ? "true" : "false",
+                      ColumnValueType::Boolean);
+  case ColumnValueType::DateTime:
+    if (!runtimeValue.isText()) {
+      ok = false;
+      return {};
+    }
+    if (!FieldValue::canConvert(runtimeValue.textValue(),
+                                ColumnValueType::DateTime)) {
+      ok = false;
+      return {};
+    }
+    return FieldValue(runtimeValue.textValue(), ColumnValueType::DateTime);
+  }
+  ok = false;
+  return {};
+}
 } // namespace
 
 int SongLibrary::addTolibrary(MSong &&s) {
@@ -61,6 +109,7 @@ int SongLibrary::addTolibrary(MSong &&s) {
     const int songId = pathIt->second;
     syncBuiltInFieldsBySongId(songId, s);
     syncDynamicAttributesBySongId(songId, s);
+    recomputeAndPersistComputedValuesForSongId(songId);
     return songId;
   }
 
@@ -86,6 +135,7 @@ int SongLibrary::addTolibrary(MSong &&s) {
   paths[path] = songId;
   // New song path: persist dynamic attributes after inserting into memory/DB.
   syncDynamicAttributesBySongId(songId, songs[songId]);
+  recomputeAndPersistComputedValuesForSongId(songId);
 
   return songId;
 }
@@ -282,6 +332,153 @@ void SongLibrary::loadDynamicAttributes() {
   }
 }
 
+void SongLibrary::loadComputedValues() {
+  QSqlDatabase &db = databaseManager_.db();
+  QSet<QString> knownKeys;
+  for (const ColumnDefinition &definition :
+       columnRegistry_.computedDefinitions()) {
+    knownKeys.insert(definition.id);
+  }
+
+  QSqlQuery query(db);
+  if (!query.exec(R"(
+        SELECT DISTINCT key
+        FROM song_computed_attributes
+    )")) {
+    qFatal("loadComputedValues query keys failed: %s",
+           query.lastError().text().toUtf8().data());
+  }
+
+  QSet<QString> unknownKeys;
+  while (query.next()) {
+    const QString key = query.value(0).toString();
+    if (!knownKeys.contains(key)) {
+      unknownKeys.insert(key);
+    }
+  }
+
+  if (!unknownKeys.empty()) {
+    QSqlQuery remove(db);
+    remove.prepare(R"(
+        DELETE FROM song_computed_attributes
+        WHERE key=:key
+    )");
+    for (const QString &key : unknownKeys) {
+      remove.bindValue(":key", key);
+      if (!remove.exec()) {
+        qFatal("loadComputedValues delete unknown keys failed: %s",
+               remove.lastError().text().toUtf8().data());
+      }
+    }
+  }
+  query = QSqlQuery(db);
+  if (!query.exec(R"(
+        SELECT song_id, key, value_text
+        FROM song_computed_attributes
+    )")) {
+    qFatal("loadComputedValues values error: %s",
+           query.lastError().text().toUtf8().data());
+  }
+
+  while (query.next()) {
+    const int songId = query.value(0).toInt();
+    const QString columnId = query.value(1).toString();
+    const std::string valueText = query.value(2).toString().toStdString();
+    if (songId < 0) {
+      qFatal("loadComputedValues: negative song_id=%d", songId);
+    }
+    if (songId >= static_cast<int>(songs.size())) {
+      qFatal("loadComputedValues: song_id out of range: %d", songId);
+    }
+    const ColumnDefinition *definition = columnRegistry_.findColumn(columnId);
+    if (!definition || definition->source != ColumnSource::Computed ||
+        definition->expression.trimmed().isEmpty()) {
+      continue;
+    }
+    songs[songId][columnId.toStdString()] =
+        FieldValue(valueText, definition->valueType);
+  }
+}
+
+void SongLibrary::recomputeAndPersistComputedValuesForSongId(int songId) {
+  if (songId < 0 || songId >= static_cast<int>(songs.size())) {
+    qFatal("recomputeAndPersistComputedValuesForSongId: invalid song_id=%d",
+           songId);
+  }
+
+  if (songs[songId].empty()) {
+    return;
+  }
+
+  MSong &song = songs[songId];
+  for (auto it = song.begin(); it != song.end();) {
+    if (it->first.rfind("attr:", 0) == 0) {
+      ++it;
+      continue;
+    }
+    const QString key = QString::fromStdString(it->first);
+    if (columnRegistry_.isBuiltInSongAttributeKey(key)) {
+      ++it;
+      continue;
+    }
+    const ColumnDefinition *definition = columnRegistry_.findColumn(key);
+    if (!definition || definition->source == ColumnSource::Computed) {
+      it = song.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
+  SongLibraryExprEvalContext context(song);
+
+  for (const ColumnDefinition &definition :
+       columnRegistry_.computedDefinitions()) {
+    ExprParseResult parsed =
+        ::parseLibraryExpression(definition.expression, columnRegistry_);
+    if (!parsed.ok()) {
+      qWarning() << "computed expression parse failed for" << definition.id
+                 << ":" << parsed.error.message;
+      song.erase(definition.id.toStdString());
+      continue;
+    }
+
+    const ExprRuntimeValue runtimeValue = parsed.expr->evaluateValue(context);
+    bool conversionOk = false;
+    const FieldValue computedValue =
+        fieldValueFromRuntime(runtimeValue, definition.valueType, conversionOk);
+    if (!conversionOk) {
+      qWarning() << "computed expression type conversion failed for"
+                 << definition.id;
+      song.erase(definition.id.toStdString());
+      continue;
+    }
+
+    song[definition.id.toStdString()] = computedValue;
+    upsertComputedFieldValueInDb(songId, definition, computedValue);
+  }
+}
+
+void SongLibrary::upsertComputedFieldValueInDb(
+    int songId, const ColumnDefinition &definition, const FieldValue &value) {
+  QSqlDatabase &db = databaseManager_.db();
+  QSqlQuery query(db);
+  query.prepare(R"(
+      INSERT INTO song_computed_attributes(song_id, key, value_text, value_type)
+      VALUES(:song_id, :key, :value_text, :value_type)
+      ON CONFLICT(song_id, key) DO UPDATE SET
+          value_text=excluded.value_text,
+          value_type=excluded.value_type
+  )");
+  query.bindValue(":song_id", songId);
+  query.bindValue(":key", definition.id);
+  query.bindValue(":value_text", QString::fromStdString(value.text));
+  query.bindValue(":value_type", columnValueTypeToStorageString(value.type));
+  if (!query.exec()) {
+    qFatal("upsert song_computed_attributes failed: %s",
+           query.lastError().text().toUtf8().data());
+  }
+}
+
 bool SongLibrary::loadPlaylistState(int playlistId, int &lastPlayed,
                                     std::vector<int> &songIds) {
   if (playlistId <= 0) {
@@ -367,6 +564,7 @@ const MSong &SongLibrary::refreshSongFromFile(const std::string &path) {
 #endif
   syncBuiltInFieldsBySongId(songId, parsed);
   syncDynamicAttributesBySongId(songId, parsed);
+  recomputeAndPersistComputedValuesForSongId(songId);
   return songs[songId];
 }
 

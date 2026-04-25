@@ -56,6 +56,7 @@ private slots:
   void search_relationalComparisonSkipsMissingDate();
   void search_supportsNot();
   void search_supportsCustomFields();
+  void search_supportsComputedFields();
   void search_noMatchReturnsEmpty();
   void refreshSongFromFile_usesInjectedParserAndSyncsDb();
   void refreshSongsFromFilepaths_dedupesAndReportsProgress();
@@ -92,7 +93,7 @@ void TestSongLibrary::cleanup() {
 void TestSongLibrary::addToLibrary_sameFilepathUpdatesExistingSong() {
   registry_->addOrUpdateDynamicColumn(
       {"attr:rating", "Rating", ColumnSource::SongAttribute,
-       ColumnValueType::Number, true, false, 120});
+       ColumnValueType::Number, "", true, false, 120});
 
   MSong first = makeSong("Old Title", "Artist A", "/tmp/song-a.mp3");
   first["attr:rating"] = "3";
@@ -133,7 +134,7 @@ void TestSongLibrary::addToLibrary_sameFilepathUpdatesExistingSong() {
 void TestSongLibrary::loadFromDatabase_loadsBuiltInAndDynamicAttributes() {
   registry_->addOrUpdateDynamicColumn(
       {"attr:date_added", "Date Added", ColumnSource::SongAttribute,
-       ColumnValueType::DateTime, true, false, 180});
+       ColumnValueType::DateTime, "", true, false, 180});
 
   QSqlDatabase &db = databaseManager_->db();
   QSqlQuery q(db);
@@ -469,7 +470,8 @@ void TestSongLibrary::search_supportsNot() {
 void TestSongLibrary::search_supportsCustomFields() {
   registry_->addOrUpdateDynamicColumn(
       {"attr:musicbrainz_trackid", "MusicBrainz Track ID",
-       ColumnSource::SongAttribute, ColumnValueType::Text, true, false, 140});
+       ColumnSource::SongAttribute, ColumnValueType::Text, "", true, false,
+       140});
 
   MSong first = makeSong("Song 1", "Artist A", "/tmp/search-f.mp3");
   first["attr:musicbrainz_trackid"] = "abc123";
@@ -489,6 +491,37 @@ void TestSongLibrary::search_supportsCustomFields() {
            std::string("Song 2"));
 }
 
+void TestSongLibrary::search_supportsComputedFields() {
+  QVERIFY(registry_->upsertComputedDefinition(
+      databaseManager_->db(),
+      {"era", "Era", ColumnSource::Computed, ColumnValueType::Text,
+       "IF date < 2000 THEN classic ELSE new", true, true, 140}));
+  QVERIFY(registry_->loadDynamicColumns(databaseManager_->db()));
+
+  library_->addTolibrary(makeSong("Song 1", "Artist A",
+                                  "/tmp/search-comp-a.mp3", "Album", "1",
+                                  "1998-01-01", "Pop"));
+  library_->addTolibrary(makeSong("Song 2", "Artist B",
+                                  "/tmp/search-comp-b.mp3", "Album", "2",
+                                  "2021-01-01", "Rock"));
+
+  ExprParseResult parsed = library_->parseLibraryExpression("era IS classic");
+  QVERIFY(parsed.ok());
+
+  const std::vector<int> matches = library_->search(*parsed.expr);
+  QCOMPARE(matches.size(), size_t(1));
+  QCOMPARE(library_->getSongByPK(matches[0]).at("title").text,
+           std::string("Song 1"));
+
+  QSqlQuery q(databaseManager_->db());
+  QVERIFY(q.exec("SELECT value_text FROM song_computed_attributes WHERE "
+                 "key='era' ORDER BY song_id"));
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toString(), QString("classic"));
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toString(), QString("new"));
+}
+
 void TestSongLibrary::search_noMatchReturnsEmpty() {
   library_->addTolibrary(makeSong("Song 1", "Artist A", "/tmp/search-h.mp3",
                                   "Album", "1", "2024-01-01", "Pop"));
@@ -504,7 +537,7 @@ void TestSongLibrary::search_noMatchReturnsEmpty() {
 void TestSongLibrary::refreshSongFromFile_usesInjectedParserAndSyncsDb() {
   registry_->addOrUpdateDynamicColumn(
       {"attr:rating", "Rating", ColumnSource::SongAttribute,
-       ColumnValueType::Number, true, false, 120});
+       ColumnValueType::Number, "", true, false, 120});
 
   int parseCallCount = 0;
   std::string parsedPath;

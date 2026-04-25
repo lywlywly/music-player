@@ -151,6 +151,7 @@ void MainWindow::initSettings() {
         qFatal("initSettings: failed to reload dynamic columns");
       }
       columnLayoutManager_.refreshFromRegistry();
+      // TODO: refresh custom/computed attributes
     });
     dialog->show();
   });

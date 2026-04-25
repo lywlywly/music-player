@@ -93,6 +93,11 @@ private:
   // `attribute_definitions` are treated as stale: they are skipped in memory
   // and deleted from DB instead of aborting the load.
   void loadDynamicAttributes();
+  void loadComputedValues();
+  void recomputeAndPersistComputedValuesForSongId(int songId);
+  void upsertComputedFieldValueInDb(int songId,
+                                    const ColumnDefinition &definition,
+                                    const FieldValue &value);
   int ensureSongInDb(const MSong &song);
   // Syncs built-in song fields in memory and DB for a known song_id.
   void syncBuiltInFieldsBySongId(int songId, const MSong &song);

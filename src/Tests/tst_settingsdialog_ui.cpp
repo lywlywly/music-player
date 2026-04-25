@@ -1,8 +1,8 @@
-#include <QObject>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QObject>
 #include <QPushButton>
 #include <QSettings>
 #include <QSignalSpy>
@@ -25,6 +25,7 @@ private slots:
   void showsExistingCustomFields();
   void addCustomField_persistsDefinitionAndEmitsSignal();
   void removeCustomField_deletesDefinitionAndValues();
+  void addComputedField_persistsDefinitionAndEmitsSignal();
 
 private:
   ColumnRegistry *registry_ = nullptr;
@@ -58,7 +59,8 @@ void TestSettingsDialogUi::showsExistingCustomFields() {
   QVERIFY(registry_->upsertCustomTagDefinition(
       databaseManager_->db(),
       {"attr:musicbrainz_trackid", "MusicBrainz Track ID",
-       ColumnSource::SongAttribute, ColumnValueType::Text, true, true, 140}));
+       ColumnSource::SongAttribute, ColumnValueType::Text, "", true, true,
+       140}));
   QVERIFY(registry_->loadDynamicColumns(databaseManager_->db()));
 
   SettingsDialog dialog(*registry_, *databaseManager_);
@@ -121,12 +123,13 @@ void TestSettingsDialogUi::removeCustomField_deletesDefinitionAndValues() {
   QVERIFY(registry_->upsertCustomTagDefinition(
       databaseManager_->db(),
       {"attr:musicbrainz_trackid", "MusicBrainz Track ID",
-       ColumnSource::SongAttribute, ColumnValueType::Text, true, true, 140}));
+       ColumnSource::SongAttribute, ColumnValueType::Text, "", true, true,
+       140}));
   QVERIFY(registry_->loadDynamicColumns(databaseManager_->db()));
 
   QSqlQuery seedValues(databaseManager_->db());
-  QVERIFY(seedValues.exec(
-      "INSERT INTO songs(song_id, title, filepath) VALUES (1, 'Song', '/tmp/remove-field.mp3')"));
+  QVERIFY(seedValues.exec("INSERT INTO songs(song_id, title, filepath) VALUES "
+                          "(1, 'Song', '/tmp/remove-field.mp3')"));
   QVERIFY(seedValues.exec(
       "INSERT INTO song_attributes(song_id, key, value_text, value_type) "
       "VALUES (1, 'musicbrainz_trackid', 'abc123', 'text')"));
@@ -149,8 +152,8 @@ void TestSettingsDialogUi::removeCustomField_deletesDefinitionAndValues() {
   QCOMPARE(customFieldsSpy.count(), 1);
 
   QSqlQuery q(databaseManager_->db());
-  QVERIFY(q.exec(
-      "SELECT COUNT(*) FROM attribute_definitions WHERE key='musicbrainz_trackid'"));
+  QVERIFY(q.exec("SELECT COUNT(*) FROM attribute_definitions WHERE "
+                 "key='musicbrainz_trackid'"));
   QVERIFY(q.next());
   QCOMPARE(q.value(0).toInt(), 0);
 
@@ -158,6 +161,60 @@ void TestSettingsDialogUi::removeCustomField_deletesDefinitionAndValues() {
       "SELECT COUNT(*) FROM song_attributes WHERE key='musicbrainz_trackid'"));
   QVERIFY(q.next());
   QCOMPARE(q.value(0).toInt(), 0);
+}
+
+void TestSettingsDialogUi::addComputedField_persistsDefinitionAndEmitsSignal() {
+  SettingsDialog dialog(*registry_, *databaseManager_);
+  QSignalSpy customFieldsSpy(&dialog, &SettingsDialog::customFieldsChanged);
+
+  QLineEdit *displayName =
+      dialog.findChild<QLineEdit *>("computed_field_display_name_edit");
+  QLineEdit *fieldKey =
+      dialog.findChild<QLineEdit *>("computed_field_key_edit");
+  QComboBox *valueType =
+      dialog.findChild<QComboBox *>("computed_field_value_type_combo");
+  QLineEdit *expression =
+      dialog.findChild<QLineEdit *>("computed_field_expression_edit");
+  QCheckBox *visible =
+      dialog.findChild<QCheckBox *>("computed_field_visible_checkbox");
+  QPushButton *addButton =
+      dialog.findChild<QPushButton *>("add_computed_field_button");
+  QListWidget *list = dialog.findChild<QListWidget *>("computed_fields_list");
+  QVERIFY(displayName != nullptr);
+  QVERIFY(fieldKey != nullptr);
+  QVERIFY(valueType != nullptr);
+  QVERIFY(expression != nullptr);
+  QVERIFY(visible != nullptr);
+  QVERIFY(addButton != nullptr);
+  QVERIFY(list != nullptr);
+
+  displayName->setText("Era");
+  fieldKey->setText("Era");
+  valueType->setCurrentIndex(0);
+  expression->setText("IF date < 2000 THEN classic ELSE new");
+  visible->setChecked(true);
+  QTest::mouseClick(addButton, Qt::LeftButton);
+
+  QCOMPARE(list->count(), 1);
+  QCOMPARE(list->item(0)->text(), QString("Era (era)"));
+
+  dialog.accept();
+  QCOMPARE(customFieldsSpy.count(), 1);
+
+  QSqlQuery q(databaseManager_->db());
+  q.prepare(R"(
+      SELECT display_name, value_type, expression, visible_default
+      FROM computed_attribute_definitions
+      WHERE key=:key
+  )");
+  q.bindValue(":key", "era");
+  QVERIFY(q.exec());
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toString(), QString("Era"));
+  QCOMPARE(q.value(1).toString(), QString("text"));
+  QCOMPARE(q.value(2).toString(),
+           QString("IF date < 2000 THEN classic ELSE new"));
+  QCOMPARE(q.value(3).toInt(), 1);
 }
 
 QTEST_MAIN(TestSettingsDialogUi)

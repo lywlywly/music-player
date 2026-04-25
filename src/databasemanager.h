@@ -26,6 +26,7 @@ private:
   bool ensureSongsSchema(QSqlQuery &q);
   bool ensurePlaylistsSchema(QSqlQuery &q);
   bool ensureDynamicAttributesSchema(QSqlQuery &q);
+  bool ensureComputedAttributesSchema(QSqlQuery &q);
 
   const ColumnRegistry &columnRegistry_;
   QSqlDatabase db_;

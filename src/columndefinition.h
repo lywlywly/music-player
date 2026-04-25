@@ -40,6 +40,7 @@ struct ColumnDefinition {
   QString title;
   ColumnSource source;
   ColumnValueType valueType;
+  QString expression;
   bool sortable = true;
   bool visibleByDefault = true;
   int defaultWidth = 140;

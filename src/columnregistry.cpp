@@ -12,27 +12,32 @@ bool isDynamicSongAttribute(const ColumnDefinition &definition) {
   return definition.source == ColumnSource::SongAttribute &&
          definition.id.startsWith("attr:");
 }
+
+bool isUserComputedField(const ColumnDefinition &definition) {
+  return definition.source == ColumnSource::Computed &&
+         !definition.expression.trimmed().isEmpty();
+}
 } // namespace
 
 ColumnRegistry::ColumnRegistry() {
-  add({"status", "Status", ColumnSource::Computed, ColumnValueType::Text, false,
-       true, 48});
+  add({"status", "Status", ColumnSource::Computed, ColumnValueType::Text, "",
+       false, true, 48});
   add({"artist", "Artist", ColumnSource::SongAttribute, ColumnValueType::Text,
-       true, true, 180});
-  add({"album", "Album", ColumnSource::SongAttribute, ColumnValueType::Text,
+       "", true, true, 180});
+  add({"album", "Album", ColumnSource::SongAttribute, ColumnValueType::Text, "",
        true, true, 220});
   add({"discnumber", "Disc no", ColumnSource::SongAttribute,
-       ColumnValueType::Number, true, true, 90});
+       ColumnValueType::Number, "", true, true, 90});
   add({"tracknumber", "Track no", ColumnSource::SongAttribute,
-       ColumnValueType::Number, true, true, 90});
-  add({"title", "Title", ColumnSource::SongAttribute, ColumnValueType::Text,
+       ColumnValueType::Number, "", true, true, 90});
+  add({"title", "Title", ColumnSource::SongAttribute, ColumnValueType::Text, "",
        true, true, 220});
   add({"date", "Date", ColumnSource::SongAttribute, ColumnValueType::DateTime,
-       true, false, 140});
-  add({"genre", "Genre", ColumnSource::SongAttribute, ColumnValueType::Text,
+       "", true, false, 140});
+  add({"genre", "Genre", ColumnSource::SongAttribute, ColumnValueType::Text, "",
        true, false, 140});
   add({"filepath", "File path", ColumnSource::SongAttribute,
-       ColumnValueType::Text, true, false, 360});
+       ColumnValueType::Text, "", true, false, 360});
 }
 
 const ColumnDefinition *ColumnRegistry::findColumn(const QString &id) const {
@@ -52,6 +57,20 @@ bool ColumnRegistry::isBuiltInSongAttributeKey(const QString &id) const {
   return definition && isBuiltInSongAttribute(*definition);
 }
 
+bool ColumnRegistry::isReservedComputedFieldKey(const QString &key) const {
+  if (key.isEmpty()) {
+    return true;
+  }
+  if (isBuiltInSongAttributeKey(key)) {
+    return true;
+  }
+  if (hasColumn(QStringLiteral("attr:") + key)) {
+    return true;
+  }
+  const ColumnDefinition *definition = findColumn(key);
+  return definition != nullptr;
+}
+
 QList<ColumnDefinition> ColumnRegistry::definitions() const {
   return definitions_;
 }
@@ -61,6 +80,17 @@ QList<ColumnDefinition> ColumnRegistry::customTagDefinitions() const {
   result.reserve(definitions_.size());
   for (const ColumnDefinition &definition : definitions_) {
     if (isDynamicSongAttribute(definition)) {
+      result.push_back(definition);
+    }
+  }
+  return result;
+}
+
+QList<ColumnDefinition> ColumnRegistry::computedDefinitions() const {
+  QList<ColumnDefinition> result;
+  result.reserve(definitions_.size());
+  for (const ColumnDefinition &definition : definitions_) {
+    if (isUserComputedField(definition)) {
       result.push_back(definition);
     }
   }
@@ -125,6 +155,37 @@ bool ColumnRegistry::loadDynamicColumns(QSqlDatabase &db) {
     addOrUpdateDynamicColumn(definition);
   }
 
+  QSqlQuery computedQuery(db);
+  if (!computedQuery.exec(R"(
+        SELECT key, display_name, value_type, expression, sortable, visible_default, width_default
+        FROM computed_attribute_definitions
+    )")) {
+    if (computedQuery.lastError().text().contains("no such table",
+                                                  Qt::CaseInsensitive)) {
+      return true;
+    }
+    qWarning() << "ColumnRegistry loadDynamicColumns computed error:"
+               << computedQuery.lastError().text();
+    return false;
+  }
+
+  while (computedQuery.next()) {
+    ColumnDefinition definition;
+    definition.id = computedQuery.value(0).toString();
+    definition.title = computedQuery.value(1).toString();
+    definition.source = ColumnSource::Computed;
+    definition.valueType =
+        columnValueTypeFromStorageString(computedQuery.value(2).toString());
+    definition.expression = computedQuery.value(3).toString();
+    definition.sortable = computedQuery.value(4).toInt() != 0;
+    definition.visibleByDefault = computedQuery.value(5).toInt() != 0;
+    definition.defaultWidth = computedQuery.value(6).toInt();
+    if (definition.defaultWidth <= 0) {
+      definition.defaultWidth = 140;
+    }
+    addOrUpdateDynamicColumn(definition);
+  }
+
   return true;
 }
 
@@ -144,6 +205,11 @@ bool ColumnRegistry::upsertCustomTagDefinition(
   }
   if (isBuiltInSongAttributeKey(key)) {
     qWarning() << "upsertCustomTagDefinition: key collides with built-in field"
+               << key;
+    return false;
+  }
+  if (hasColumn(key)) {
+    qWarning() << "upsertCustomTagDefinition: key collides with computed field"
                << key;
     return false;
   }
@@ -224,6 +290,100 @@ bool ColumnRegistry::removeCustomTagDefinition(QSqlDatabase &db,
   return true;
 }
 
+bool ColumnRegistry::upsertComputedDefinition(
+    QSqlDatabase &db, const ColumnDefinition &definition) const {
+  if (definition.source != ColumnSource::Computed) {
+    qWarning() << "upsertComputedDefinition: invalid source";
+    return false;
+  }
+  const QString key = definition.id.trimmed();
+  if (key.isEmpty()) {
+    qWarning() << "upsertComputedDefinition: empty key";
+    return false;
+  }
+  if (isBuiltInSongAttributeKey(key)) {
+    qWarning() << "upsertComputedDefinition: key collides with built-in field"
+               << key;
+    return false;
+  }
+  if (hasColumn(QStringLiteral("attr:") + key)) {
+    qWarning() << "upsertComputedDefinition: key collides with attr field"
+               << key;
+    return false;
+  }
+  const ColumnDefinition *existing = findColumn(key);
+  if (existing && !isUserComputedField(*existing)) {
+    qWarning() << "upsertComputedDefinition: key collides with built-in field"
+               << key;
+    return false;
+  }
+
+  QSqlQuery query(db);
+  query.prepare(R"(
+      INSERT INTO computed_attribute_definitions(
+          key, display_name, value_type, expression, sortable, visible_default, width_default, updated_at
+      ) VALUES(
+          :key, :display_name, :value_type, :expression, :sortable, :visible_default, :width_default, strftime('%s','now')
+      )
+      ON CONFLICT(key) DO UPDATE SET
+          display_name=excluded.display_name,
+          value_type=excluded.value_type,
+          expression=excluded.expression,
+          sortable=excluded.sortable,
+          visible_default=excluded.visible_default,
+          width_default=excluded.width_default,
+          updated_at=excluded.updated_at
+  )");
+  query.bindValue(":key", key);
+  query.bindValue(":display_name", definition.title);
+  query.bindValue(":value_type",
+                  columnValueTypeToStorageString(definition.valueType));
+  query.bindValue(":expression", definition.expression);
+  query.bindValue(":sortable", definition.sortable ? 1 : 0);
+  query.bindValue(":visible_default", definition.visibleByDefault ? 1 : 0);
+  query.bindValue(":width_default",
+                  definition.defaultWidth > 0 ? definition.defaultWidth : 140);
+  if (!query.exec()) {
+    qWarning() << "upsertComputedDefinition failed:" << query.lastError();
+    return false;
+  }
+  return true;
+}
+
+bool ColumnRegistry::removeComputedDefinition(QSqlDatabase &db,
+                                              const QString &columnId) const {
+  if (columnId.trimmed().isEmpty()) {
+    qWarning() << "removeComputedDefinition: empty key";
+    return false;
+  }
+
+  QSqlQuery deleteDefinition(db);
+  deleteDefinition.prepare(R"(
+      DELETE FROM computed_attribute_definitions
+      WHERE key=:key
+  )");
+  deleteDefinition.bindValue(":key", columnId);
+  if (!deleteDefinition.exec()) {
+    qWarning() << "removeComputedDefinition definition delete failed:"
+               << deleteDefinition.lastError();
+    return false;
+  }
+
+  QSqlQuery deleteValues(db);
+  deleteValues.prepare(R"(
+      DELETE FROM song_computed_attributes
+      WHERE key=:key
+  )");
+  deleteValues.bindValue(":key", columnId);
+  if (!deleteValues.exec()) {
+    qWarning() << "removeComputedDefinition value delete failed:"
+               << deleteValues.lastError();
+    return false;
+  }
+
+  return true;
+}
+
 void ColumnRegistry::add(const ColumnDefinition &definition) {
   idToIndex_.insert(definition.id, definitions_.size());
   definitions_.push_back(definition);
@@ -233,7 +393,8 @@ void ColumnRegistry::resetDynamicColumns() {
   QList<ColumnDefinition> builtIns;
   builtIns.reserve(definitions_.size());
   for (const ColumnDefinition &definition : definitions_) {
-    if (!isDynamicSongAttribute(definition)) {
+    if (!isDynamicSongAttribute(definition) &&
+        !isUserComputedField(definition)) {
       builtIns.push_back(definition);
     }
   }

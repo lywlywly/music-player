@@ -85,7 +85,7 @@ bool DatabaseManager::createTables() {
   QSqlQuery q(db_);
 
   return ensureSongsSchema(q) && ensurePlaylistsSchema(q) &&
-         ensureDynamicAttributesSchema(q);
+         ensureDynamicAttributesSchema(q) && ensureComputedAttributesSchema(q);
 }
 
 bool DatabaseManager::ensureSongsSchema(QSqlQuery &q) {
@@ -209,6 +209,51 @@ bool DatabaseManager::ensureDynamicAttributesSchema(QSqlQuery &q) {
       R"(CREATE INDEX IF NOT EXISTS idx_song_attrs_key_text ON song_attributes(key, value_text);)");
   q.exec(
       R"(CREATE INDEX IF NOT EXISTS idx_song_attrs_key_type ON song_attributes(key, value_type);)");
+
+  return true;
+}
+
+bool DatabaseManager::ensureComputedAttributesSchema(QSqlQuery &q) {
+  if (!execOrWarn(q,
+                  R"(
+        CREATE TABLE IF NOT EXISTS computed_attribute_definitions (
+            key              TEXT PRIMARY KEY,
+            display_name     TEXT NOT NULL,
+            value_type       TEXT NOT NULL,
+            expression       TEXT NOT NULL,
+            sortable         INTEGER NOT NULL DEFAULT 1,
+            visible_default  INTEGER NOT NULL DEFAULT 0,
+            width_default    INTEGER NOT NULL DEFAULT 140,
+            updated_at       INTEGER NOT NULL
+        );
+    )",
+                  "Error creating computed_attribute_definitions table:")) {
+    return false;
+  }
+
+  if (!execOrWarn(q,
+                  R"(
+        CREATE TABLE IF NOT EXISTS song_computed_attributes (
+            song_id     INTEGER NOT NULL,
+            key         TEXT NOT NULL,
+            value_text  TEXT,
+            value_type  TEXT NOT NULL,
+            PRIMARY KEY (song_id, key),
+            FOREIGN KEY (song_id) REFERENCES songs(song_id) ON DELETE CASCADE
+        );
+    )",
+                  "Error creating song_computed_attributes table:")) {
+    return false;
+  }
+
+  q.exec(R"(
+      CREATE INDEX IF NOT EXISTS idx_song_computed_attrs_key_text
+      ON song_computed_attributes(key, value_text);
+  )");
+  q.exec(R"(
+      CREATE INDEX IF NOT EXISTS idx_song_computed_attrs_key_type
+      ON song_computed_attributes(key, value_type);
+  )");
 
   return true;
 }

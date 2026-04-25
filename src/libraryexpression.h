@@ -234,6 +234,9 @@ struct ExprParseResult {
   bool ok() const { return expr != nullptr; }
 };
 
+enum class ExprStaticType { Invalid, Bool, Text, Number };
+ExprStaticType inferExprStaticType(const Expr &expr);
+
 ExprParseResult parseLibraryExpression(const QString &expressionText,
                                        const ColumnRegistry &registry);
 

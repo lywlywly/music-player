@@ -4,6 +4,7 @@
 #include "columndefinition.h"
 #include "columnregistry.h"
 #include "databasemanager.h"
+#include "libraryexpression.h"
 #include "playbackbackendmanager.h"
 #include <QDialog>
 #include <QSet>
@@ -27,15 +28,23 @@ signals:
 
 private:
   void refreshCustomFieldsList();
+  void refreshComputedFieldsList();
   void addCustomFieldFromForm();
+  void addComputedFieldFromForm();
   void removeSelectedCustomField();
+  void removeSelectedComputedField();
   void applySettings();
   ColumnDefinition buildCustomFieldDefinitionFromForm() const;
+  ColumnDefinition buildComputedFieldDefinitionFromForm() const;
+  bool expressionTypeMatchesValueType(const Expr &expr,
+                                      ColumnValueType expectedType) const;
   Ui::SettingsDialog *ui;
   ColumnRegistry &columnRegistry_;
   DatabaseManager &databaseManager_;
   QList<ColumnDefinition> customFields_;
+  QList<ColumnDefinition> computedFields_;
   QSet<QString> originalCustomFieldIds_;
+  QSet<QString> originalComputedFieldIds_;
 };
 
 #endif // SETTINGSDIALOG_H

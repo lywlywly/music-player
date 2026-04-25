@@ -13,6 +13,7 @@ private slots:
   void builtInSongAttributeKey_onlyTrueForBuiltIns();
   void loadDynamicColumns_loadsAndNormalizes();
   void loadDynamicColumns_replacesRemovedDynamicColumns();
+  void loadDynamicColumns_loadsComputedDefinitions();
 };
 
 void TestColumnRegistry::builtInDefinitions_areAvailable() {
@@ -125,10 +126,9 @@ void TestColumnRegistry::loadDynamicColumns_replacesRemovedDynamicColumns() {
                    "width_default INTEGER NOT NULL DEFAULT 140,"
                    "enum_values_json TEXT"
                    ")"));
-    QVERIFY(q.exec(
-        "INSERT INTO attribute_definitions"
-        "(key, display_name, value_type, source) "
-        "VALUES ('rating', 'Rating', 'number', 'custom_tag')"));
+    QVERIFY(q.exec("INSERT INTO attribute_definitions"
+                   "(key, display_name, value_type, source) "
+                   "VALUES ('rating', 'Rating', 'number', 'custom_tag')"));
 
     QVERIFY(registry.loadDynamicColumns(db));
     QVERIFY(registry.findColumn("attr:rating") != nullptr);
@@ -136,6 +136,54 @@ void TestColumnRegistry::loadDynamicColumns_replacesRemovedDynamicColumns() {
     QVERIFY(q.exec("DELETE FROM attribute_definitions WHERE key='rating'"));
     QVERIFY(registry.loadDynamicColumns(db));
     QVERIFY(registry.findColumn("attr:rating") == nullptr);
+  }
+
+  QSqlDatabase::removeDatabase(connectionName);
+}
+
+void TestColumnRegistry::loadDynamicColumns_loadsComputedDefinitions() {
+  ColumnRegistry registry;
+  const QString connectionName = "test_columnregistry_computed_connection";
+  {
+    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
+    db.setDatabaseName(":memory:");
+    QVERIFY2(db.open(), "failed to open in-memory sqlite database");
+
+    QSqlQuery q(db);
+    QVERIFY(q.exec("CREATE TABLE attribute_definitions ("
+                   "key TEXT PRIMARY KEY,"
+                   "display_name TEXT NOT NULL,"
+                   "value_type TEXT NOT NULL,"
+                   "source TEXT NOT NULL,"
+                   "sortable INTEGER NOT NULL DEFAULT 1,"
+                   "filterable INTEGER NOT NULL DEFAULT 1,"
+                   "visible_default INTEGER NOT NULL DEFAULT 0,"
+                   "width_default INTEGER NOT NULL DEFAULT 140,"
+                   "enum_values_json TEXT"
+                   ")"));
+    QVERIFY(q.exec("CREATE TABLE computed_attribute_definitions ("
+                   "key TEXT PRIMARY KEY,"
+                   "display_name TEXT NOT NULL,"
+                   "value_type TEXT NOT NULL,"
+                   "expression TEXT NOT NULL,"
+                   "sortable INTEGER NOT NULL DEFAULT 1,"
+                   "visible_default INTEGER NOT NULL DEFAULT 0,"
+                   "width_default INTEGER NOT NULL DEFAULT 140,"
+                   "updated_at INTEGER NOT NULL"
+                   ")"));
+    QVERIFY(q.exec("INSERT INTO computed_attribute_definitions"
+                   "(key, display_name, value_type, expression, sortable, "
+                   "visible_default, width_default, updated_at) "
+                   "VALUES ('era', 'Era', 'text', 'IF date < 2000 THEN classic "
+                   "ELSE new', 1, 1, 150, 1)"));
+
+    QVERIFY(registry.loadDynamicColumns(db));
+    const ColumnDefinition *era = registry.findColumn("era");
+    QVERIFY(era != nullptr);
+    QCOMPARE(era->source, ColumnSource::Computed);
+    QCOMPARE(era->expression, QString("IF date < 2000 THEN classic ELSE new"));
+    QCOMPARE(era->valueType, ColumnValueType::Text);
+    QVERIFY(era->visibleByDefault);
   }
 
   QSqlDatabase::removeDatabase(connectionName);

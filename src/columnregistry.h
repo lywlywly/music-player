@@ -18,8 +18,10 @@ public:
   const ColumnDefinition *findColumn(const QString &id) const;
   bool hasColumn(const QString &id) const;
   bool isBuiltInSongAttributeKey(const QString &id) const;
+  bool isReservedComputedFieldKey(const QString &key) const;
   QList<ColumnDefinition> definitions() const;
   QList<ColumnDefinition> customTagDefinitions() const;
+  QList<ColumnDefinition> computedDefinitions() const;
   // Contract: for non-dynamic SongAttribute columns, id must match DB table
   // `songs` column name exactly.
   QList<ColumnDefinition> songAttributeDefinitions() const;
@@ -30,6 +32,10 @@ public:
                                  const ColumnDefinition &definition) const;
   bool removeCustomTagDefinition(QSqlDatabase &db,
                                  const QString &columnId) const;
+  bool upsertComputedDefinition(QSqlDatabase &db,
+                                const ColumnDefinition &definition) const;
+  bool removeComputedDefinition(QSqlDatabase &db,
+                                const QString &columnId) const;
   void addOrUpdateDynamicColumn(const ColumnDefinition &definition);
 
 private:

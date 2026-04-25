@@ -390,3 +390,41 @@ bool IfExpr::equals(const Expr &other) const {
          thenExpr->equals(*ifExpr->thenExpr) &&
          elseExpr->equals(*ifExpr->elseExpr);
 }
+
+ExprStaticType inferExprStaticType(const Expr &expr) {
+  if (dynamic_cast<const ComparisonExpr *>(&expr) ||
+      dynamic_cast<const AndExpr *>(&expr) ||
+      dynamic_cast<const OrExpr *>(&expr) ||
+      dynamic_cast<const NotExpr *>(&expr)) {
+    return ExprStaticType::Bool;
+  }
+
+  if (const auto *literal = dynamic_cast<const LiteralExpr *>(&expr)) {
+    if (literal->value.isBool()) {
+      return ExprStaticType::Bool;
+    }
+    if (literal->value.isNumber()) {
+      return ExprStaticType::Number;
+    }
+    if (literal->value.isText()) {
+      return ExprStaticType::Text;
+    }
+    return ExprStaticType::Invalid;
+  }
+
+  if (const auto *ifExpr = dynamic_cast<const IfExpr *>(&expr)) {
+    if (inferExprStaticType(*ifExpr->condition) != ExprStaticType::Bool) {
+      return ExprStaticType::Invalid;
+    }
+
+    const ExprStaticType thenType = inferExprStaticType(*ifExpr->thenExpr);
+    const ExprStaticType elseType = inferExprStaticType(*ifExpr->elseExpr);
+    if (thenType == ExprStaticType::Invalid ||
+        elseType == ExprStaticType::Invalid || thenType != elseType) {
+      return ExprStaticType::Invalid;
+    }
+    return thenType;
+  }
+
+  return ExprStaticType::Invalid;
+}

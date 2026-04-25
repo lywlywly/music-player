@@ -55,9 +55,6 @@ const ExprToken &peek(const std::vector<ExprToken> &tokens, int index) {
 template <typename T>
 using ParserFn = std::function<ParseStep<T>(const ParseContext &, int)>;
 
-enum class ExprStaticType { Invalid, Bool, Text, Number };
-ExprStaticType inferExprType(const Expr &expr);
-
 template <typename T, typename Transform>
 auto map(ParserFn<T> parser, Transform transform)
     -> ParserFn<std::invoke_result_t<Transform, T>> {
@@ -139,8 +136,8 @@ ParserFn<ExprPtr> chainLeft(ParserFn<ExprPtr> operand,
             return right;
           }
 
-          if (inferExprType(*left.value) != expectedType ||
-              inferExprType(*right.value) != expectedType) {
+          if (inferExprStaticType(*left.value) != expectedType ||
+              inferExprStaticType(*right.value) != expectedType) {
             return makeErrorStep<ExprPtr>(
                 QStringLiteral("%1 operands must be boolean").arg(operatorName),
                 peek(context.tokens, operatorIndex).start);
@@ -168,45 +165,6 @@ ParseStep<ExprOperatorPtr> parseComparisonOperator(const ParseContext &context,
                                                    int index);
 ParseStep<ExprValue> parseValue(const ParseContext &context, int index);
 ParseStep<ExprValue> parseListValue(const ParseContext &context, int index);
-
-ExprStaticType inferExprType(const Expr &expr) {
-  if (dynamic_cast<const ComparisonExpr *>(&expr) ||
-      dynamic_cast<const AndExpr *>(&expr) ||
-      dynamic_cast<const OrExpr *>(&expr) ||
-      dynamic_cast<const NotExpr *>(&expr)) {
-    return ExprStaticType::Bool;
-  }
-
-  if (const auto *literal = dynamic_cast<const LiteralExpr *>(&expr)) {
-    if (literal->value.isBool()) {
-      return ExprStaticType::Bool;
-    }
-    if (literal->value.isNumber()) {
-      return ExprStaticType::Number;
-    }
-    if (literal->value.isText()) {
-      return ExprStaticType::Text;
-    }
-    return ExprStaticType::Invalid;
-  }
-
-  if (const auto *ifExpr = dynamic_cast<const IfExpr *>(&expr)) {
-    const ExprStaticType conditionType = inferExprType(*ifExpr->condition);
-    if (conditionType != ExprStaticType::Bool) {
-      return ExprStaticType::Invalid;
-    }
-
-    const ExprStaticType thenType = inferExprType(*ifExpr->thenExpr);
-    const ExprStaticType elseType = inferExprType(*ifExpr->elseExpr);
-    if (thenType == ExprStaticType::Invalid ||
-        elseType == ExprStaticType::Invalid || thenType != elseType) {
-      return ExprStaticType::Invalid;
-    }
-    return thenType;
-  }
-
-  return ExprStaticType::Invalid;
-}
 
 ExprRuntimeValue parseLiteralRuntimeValue(const QString &rawText) {
   if (rawText.compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0) {
@@ -272,7 +230,7 @@ ParseStep<ExprPtr> parseUnary(const ParseContext &context, int index) {
     if (!child.ok()) {
       return child;
     }
-    if (inferExprType(*child.value) != ExprStaticType::Bool) {
+    if (inferExprStaticType(*child.value) != ExprStaticType::Bool) {
       return makeErrorStep<ExprPtr>(
           QStringLiteral("NOT operand must be boolean"), token.start);
     }
@@ -360,14 +318,14 @@ ParseStep<ExprPtr> parseIfExpr(const ParseContext &context, int index) {
   }
 
   const auto *ifExpr = static_cast<const IfExpr *>(step.value.get());
-  if (inferExprType(*ifExpr->condition) != ExprStaticType::Bool) {
+  if (inferExprStaticType(*ifExpr->condition) != ExprStaticType::Bool) {
     return makeErrorStep<ExprPtr>(
         QStringLiteral("IF condition must be boolean"),
         peek(context.tokens, index).start);
   }
 
-  const ExprStaticType thenType = inferExprType(*ifExpr->thenExpr);
-  const ExprStaticType elseType = inferExprType(*ifExpr->elseExpr);
+  const ExprStaticType thenType = inferExprStaticType(*ifExpr->thenExpr);
+  const ExprStaticType elseType = inferExprStaticType(*ifExpr->elseExpr);
   if (thenType == ExprStaticType::Invalid ||
       elseType == ExprStaticType::Invalid || thenType != elseType) {
     return makeErrorStep<ExprPtr>(
@@ -431,7 +389,7 @@ ParseStep<ExprPtr> parseExprValueComparisonSuffix(const ParseContext &context,
   const ExprOperatorPtr &op = std::get<0>(opValueStep.value);
   const ExprValue &rightValue = std::get<1>(opValueStep.value);
 
-  const ExprStaticType leftType = inferExprType(*left.value);
+  const ExprStaticType leftType = inferExprStaticType(*left.value);
   if (leftType == ExprStaticType::Invalid) {
     return makeErrorStep<ExprPtr>(QStringLiteral("Invalid expression type"),
                                   operatorToken.start);
@@ -531,17 +489,23 @@ ParseStep<ExprFieldRef> parseFieldRef(const ParseContext &context, int index) {
   const ColumnDefinition *direct =
       context.registry.findColumn(QString::fromStdString(normalizedField));
   if (direct) {
-    if (direct->source != ColumnSource::SongAttribute) {
+    const bool searchableDirect =
+        direct->source == ColumnSource::SongAttribute ||
+        (direct->source == ColumnSource::Computed &&
+         !direct->expression.trimmed().isEmpty());
+    if (searchableDirect) {
+      return ParseStep<ExprFieldRef>{
+          .value =
+              ExprFieldRef{normalizedField, normalizedField, direct->valueType},
+          .nextIndex = index + 1};
+    }
+
+    if (direct->id == QStringLiteral("status")) {
       return makeErrorStep<ExprFieldRef>(
           QStringLiteral("Field `%1` is not searchable")
               .arg(QString::fromStdString(fieldToken.text)),
           fieldToken.start);
     }
-
-    return ParseStep<ExprFieldRef>{
-        .value =
-            ExprFieldRef{normalizedField, normalizedField, direct->valueType},
-        .nextIndex = index + 1};
   }
 
   const std::string customColumnId = std::string("attr:") + normalizedField;

@@ -350,7 +350,8 @@ void TestLibraryExpression::parse_customFieldByBareKey() {
   ColumnRegistry registry;
   registry.addOrUpdateDynamicColumn(
       {"attr:musicbrainz_trackid", "MusicBrainz Track ID",
-       ColumnSource::SongAttribute, ColumnValueType::Text, true, true, 140});
+       ColumnSource::SongAttribute, ColumnValueType::Text, "", true, true,
+       140});
 
   ExprParseResult result = parseLibraryExpression(
       QStringLiteral("musicbrainz_trackid IS abc123"), registry);
