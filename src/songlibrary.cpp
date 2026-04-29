@@ -109,7 +109,7 @@ int SongLibrary::addTolibrary(MSong &&s) {
     const int songId = pathIt->second;
     syncBuiltInFieldsBySongId(songId, s);
     syncDynamicAttributesBySongId(songId, s);
-    recomputeAndPersistComputedValuesForSongId(songId);
+    syncComputedValuesBySongId(songId, s);
     return songId;
   }
 
@@ -135,7 +135,7 @@ int SongLibrary::addTolibrary(MSong &&s) {
   paths[path] = songId;
   // New song path: persist dynamic attributes after inserting into memory/DB.
   syncDynamicAttributesBySongId(songId, songs[songId]);
-  recomputeAndPersistComputedValuesForSongId(songId);
+  syncComputedValuesBySongId(songId, songs[songId]);
 
   return songId;
 }
@@ -400,17 +400,7 @@ void SongLibrary::loadComputedValues() {
   }
 }
 
-void SongLibrary::recomputeAndPersistComputedValuesForSongId(int songId) {
-  if (songId < 0 || songId >= static_cast<int>(songs.size())) {
-    qFatal("recomputeAndPersistComputedValuesForSongId: invalid song_id=%d",
-           songId);
-  }
-
-  if (songs[songId].empty()) {
-    return;
-  }
-
-  MSong &song = songs[songId];
+void SongLibrary::evaluateComputedFieldsInSong(MSong &song) const {
   for (auto it = song.begin(); it != song.end();) {
     if (it->first.rfind("attr:", 0) == 0) {
       ++it;
@@ -454,7 +444,18 @@ void SongLibrary::recomputeAndPersistComputedValuesForSongId(int songId) {
     }
 
     song[definition.id.toStdString()] = computedValue;
-    upsertComputedFieldValueInDb(songId, definition, computedValue);
+  }
+}
+
+void SongLibrary::syncComputedValuesBySongId(int songId, const MSong &song) {
+  for (const ColumnDefinition &definition :
+       columnRegistry_.computedDefinitions()) {
+    auto it = song.find(definition.id.toStdString());
+    if (it == song.end()) {
+      continue;
+    }
+    songs[songId][definition.id.toStdString()] = it->second;
+    upsertComputedFieldValueInDb(songId, definition, it->second);
   }
 }
 
@@ -557,15 +558,21 @@ const MSong &SongLibrary::refreshSongFromFile(const std::string &path) {
            path.c_str());
   }
 
-#ifdef MYPLAYER_TESTING
-  const MSong parsed = parseSong_(path, columnRegistry_);
-#else
-  const MSong parsed = SongParser::parse(path, columnRegistry_);
-#endif
+  const MSong parsed = loadSongFromFile(path);
   syncBuiltInFieldsBySongId(songId, parsed);
   syncDynamicAttributesBySongId(songId, parsed);
-  recomputeAndPersistComputedValuesForSongId(songId);
+  syncComputedValuesBySongId(songId, parsed);
   return songs[songId];
+}
+
+MSong SongLibrary::loadSongFromFile(const std::string &path) const {
+#ifdef MYPLAYER_TESTING
+  MSong parsed = parseSong_(path, columnRegistry_);
+#else
+  MSong parsed = SongParser::parse(path, columnRegistry_);
+#endif
+  evaluateComputedFieldsInSong(parsed);
+  return parsed;
 }
 
 void SongLibrary::refreshSongsFromFilepaths(

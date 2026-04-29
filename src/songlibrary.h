@@ -44,7 +44,9 @@ public:
   explicit SongLibrary(const ColumnRegistry &columnRegistry,
                        DatabaseManager &databaseManager);
 #endif
-  // add to library if not exists, else do nothing, return primary key
+  // Adds a fully prepared song map to library/DB and returns primary key.
+  // If filepath already exists, syncs DB and in-memory fields from prepared
+  // song instead of creating a new row.
   int addTolibrary(MSong &&);
   const MSong &getSongByPK(int) const;
   ExprParseResult parseLibraryExpression(const QString &expressionText) const;
@@ -71,6 +73,7 @@ public:
   // Re-parses one song by filepath, updates DB + in-memory fields, and returns
   // the refreshed in-memory song.
   const MSong &refreshSongFromFile(const std::string &path);
+  MSong loadSongFromFile(const std::string &path) const;
   // Re-parses a filepath list (deduped internally), then updates DB and
   // in-memory fields for each song. This can take noticeable time on large
   // lists; progressCallback receives (current, total) after each refresh for
@@ -94,7 +97,8 @@ private:
   // and deleted from DB instead of aborting the load.
   void loadDynamicAttributes();
   void loadComputedValues();
-  void recomputeAndPersistComputedValuesForSongId(int songId);
+  void evaluateComputedFieldsInSong(MSong &song) const;
+  void syncComputedValuesBySongId(int songId, const MSong &song);
   void upsertComputedFieldValueInDb(int songId,
                                     const ColumnDefinition &definition,
                                     const FieldValue &value);

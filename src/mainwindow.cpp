@@ -322,8 +322,8 @@ void MainWindow::addEntry() {
   addEntryDialog->setAttribute(Qt::WA_DeleteOnClose);
   QObject::connect(addEntryDialog, &AddEntryDialog::entryStringEntered,
                    [this](const QString &text) {
-                     playlistTabs->currentPlaylist()->addSong(SongParser::parse(
-                         text.toStdString(), columnRegistry_));
+                     playlistTabs->currentPlaylist()->addSong(
+                         songLibrary.loadSongFromFile(text.toStdString()));
                    });
 }
 
@@ -390,7 +390,7 @@ void MainWindow::open() {
       R"(Audio Files (*.mp3 *.flac *.m4a *.wav *.ogg *.opus *.alac);;All Files (*.*))");
   for (const QString &s : fileName) {
     playlistTabs->currentPlaylist()->addSong(
-        SongParser::parse(s.toStdString(), columnRegistry_));
+        songLibrary.loadSongFromFile(s.toStdString()));
   }
 }
 
@@ -419,8 +419,8 @@ void MainWindow::openFolder() {
   songs.reserve(static_cast<size_t>(files.size()));
   for (int i = 0; i < files.size(); ++i) {
     const QString &s = files[i];
-    songs.push_back(SongParser::parse(dir.absoluteFilePath(s).toStdString(),
-                                      columnRegistry_));
+    songs.push_back(
+        songLibrary.loadSongFromFile(dir.absoluteFilePath(s).toStdString()));
     progressDialog.setValue(i + 1);
     QApplication::processEvents();
   }
