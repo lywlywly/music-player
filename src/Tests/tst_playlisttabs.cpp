@@ -17,6 +17,7 @@
 #include "../playbackqueue.h"
 #include "../playlisttabs.h"
 #include "../songlibrary.h"
+#include "../utils.h"
 
 namespace {
 MSong makeSong(const QString &title, const QString &artist, const QString &path,
@@ -33,6 +34,11 @@ MSong makeSong(const QString &title, const QString &artist, const QString &path,
   song["date"] = FieldValue("2024-01-01", ColumnValueType::DateTime);
   song["genre"] = "genre";
   song["filepath"] = path.toStdString();
+  const std::string identity =
+      util::normalizedText(title).toStdString() + "|" +
+      util::normalizedText(artist).toStdString() + "|" +
+      util::normalizedText(QStringLiteral("Album")).toStdString();
+  song["song_identity_key"] = identity;
   return song;
 }
 
@@ -161,16 +167,14 @@ void TestPlaylistTabs::
   Playlist *pl = tabs_->currentPlaylist();
   QVERIFY(pl != nullptr);
   pl->addSong(makeSong("A", "Artist", "/tmp/pt-notify-a.mp3", "1"));
+  const int songPk = pl->getPkByIndex(0);
 
   QSignalSpy spy(pl, &QAbstractItemModel::dataChanged);
 
-  tabs_->notifySongDataChangedInAllPlaylists("/tmp/pt-notify-a.mp3");
+  tabs_->notifySongDataChangedInAllPlaylists(songPk);
   QCOMPARE(spy.count(), 1);
 
-  tabs_->notifySongDataChangedInAllPlaylists("/tmp/pt-notify-miss.mp3");
-  QCOMPARE(spy.count(), 1);
-
-  tabs_->notifySongDataChangedInAllPlaylists("");
+  tabs_->notifySongDataChangedInAllPlaylists(-1);
   QCOMPARE(spy.count(), 1);
 }
 

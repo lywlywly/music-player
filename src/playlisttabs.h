@@ -36,10 +36,10 @@ public:
   void createNewPlaylistTabFromSongIds(const QList<int> &songIds);
   void setUpTableView(Playlist *, QTableView *);
   void navigateIndex(MSong, int row, Playlist *pl);
-  // Emits row data-changed notifications for this filepath in every playlist
+  // Emits row data-changed notifications for this songPk in every playlist
   // model. This is a UI/model refresh signal path and does not mutate song
   // data.
-  void notifySongDataChangedInAllPlaylists(const std::string &filepath);
+  void notifySongDataChangedInAllPlaylists(int songPk);
 
 signals:
   void doubleClicked(const QModelIndex &index);

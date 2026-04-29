@@ -23,10 +23,12 @@ public:
 private:
   void applyPragmas();
   bool createTables();
+  bool ensureSongIdentitiesSchema(QSqlQuery &q);
   bool ensureSongsSchema(QSqlQuery &q);
   bool ensurePlaylistsSchema(QSqlQuery &q);
   bool ensureDynamicAttributesSchema(QSqlQuery &q);
   bool ensureComputedAttributesSchema(QSqlQuery &q);
+  bool ensurePlayStatsSchema(QSqlQuery &q);
 
   const ColumnRegistry &columnRegistry_;
   QSqlDatabase db_;

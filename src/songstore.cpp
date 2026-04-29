@@ -130,6 +130,10 @@ int SongStore::getIndexByPk(int pk) const {
   return indices.at(pk);
 }
 
+bool SongStore::containsPk(int pk) const {
+  return pk >= 0 && pk < static_cast<int>(indices.size()) && indices[pk] >= 0;
+}
+
 void SongStore::sortByField(std::string f, int order) {
   const bool ascending = (order == 0);
 

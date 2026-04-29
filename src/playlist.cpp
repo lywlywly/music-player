@@ -235,20 +235,16 @@ void Playlist::refreshMetadataFromFiles(
   endResetModel();
 }
 
-void Playlist::emitSongDataChangedByFilepath(const std::string &filepath) {
-  if (filepath.empty()) {
-    qFatal("emitSongDataChangedByFilepath: filepath is empty");
+void Playlist::emitSongDataChangedBySongPk(int songPk) {
+  if (songPk < 0) {
+    return;
   }
   if (rowCount() == 0 || columnCount() == 0) {
     return;
   }
-
-  for (int row = 0; row < rowCount(); ++row) {
-    const MSong &song = getSongByIndex(row);
-    auto it = song.find("filepath");
-    if (it == song.end() || it->second.text != filepath) {
-      continue;
-    }
-    emit dataChanged(index(row, 0), index(row, columnCount() - 1));
+  if (!store.containsPk(songPk)) {
+    return;
   }
+  const int row = store.getIndexByPk(songPk);
+  emit dataChanged(index(row, 0), index(row, columnCount() - 1));
 }

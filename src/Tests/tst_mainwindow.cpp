@@ -9,6 +9,8 @@
 #include <QSettings>
 #include <QSignalSpy>
 #include <QSlider>
+#include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QStatusBar>
 #include <QTableView>
 #include <QTemporaryDir>
@@ -22,6 +24,7 @@
 #include "../mainwindow.h"
 #include "../playbackbackendmanager.h"
 #include "../playlisttabs.h"
+#include "../utils.h"
 
 namespace {
 bool writeSilentWav(const QString &path) {
@@ -71,6 +74,11 @@ MSong makeSong(const QString &title, const QString &artist,
   song["date"] = FieldValue("2024-01-01", ColumnValueType::DateTime);
   song["genre"] = "genre";
   song["filepath"] = filepath.toStdString();
+  const std::string identity =
+      util::normalizedText(title).toStdString() + "|" +
+      util::normalizedText(artist).toStdString() + "|" +
+      util::normalizedText(QStringLiteral("Album")).toStdString();
+  song["song_identity_key"] = identity;
   return song;
 }
 
@@ -109,6 +117,8 @@ private slots:
   void playbackOrderMenuActions_areExclusive();
   void librarySearchAction_opensDialog();
   void librarySearchDialog_canCreateNewPlaylistTabFromResults();
+  void playStats_seekToEndWithoutListenDoesNotCount();
+  void playStats_nearEndWithListenCountsOnceAndRefreshes();
 
 private:
   MainWindow *window_ = nullptr;
@@ -521,6 +531,86 @@ void TestMainWindow::librarySearchDialog_canCreateNewPlaylistTabFromResults() {
   QTRY_COMPARE(tabs->currentPlaylist()->songCount(), 1);
   QCOMPARE(tabs->currentPlaylist()->getSongByIndex(0).at("title").text,
            std::string("Song2"));
+}
+
+void TestMainWindow::playStats_seekToEndWithoutListenDoesNotCount() {
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(tabs != nullptr);
+  Playlist *playlist = tabs->currentPlaylist();
+  QVERIFY(playlist != nullptr);
+  PlaybackBackendManager *backend =
+      window_->findChild<PlaybackBackendManager *>();
+  QVERIFY(backend != nullptr);
+  DummyAudioPlayer *dummyPlayer =
+      qobject_cast<DummyAudioPlayer *>(backend->player());
+  QVERIFY(dummyPlayer != nullptr);
+  QSlider *slider = window_->findChild<QSlider *>("horizontalSlider");
+  QVERIFY(slider != nullptr);
+
+  const QString wav = workDir_->filePath("stats-seek.wav");
+  QVERIFY(writeSilentWav(wav));
+  playlist->addSong(makeSong("Song", "Artist", wav));
+  playlist->setLastPlayed(playlist->getPkByIndex(0));
+  dummyPlayer->setDurationForTest(120000);
+
+  QAction *playAction = window_->findChild<QAction *>("actionPlay");
+  QVERIFY(playAction != nullptr);
+  playAction->trigger();
+
+  slider->setMaximum(120000);
+  slider->setValue(115000);
+  QVERIFY(QMetaObject::invokeMethod(slider, "sliderReleased",
+                                    Qt::DirectConnection));
+
+  QSqlDatabase db = QSqlDatabase::database("myplayer_main");
+  QVERIFY(db.isValid());
+  QSqlQuery q(db);
+  QVERIFY(q.exec("SELECT IFNULL(MAX(play_count), 0) FROM song_play_stats"));
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toInt(), 0);
+}
+
+void TestMainWindow::playStats_nearEndWithListenCountsOnceAndRefreshes() {
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(tabs != nullptr);
+  Playlist *playlist = tabs->currentPlaylist();
+  QVERIFY(playlist != nullptr);
+  PlaybackBackendManager *backend =
+      window_->findChild<PlaybackBackendManager *>();
+  QVERIFY(backend != nullptr);
+  DummyAudioPlayer *dummyPlayer =
+      qobject_cast<DummyAudioPlayer *>(backend->player());
+  QVERIFY(dummyPlayer != nullptr);
+
+  const QString wav = workDir_->filePath("stats-listen.wav");
+  QVERIFY(writeSilentWav(wav));
+  playlist->addSong(makeSong("Song", "Artist", wav));
+  playlist->setLastPlayed(playlist->getPkByIndex(0));
+  dummyPlayer->setDurationForTest(120000);
+
+  QAction *playAction = window_->findChild<QAction *>("actionPlay");
+  QVERIFY(playAction != nullptr);
+  playAction->trigger();
+
+  backend->player()->setPosition(1000);
+  backend->player()->setPosition(35000);
+  backend->player()->setPosition(70000);
+  backend->player()->setPosition(109000);
+  backend->player()->setPosition(115000);
+  backend->player()->setPosition(119000);
+
+  QSqlDatabase db = QSqlDatabase::database("myplayer_main");
+  QVERIFY(db.isValid());
+  QSqlQuery q(db);
+  QVERIFY(q.exec("SELECT COUNT(*) FROM song_play_stats"));
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toInt(), 1);
+
+  QVERIFY(q.exec("SELECT play_count, last_played_timestamp "
+                 "FROM song_play_stats LIMIT 1"));
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toInt(), 1);
+  QVERIFY(q.value(1).toLongLong() > 0);
 }
 
 QTEST_MAIN(TestMainWindow)

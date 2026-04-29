@@ -12,6 +12,7 @@
 #include "../playlist.h"
 #include "../songlibrary.h"
 #include "../songstore.h"
+#include "../utils.h"
 
 namespace {
 MSong makeSong(const QString &title, const QString &artist, const QString &path,
@@ -28,6 +29,11 @@ MSong makeSong(const QString &title, const QString &artist, const QString &path,
   song["date"] = FieldValue("2024-01-01", ColumnValueType::DateTime);
   song["genre"] = "genre";
   song["filepath"] = path.toStdString();
+  const std::string identity =
+      util::normalizedText(title).toStdString() + "|" +
+      util::normalizedText(artist).toStdString() + "|" +
+      util::normalizedText(QStringLiteral("Album")).toStdString();
+  song["song_identity_key"] = identity;
   return song;
 }
 } // namespace
@@ -41,7 +47,8 @@ private slots:
 
   void data_returnsSongFieldsAndPlayingStatus();
   void sortByColumnId_statusNoop_tracknumberSorts();
-  void emitSongDataChangedByFilepath_emitsOnlyWhenMatched();
+  void emitSongDataChangedBySongPk_emitsOnlyWhenMatched();
+  void emitSongDataChangedBySongPk_targetsGivenSong();
   void refreshMetadataFromFiles_updatesSongsAndReportsProgress();
   void columnCount_tracksVisibilityChanges();
 
@@ -125,18 +132,39 @@ void TestPlaylist::sortByColumnId_statusNoop_tracknumberSorts() {
   QCOMPARE(playlist.getSongByIndex(2).at("title").text, std::string("A"));
 }
 
-void TestPlaylist::emitSongDataChangedByFilepath_emitsOnlyWhenMatched() {
+void TestPlaylist::emitSongDataChangedBySongPk_emitsOnlyWhenMatched() {
   SongStore store(*library_, -1);
   store.addSong(makeSong("A", "Artist", "/tmp/pl-signal-a.mp3", "1"));
   store.addSong(makeSong("B", "Artist", "/tmp/pl-signal-b.mp3", "2"));
   Playlist playlist(std::move(store), *queue_, 1, *layout_);
 
   QSignalSpy spy(&playlist, &QAbstractItemModel::dataChanged);
+  const int songPk = playlist.getPkByIndex(0);
 
-  playlist.emitSongDataChangedByFilepath("/tmp/pl-signal-a.mp3");
+  playlist.emitSongDataChangedBySongPk(songPk);
   QCOMPARE(spy.count(), 1);
 
-  playlist.emitSongDataChangedByFilepath("/tmp/does-not-exist.mp3");
+  playlist.emitSongDataChangedBySongPk(-1);
+  QCOMPARE(spy.count(), 1);
+}
+
+void TestPlaylist::emitSongDataChangedBySongPk_targetsGivenSong() {
+  SongStore store(*library_, -1);
+  store.addSong(makeSong("A1", "Artist", "/tmp/pl-same.mp3", "1"));
+  store.addSong(makeSong("B", "Artist", "/tmp/pl-other.mp3", "2"));
+  store.addSong(makeSong("A2", "Artist", "/tmp/pl-same.mp3", "3"));
+  Playlist playlist(std::move(store), *queue_, 1, *layout_);
+
+  QSignalSpy spy(&playlist, &QAbstractItemModel::dataChanged);
+  const int firstPk = playlist.getPkByIndex(0);
+  const int thirdPk = playlist.getPkByIndex(2);
+
+  playlist.emitSongDataChangedBySongPk(firstPk);
+  QCOMPARE(spy.count(), 1);
+
+  playlist.sortByColumnId("tracknumber", 1);
+  spy.clear();
+  playlist.emitSongDataChangedBySongPk(thirdPk);
   QCOMPARE(spy.count(), 1);
 }
 

@@ -10,6 +10,7 @@
 #include "../playbackmanager.h"
 #include "../playbackqueue.h"
 #include "../playlist.h"
+#include "../utils.h"
 
 namespace {
 MSong makeSong(const QString &title, const QString &artist, const QString &path,
@@ -24,6 +25,11 @@ MSong makeSong(const QString &title, const QString &artist, const QString &path,
   song["date"] = FieldValue("2024-01-01", ColumnValueType::DateTime);
   song["genre"] = "genre";
   song["filepath"] = path.toStdString();
+  const std::string identity =
+      util::normalizedText(title).toStdString() + "|" +
+      util::normalizedText(artist).toStdString() + "|" +
+      util::normalizedText(QStringLiteral("Album")).toStdString();
+  song["song_identity_key"] = identity;
   return song;
 }
 } // namespace

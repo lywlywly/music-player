@@ -28,6 +28,7 @@ public:
   const MSong &getSongByIndex(int) const;
   int getPkByIndex(int) const;
   int getIndexByPk(int) const;
+  bool containsPk(int) const;
   void sortByField(std::string, int = 0);
   std::vector<int> expression(std::string);
   std::vector<int> &expressionView(std::string);

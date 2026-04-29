@@ -18,7 +18,10 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
 - ⬜ Media folder monitoring
 - 🟡 Search expressions
   - See [Search Expressions](#search-expressions)
-- ⬜ Playback statistics
+- 🟡 Playback statistics
+  - ✅ `play_count` with near-complete gating (seek-to-end alone does not count)
+  - ✅ `last_played_timestamp`
+  - ✅ Identity-based stats aggregation (shared by normalized title/artist/album)
   - ⬜ Cloud sync for playback statistics
 - ⬜ CLI tool and headless mode
 - 🟡 System media integration
@@ -36,6 +39,6 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
 
 - Implemented: boolean operators (`AND`/`OR`/`NOT`), parentheses, comparison operators (`IS`/`=`, `HAS`, `IN`, `<`, `<=`, `>`, `>=`), and list/range values.
 - Implemented: typed conversion/comparison for numeric, datetime, and boolean fields.
-- Next: evolve this into a fully typed expression system so non-boolean value expressions are first-class.
+- Implemented: expression values via `IF ... THEN ... ELSE ...` (usable in comparisons).
 - Later goal example: `IF encoding IN [flac, alac, pcm, wavpack] THEN "lossless" ELSE "lossy"`.
 - Compatibility goal: keep current query syntax valid as a subset while extending the language.

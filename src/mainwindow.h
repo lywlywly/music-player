@@ -47,7 +47,7 @@ private:
   void pause();
   void toggle();
   void stop();
-  void playSong(const MSong &);
+  void playSong(const MSong &, int row, Playlist *pl);
   void navigateIndex(MSong song, int, Playlist *);
   void setUpSplitter();
   void setUpLyricsPanel();
@@ -59,6 +59,9 @@ private:
   void setUpPlaylist();
   void setUpMenuBar();
   void openLibrarySearchDialog();
+  void resetPlayStatsSession(int songPk);
+  void maybeCountCompletedPlay();
+  static qint64 unixNowSeconds();
   // TODO: remove song from current playlist, check if any other playlist
   // references the song, if no, remove from library
   void removeSong();
@@ -78,5 +81,11 @@ private:
   ISystemMediaInterface *sysMedia;
   qint64 currentDurationMs_ = 0;
   qint64 currentPositionMs_ = 0;
+  int currentTrackPk_ = -1;
+  qint64 sessionDurationMs_ = 0;
+  qint64 sessionMaxPositionMs_ = 0;
+  qint64 sessionListenedMs_ = 0;
+  qint64 lastPositionSampleMs_ = -1;
+  bool completionCounted_ = false;
 };
 #endif // MAINWINDOW_H

@@ -18,6 +18,7 @@
 #include "songparser.h"
 #include <QActionGroup>
 #include <QApplication>
+#include <QDateTime>
 #include <QDebug>
 #include <QFileDialog>
 #include <QProgressDialog>
@@ -25,6 +26,7 @@
 #include <QSqlDatabase>
 #include <QStandardPaths>
 #include <QStatusBar>
+#include <algorithm>
 
 namespace {
 QString formatPlaybackTime(qint64 milliseconds) {
@@ -120,7 +122,7 @@ void MainWindow::setUpPlaylist() {
                      &columnLayoutManager_);
   connect(playlistTabs, &PlaylistTabs::doubleClicked, [this](QModelIndex i) {
     MSong song = control.playIndex(i.row());
-    playSong(song);
+    playSong(song, i.row(), playlistTabs->currentPlaylist());
     setUpImageAndLyrics(song);
   });
   // playlist operations
@@ -209,13 +211,16 @@ void MainWindow::setUpPlaybackBackend() {
           &MainWindow::positionChanged);
 }
 
-void MainWindow::playSong(const MSong &song) {
+void MainWindow::playSong(const MSong &song, int row, Playlist *pl) {
+  const int songPk = pl->getPkByIndex(row);
   const std::string filepath = song.at("filepath").text;
   if (filepath.empty()) {
     qFatal("playSong: filepath is empty");
   }
   const MSong &activeSong = songLibrary.refreshSongFromFile(filepath);
-  playlistTabs->notifySongDataChangedInAllPlaylists(filepath);
+  resetPlayStatsSession(songPk);
+  songLibrary.markSongPlayedAtStart(songPk, unixNowSeconds());
+  playlistTabs->notifySongDataChangedInAllPlaylists(songPk);
 
   backendManager->player()->setSource(
       QString::fromStdString(activeSong.at("filepath").text));
@@ -232,7 +237,7 @@ void MainWindow::next() {
   if (row < 0)
     return;
 
-  playSong(song);
+  playSong(song, row, pl);
   navigateIndex(song, row, pl);
 }
 
@@ -241,16 +246,17 @@ void MainWindow::prev() {
   if (row < 0)
     return;
 
-  playSong(song);
+  playSong(song, row, pl);
   navigateIndex(song, row, pl);
 }
 
 void MainWindow::play() {
   if (control.getStatus() == PlaybackQueue::PlaybackStatus::None) {
-    int lastPlayedPk = playlistTabs->currentPlaylist()->getLastPlayed();
-    MSong song = control.playIndex(
-        playlistTabs->currentPlaylist()->getIndexByPk(lastPlayedPk));
-    playSong(song);
+    Playlist *pl = playlistTabs->currentPlaylist();
+    int lastPlayedPk = pl->getLastPlayed();
+    const int row = pl->getIndexByPk(lastPlayedPk);
+    MSong song = control.playIndex(row);
+    playSong(song, row, pl);
   } else {
     backendManager->player()->play();
     control.play();
@@ -329,6 +335,7 @@ void MainWindow::addEntry() {
 
 void MainWindow::durationChanged(qint64 newDuration) {
   currentDurationMs_ = newDuration;
+  sessionDurationMs_ = newDuration;
   ui->horizontalSlider->setMaximum(newDuration);
   updatePlaybackTimeStatus();
   sysMedia->setDuration(newDuration);
@@ -336,6 +343,19 @@ void MainWindow::durationChanged(qint64 newDuration) {
 
 void MainWindow::positionChanged(qint64 progress) {
   currentPositionMs_ = progress;
+  if (progress > sessionMaxPositionMs_) {
+    sessionMaxPositionMs_ = progress;
+  }
+  if (control.getStatus() == PlaybackQueue::PlaybackStatus::Playing &&
+      lastPositionSampleMs_ >= 0) {
+    const qint64 delta = progress - lastPositionSampleMs_;
+    if (delta > 0) {
+      sessionListenedMs_ += delta;
+    }
+  }
+  lastPositionSampleMs_ = progress;
+  maybeCountCompletedPlay();
+
   if (!ui->horizontalSlider->isSliderDown())
     ui->horizontalSlider->setValue(progress);
   updatePlaybackTimeStatus();
@@ -353,6 +373,7 @@ void MainWindow::updatePlaybackTimeStatus() {
 }
 
 void MainWindow::seek(int mseconds) {
+  lastPositionSampleMs_ = -1;
   sysMedia->setPosition(mseconds);
   backendManager->player()->setPosition(mseconds);
 }
@@ -374,6 +395,7 @@ void MainWindow::statusChanged(QMediaPlayer::MediaStatus status) {
   case QMediaPlayer::StalledMedia:
     break;
   case QMediaPlayer::EndOfMedia:
+    maybeCountCompletedPlay();
     QApplication::alert(this);
     this->next();
     break;
@@ -438,3 +460,38 @@ void MainWindow::openLibrarySearchDialog() {
 }
 
 MainWindow::~MainWindow() { delete ui; }
+
+void MainWindow::resetPlayStatsSession(int songPk) {
+  currentTrackPk_ = songPk;
+  sessionDurationMs_ = currentDurationMs_;
+  sessionMaxPositionMs_ = 0;
+  sessionListenedMs_ = 0;
+  lastPositionSampleMs_ = -1;
+  completionCounted_ = false;
+}
+
+void MainWindow::maybeCountCompletedPlay() {
+  if (completionCounted_ || currentTrackPk_ < 0) {
+    return;
+  }
+  const qint64 duration = sessionDurationMs_;
+  if (duration <= 0) {
+    return;
+  }
+  const qint64 nearEndThreshold =
+      std::max<qint64>(0, std::min((duration * 9) / 10, duration - 5000));
+  const qint64 listenedThreshold = (duration * 2) / 3;
+  if (sessionMaxPositionMs_ < nearEndThreshold ||
+      sessionListenedMs_ < listenedThreshold) {
+    return;
+  }
+  if (!songLibrary.incrementPlayCount(currentTrackPk_)) {
+    return;
+  }
+  completionCounted_ = true;
+  playlistTabs->notifySongDataChangedInAllPlaylists(currentTrackPk_);
+}
+
+qint64 MainWindow::unixNowSeconds() {
+  return QDateTime::currentSecsSinceEpoch();
+}

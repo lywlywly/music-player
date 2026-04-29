@@ -29,11 +29,15 @@ using SongParseFn =
 #endif
 
 // SongLibrary is the canonical repository for song metadata in memory and in
-// the database. Songs are indexed by song_id and filepath, with filepath as
-// the unique identity. Normal single-song updates are synchronous; bulk loads
-// and refreshes may take time; UI-first playlist clears update memory
-// immediately and delete DB rows asynchronously; startup load and playlist
-// restore stay synchronous so memory matches the database before use.
+// the database. Prefer song_id (pk) for cross-component references; filepath
+// is mainly used for dedup and parser refresh lookup. Songs are indexed by
+// song_id and filepath in memory; play statistics are keyed by song identity
+// (normalized title|artist|album) in DB. Multiple songs can share the same
+// identity.
+// Normal single-song updates are synchronous; bulk loads and refreshes may take
+// time; UI-first playlist clears update memory immediately and delete DB rows
+// asynchronously; startup load and playlist restore stay synchronous so memory
+// matches the database before use.
 class SongLibrary {
 public:
 #ifdef MYPLAYER_TESTING
@@ -73,6 +77,9 @@ public:
   // Re-parses one song by filepath, updates DB + in-memory fields, and returns
   // the refreshed in-memory song.
   const MSong &refreshSongFromFile(const std::string &path);
+  // Parses one file and returns a prepared song map containing:
+  // built-in fields, dynamic attrs from parser, computed fields, and
+  // song_identity_key.
   MSong loadSongFromFile(const std::string &path) const;
   // Re-parses a filepath list (deduped internally), then updates DB and
   // in-memory fields for each song. This can take noticeable time on large
@@ -81,6 +88,12 @@ public:
   void refreshSongsFromFilepaths(
       const std::vector<std::string> &filepaths,
       const std::function<void(int current, int total)> &progressCallback = {});
+  // Updates last_played_timestamp for the identity of songPk.
+  // This also updates all in-memory songs with the same identity.
+  bool markSongPlayedAtStart(int songPk, qint64 unixSeconds);
+  // Increments play_count for the identity of songPk.
+  // This also updates all in-memory songs with the same identity.
+  bool incrementPlayCount(int songPk);
   // Appends one song to DB table `playlist_items` at the given playlist
   // position.
   void appendSongToPlaylistInDb(int playlistId, int songId, int position);
@@ -97,12 +110,16 @@ private:
   // and deleted from DB instead of aborting the load.
   void loadDynamicAttributes();
   void loadComputedValues();
-  void evaluateComputedFieldsInSong(MSong &song) const;
+  void loadPlayStats();
+  int songIdentityIdBySongId(int songId) const;
+  int ensureSongIdentityId(const std::string &identityKey);
+  void addSongToIdentityIndex(int songId, int identityId);
+  void removeSongFromIdentityIndex(int songId, int identityId);
   void syncComputedValuesBySongId(int songId, const MSong &song);
   void upsertComputedFieldValueInDb(int songId,
                                     const ColumnDefinition &definition,
                                     const FieldValue &value);
-  int ensureSongInDb(const MSong &song);
+  int ensureSongInDb(MSong &song);
   // Syncs built-in song fields in memory and DB for a known song_id.
   void syncBuiltInFieldsBySongId(int songId, const MSong &song);
   // Syncs dynamic attributes in memory and DB for a known song_id.
@@ -114,6 +131,9 @@ private:
 #endif
   std::vector<MSong> songs;
   std::unordered_map<std::string, int> paths;
+  // Reverse index for fast identity-wide in-memory fan-out updates
+  // (play_count / last_played_timestamp).
+  std::unordered_map<int, std::vector<int>> songIdsByIdentityId_;
   mutable std::unordered_map<std::string, std::unordered_set<std::string>>
       registeredQueryFields;
   mutable std::unordered_map<std::string, std::vector<int>> registeredQueries;

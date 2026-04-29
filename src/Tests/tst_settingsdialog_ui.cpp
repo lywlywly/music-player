@@ -128,8 +128,12 @@ void TestSettingsDialogUi::removeCustomField_deletesDefinitionAndValues() {
   QVERIFY(registry_->loadDynamicColumns(databaseManager_->db()));
 
   QSqlQuery seedValues(databaseManager_->db());
-  QVERIFY(seedValues.exec("INSERT INTO songs(song_id, title, filepath) VALUES "
-                          "(1, 'Song', '/tmp/remove-field.mp3')"));
+  QVERIFY(seedValues.exec(
+      "INSERT INTO song_identities(identity_id, song_identity_key) VALUES "
+      "(1, 'song|artist|album')"));
+  QVERIFY(seedValues.exec(
+      "INSERT INTO songs(song_id, title, filepath, identity_id) "
+      "VALUES (1, 'Song', '/tmp/remove-field.mp3', 1)"));
   QVERIFY(seedValues.exec(
       "INSERT INTO song_attributes(song_id, key, value_text, value_type) "
       "VALUES (1, 'musicbrainz_trackid', 'abc123', 'text')"));

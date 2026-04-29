@@ -7,6 +7,7 @@
 #include "../columnregistry.h"
 #include "../databasemanager.h"
 #include "../songlibrary.h"
+#include "../utils.h"
 
 namespace {
 MSong makeSong(const QString &title, const QString &artist, const QString &path,
@@ -30,6 +31,10 @@ MSong makeSong(const QString &title, const QString &artist, const QString &path,
     song["genre"] = genre.toStdString();
   }
   song["filepath"] = path.toStdString();
+  const std::string identity = util::normalizedText(title).toStdString() + "|" +
+                               util::normalizedText(artist).toStdString() +
+                               "|" + util::normalizedText(album).toStdString();
+  song["song_identity_key"] = identity;
   return song;
 }
 } // namespace
@@ -44,6 +49,10 @@ private slots:
   void addToLibrary_sameFilepathUpdatesExistingSong();
   void loadFromDatabase_loadsBuiltInAndDynamicAttributes();
   void loadFromDatabase_removesUnknownDynamicAttributes();
+  void loadFromDatabase_loadsPlayStatsDefaultsAndRows();
+  void markSongPlayedAtStart_updatesTimestampOnly();
+  void incrementPlayCount_updatesMemoryAndDb();
+  void playStats_sharedAcrossSameIdentityKey();
   void search_matchesCaseInsensitiveExact();
   void search_supportsAndOr();
   void search_supportsParentheses();
@@ -62,6 +71,7 @@ private slots:
   void refreshSongsFromFilepaths_dedupesAndReportsProgress();
   void appendAndRemovePlaylistItems();
   void registerQuery_tracksLaterInsertions();
+  void queryHelpers_skipEmptySongSlots();
 
 private:
   ColumnRegistry *registry_ = nullptr;
@@ -138,11 +148,14 @@ void TestSongLibrary::loadFromDatabase_loadsBuiltInAndDynamicAttributes() {
 
   QSqlDatabase &db = databaseManager_->db();
   QSqlQuery q(db);
+  QVERIFY(q.exec(
+      "INSERT INTO song_identities(identity_id, song_identity_key) VALUES "
+      "(7, 'song 7|artist 7|album 7')"));
   QVERIFY(
       q.exec("INSERT INTO songs(song_id, title, artist, album, discnumber, "
-             "tracknumber, date, genre, filepath) "
+             "tracknumber, date, genre, filepath, identity_id) "
              "VALUES (7, 'Song 7', 'Artist 7', 'Album 7', 1, 3, '2022-11-13', "
-             "'Jazz', '/tmp/song-7.mp3')"));
+             "'Jazz', '/tmp/song-7.mp3', 7)"));
   QVERIFY(q.exec(
       "INSERT INTO song_attributes(song_id, key, value_text, value_type) "
       "VALUES (7, 'date_added', '2022-11-13 06:45:23+00:00', 'date')"));
@@ -160,11 +173,14 @@ void TestSongLibrary::loadFromDatabase_loadsBuiltInAndDynamicAttributes() {
 void TestSongLibrary::loadFromDatabase_removesUnknownDynamicAttributes() {
   QSqlDatabase &db = databaseManager_->db();
   QSqlQuery q(db);
+  QVERIFY(q.exec(
+      "INSERT INTO song_identities(identity_id, song_identity_key) VALUES "
+      "(8, 'song 8|artist 8|album 8')"));
   QVERIFY(
       q.exec("INSERT INTO songs(song_id, title, artist, album, discnumber, "
-             "tracknumber, date, genre, filepath) "
+             "tracknumber, date, genre, filepath, identity_id) "
              "VALUES (8, 'Song 8', 'Artist 8', 'Album 8', 1, 4, '2022-11-14', "
-             "'Rock', '/tmp/song-8.mp3')"));
+             "'Rock', '/tmp/song-8.mp3', 8)"));
   QVERIFY(q.exec(
       "INSERT INTO song_attributes(song_id, key, value_text, value_type) "
       "VALUES (8, 'orphan_tag', 'stale', 'text')"));
@@ -178,6 +194,101 @@ void TestSongLibrary::loadFromDatabase_removesUnknownDynamicAttributes() {
       q.exec("SELECT COUNT(*) FROM song_attributes WHERE key='orphan_tag'"));
   QVERIFY(q.next());
   QCOMPARE(q.value(0).toInt(), 0);
+}
+
+void TestSongLibrary::loadFromDatabase_loadsPlayStatsDefaultsAndRows() {
+  QSqlDatabase &db = databaseManager_->db();
+  QSqlQuery q(db);
+  QVERIFY(q.exec(
+      "INSERT INTO song_identities(identity_id, song_identity_key) VALUES "
+      "(9, 'song 9|artist 9|album 9'), (10, 'song 10|artist 10|album 10')"));
+  QVERIFY(
+      q.exec("INSERT INTO songs(song_id, title, artist, album, discnumber, "
+             "tracknumber, date, genre, filepath, identity_id) "
+             "VALUES (9, 'Song 9', 'Artist 9', 'Album 9', 1, 9, '2022-11-15', "
+             "'Rock', '/tmp/song-9.mp3', 9)"));
+  QVERIFY(q.exec(
+      "INSERT INTO songs(song_id, title, artist, album, discnumber, "
+      "tracknumber, date, genre, filepath, identity_id) "
+      "VALUES (10, 'Song 10', 'Artist 10', 'Album 10', 1, 10, '2022-11-16', "
+      "'Pop', '/tmp/song-10.mp3', 10)"));
+  QVERIFY(q.exec("INSERT INTO song_play_stats(identity_id, play_count, "
+                 "last_played_timestamp) VALUES (9, 7, 1710000000)"));
+
+  library_->loadFromDatabase();
+
+  const MSong &song9 = library_->getSongByPK(9);
+  QVERIFY(song9.contains("play_count"));
+  QVERIFY(song9.contains("last_played_timestamp"));
+  QCOMPARE(song9.at("play_count").text, std::string("7"));
+  QCOMPARE(song9.at("last_played_timestamp").text, std::string("1710000000"));
+
+  const MSong &song10 = library_->getSongByPK(10);
+  QVERIFY(!song10.contains("play_count"));
+  QVERIFY(!song10.contains("last_played_timestamp"));
+}
+
+void TestSongLibrary::markSongPlayedAtStart_updatesTimestampOnly() {
+  const int songId =
+      library_->addTolibrary(makeSong("Song", "Artist", "/tmp/stats-a.mp3"));
+
+  QVERIFY(library_->markSongPlayedAtStart(songId, 1720000000));
+  const MSong &song = library_->getSongByPK(songId);
+  QVERIFY(song.contains("play_count"));
+  QVERIFY(song.contains("last_played_timestamp"));
+  QCOMPARE(song.at("play_count").text, std::string("0"));
+  QCOMPARE(song.at("last_played_timestamp").text, std::string("1720000000"));
+  const std::string identityIdText = song.at("song_identity_id").text;
+
+  QSqlQuery q(databaseManager_->db());
+  QVERIFY(q.exec(QString("SELECT play_count, last_played_timestamp "
+                         "FROM song_play_stats WHERE identity_id=%1")
+                     .arg(QString::fromStdString(identityIdText))));
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toInt(), 0);
+  QCOMPARE(q.value(1).toLongLong(), 1720000000LL);
+}
+
+void TestSongLibrary::incrementPlayCount_updatesMemoryAndDb() {
+  const int songId =
+      library_->addTolibrary(makeSong("Song", "Artist", "/tmp/stats-b.mp3"));
+  QVERIFY(library_->markSongPlayedAtStart(songId, 1721000000));
+
+  QVERIFY(library_->incrementPlayCount(songId));
+  QVERIFY(library_->incrementPlayCount(songId));
+
+  const MSong &song = library_->getSongByPK(songId);
+  QCOMPARE(song.at("play_count").text, std::string("2"));
+  QCOMPARE(song.at("last_played_timestamp").text, std::string("1721000000"));
+  const std::string identityIdText = song.at("song_identity_id").text;
+
+  QSqlQuery q(databaseManager_->db());
+  QVERIFY(q.exec(QString("SELECT play_count, last_played_timestamp "
+                         "FROM song_play_stats WHERE identity_id=%1")
+                     .arg(QString::fromStdString(identityIdText))));
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toInt(), 2);
+  QCOMPARE(q.value(1).toLongLong(), 1721000000LL);
+}
+
+void TestSongLibrary::playStats_sharedAcrossSameIdentityKey() {
+  const int firstId =
+      library_->addTolibrary(makeSong("Song", "Artist", "/tmp/stats-c1.mp3"));
+  const int secondId =
+      library_->addTolibrary(makeSong("Song", "Artist", "/tmp/stats-c2.mp3"));
+
+  QVERIFY(library_->markSongPlayedAtStart(firstId, 1722000000));
+  QVERIFY(library_->incrementPlayCount(firstId));
+  QVERIFY(library_->incrementPlayCount(secondId));
+
+  library_->loadFromDatabase();
+
+  const MSong &first = library_->getSongByPK(firstId);
+  const MSong &second = library_->getSongByPK(secondId);
+  QCOMPARE(first.at("play_count").text, std::string("2"));
+  QCOMPARE(second.at("play_count").text, std::string("2"));
+  QCOMPARE(first.at("last_played_timestamp").text, std::string("1722000000"));
+  QCOMPARE(second.at("last_played_timestamp").text, std::string("1722000000"));
 }
 
 void TestSongLibrary::search_matchesCaseInsensitiveExact() {
@@ -498,19 +609,23 @@ void TestSongLibrary::search_supportsComputedFields() {
        "IF date < 2000 THEN classic ELSE new", true, true, 140}));
   QVERIFY(registry_->loadDynamicColumns(databaseManager_->db()));
 
-  library_->addTolibrary(makeSong("Song 1", "Artist A",
-                                  "/tmp/search-comp-a.mp3", "Album", "1",
-                                  "1998-01-01", "Pop"));
-  library_->addTolibrary(makeSong("Song 2", "Artist B",
-                                  "/tmp/search-comp-b.mp3", "Album", "2",
-                                  "2021-01-01", "Rock"));
+  SongLibrary localLibrary(*registry_, *databaseManager_);
+  MSong first = makeSong("Song 1", "Artist A", "/tmp/search-comp-a.mp3",
+                         "Album", "1", "1998-01-01", "Pop");
+  first["era"] = "classic";
+  localLibrary.addTolibrary(std::move(first));
+  MSong second = makeSong("Song 2", "Artist B", "/tmp/search-comp-b.mp3",
+                          "Album", "2", "2021-01-01", "Rock");
+  second["era"] = "new";
+  localLibrary.addTolibrary(std::move(second));
 
-  ExprParseResult parsed = library_->parseLibraryExpression("era IS classic");
+  ExprParseResult parsed =
+      localLibrary.parseLibraryExpression("era IS classic");
   QVERIFY(parsed.ok());
 
-  const std::vector<int> matches = library_->search(*parsed.expr);
+  const std::vector<int> matches = localLibrary.search(*parsed.expr);
   QCOMPARE(matches.size(), size_t(1));
-  QCOMPARE(library_->getSongByPK(matches[0]).at("title").text,
+  QCOMPARE(localLibrary.getSongByPK(matches[0]).at("title").text,
            std::string("Song 1"));
 
   QSqlQuery q(databaseManager_->db());
@@ -669,6 +784,36 @@ void TestSongLibrary::registerQuery_tracksLaterInsertions() {
 
   const std::vector<int> expected = {id1, id3};
   QCOMPARE(artistA, expected);
+}
+
+void TestSongLibrary::queryHelpers_skipEmptySongSlots() {
+  QSqlDatabase &db = databaseManager_->db();
+  QSqlQuery q(db);
+  QVERIFY(q.exec(
+      "INSERT INTO song_identities(identity_id, song_identity_key) VALUES "
+      "(5, 's5|artistx|album'), (9, 's9|artisty|album')"));
+  QVERIFY(
+      q.exec("INSERT INTO songs(song_id, title, artist, album, discnumber, "
+             "tracknumber, date, genre, filepath, identity_id) "
+             "VALUES (5, 'S5', 'ArtistX', 'Album', 1, 1, '2024-01-01', 'Pop', "
+             "'/tmp/s5.mp3', 5)"));
+  QVERIFY(
+      q.exec("INSERT INTO songs(song_id, title, artist, album, discnumber, "
+             "tracknumber, date, genre, filepath, identity_id) "
+             "VALUES (9, 'S9', 'ArtistY', 'Album', 1, 2, '2024-01-01', 'Pop', "
+             "'/tmp/s9.mp3', 9)"));
+
+  library_->loadFromDatabase();
+
+  const std::vector<int> matches = library_->query("ArtistX");
+  QCOMPARE(matches.size(), static_cast<size_t>(1));
+  QCOMPARE(matches[0], 5);
+
+  const std::unordered_set<std::string> artists =
+      library_->queryField("artist");
+  QCOMPARE(artists.size(), static_cast<size_t>(2));
+  QVERIFY(artists.find("ArtistX") != artists.end());
+  QVERIFY(artists.find("ArtistY") != artists.end());
 }
 
 QTEST_MAIN(TestSongLibrary)

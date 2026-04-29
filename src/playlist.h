@@ -56,10 +56,10 @@ public:
   // non-empty `filepath`; missing/empty filepath is treated as fatal.
   void refreshMetadataFromFiles(
       const std::function<void(int current, int total)> &progressCallback = {});
-  // Emits row data-changed notifications for rows matching filepath in this
+  // Emits row data-changed notifications for songPk in this
   // model. This refreshes view data without mutating the underlying song map.
-  // No-op when the model is empty or no row matches filepath.
-  void emitSongDataChangedByFilepath(const std::string &filepath);
+  // No-op when the model is empty or songPk is not in the view.
+  void emitSongDataChangedBySongPk(int songPk);
 
 private:
   QString columnIdAt(int section) const;

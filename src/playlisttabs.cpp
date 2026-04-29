@@ -77,13 +77,12 @@ void PlaylistTabs::createNewPlaylistTabFromSongIds(const QList<int> &songIds) {
   }
 }
 
-void PlaylistTabs::notifySongDataChangedInAllPlaylists(
-    const std::string &filepath) {
-  if (filepath.empty()) {
+void PlaylistTabs::notifySongDataChangedInAllPlaylists(int songPk) {
+  if (songPk < 0) {
     return;
   }
   for (auto &[name, playlist] : playlistMap) {
-    playlist.emitSongDataChangedByFilepath(filepath);
+    playlist.emitSongDataChangedBySongPk(songPk);
   }
 }
 

@@ -8,6 +8,11 @@ bool isBuiltInSongAttribute(const ColumnDefinition &definition) {
          !definition.id.startsWith("attr:");
 }
 
+bool isPlayStatsFieldId(const QString &id) {
+  return id == QStringLiteral("play_count") ||
+         id == QStringLiteral("last_played_timestamp");
+}
+
 bool isDynamicSongAttribute(const ColumnDefinition &definition) {
   return definition.source == ColumnSource::SongAttribute &&
          definition.id.startsWith("attr:");
@@ -36,6 +41,10 @@ ColumnRegistry::ColumnRegistry() {
        "", true, false, 140});
   add({"genre", "Genre", ColumnSource::SongAttribute, ColumnValueType::Text, "",
        true, false, 140});
+  add({"play_count", "Play Count", ColumnSource::SongAttribute,
+       ColumnValueType::Number, "", true, true, 120});
+  add({"last_played_timestamp", "Last Played", ColumnSource::SongAttribute,
+       ColumnValueType::DateTime, "", true, false, 180});
   add({"filepath", "File path", ColumnSource::SongAttribute,
        ColumnValueType::Text, "", true, false, 360});
 }
@@ -101,7 +110,8 @@ QList<ColumnDefinition> ColumnRegistry::songAttributeDefinitions() const {
   QList<ColumnDefinition> result;
   result.reserve(definitions_.size());
   for (const ColumnDefinition &definition : definitions_) {
-    if (isBuiltInSongAttribute(definition)) {
+    if (isBuiltInSongAttribute(definition) &&
+        !isPlayStatsFieldId(definition.id)) {
       result.push_back(definition);
     }
   }

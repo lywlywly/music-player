@@ -1,7 +1,6 @@
 #include "databasemanager.h"
 #include "columnregistry.h"
 #include <QDebug>
-#include <QSet>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QStringList>
@@ -84,8 +83,29 @@ void DatabaseManager::applyPragmas() {
 bool DatabaseManager::createTables() {
   QSqlQuery q(db_);
 
-  return ensureSongsSchema(q) && ensurePlaylistsSchema(q) &&
-         ensureDynamicAttributesSchema(q) && ensureComputedAttributesSchema(q);
+  return ensureSongIdentitiesSchema(q) && ensureSongsSchema(q) &&
+         ensurePlaylistsSchema(q) && ensureDynamicAttributesSchema(q) &&
+         ensureComputedAttributesSchema(q) && ensurePlayStatsSchema(q);
+}
+
+bool DatabaseManager::ensureSongIdentitiesSchema(QSqlQuery &q) {
+  if (!execOrWarn(q,
+                  R"(
+        CREATE TABLE IF NOT EXISTS song_identities (
+            identity_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            song_identity_key TEXT NOT NULL UNIQUE
+        );
+    )",
+                  "Error creating song_identities table:")) {
+    return false;
+  }
+
+  q.exec(R"(
+      CREATE INDEX IF NOT EXISTS idx_song_identities_key
+      ON song_identities(song_identity_key);
+  )");
+
+  return true;
 }
 
 bool DatabaseManager::ensureSongsSchema(QSqlQuery &q) {
@@ -95,6 +115,9 @@ bool DatabaseManager::ensureSongsSchema(QSqlQuery &q) {
        columnRegistry_.songAttributeDefinitions()) {
     songsColumns.push_back(songsColumnDefinition(definition));
   }
+  songsColumns.push_back("identity_id INTEGER NOT NULL");
+  songsColumns.push_back(
+      "FOREIGN KEY(identity_id) REFERENCES song_identities(identity_id)");
 
   const QString createSongsSql =
       QString("CREATE TABLE IF NOT EXISTS songs (%1);")
@@ -104,31 +127,8 @@ bool DatabaseManager::ensureSongsSchema(QSqlQuery &q) {
     return false;
   }
 
-  QSet<QString> existingSongsColumns;
-  if (!q.exec("PRAGMA table_info(songs)")) {
-    qWarning() << "Error reading songs table schema:" << q.lastError();
-    return false;
-  }
-  while (q.next()) {
-    existingSongsColumns.insert(q.value(1).toString());
-  }
-
-  for (const ColumnDefinition &definition :
-       columnRegistry_.songAttributeDefinitions()) {
-    const QString songsColumn = definition.id;
-    if (existingSongsColumns.contains(songsColumn)) {
-      continue;
-    }
-
-    const QString sql = QString("ALTER TABLE songs ADD COLUMN %1 %2;")
-                            .arg(songsColumn, toSqlType(definition.valueType));
-    if (!q.exec(sql)) {
-      qWarning() << "Error adding songs column" << songsColumn << ":"
-                 << q.lastError();
-      return false;
-    }
-    existingSongsColumns.insert(songsColumn);
-  }
+  q.exec(
+      R"(CREATE INDEX IF NOT EXISTS idx_songs_identity_id ON songs(identity_id);)");
 
   return true;
 }
@@ -253,6 +253,28 @@ bool DatabaseManager::ensureComputedAttributesSchema(QSqlQuery &q) {
   q.exec(R"(
       CREATE INDEX IF NOT EXISTS idx_song_computed_attrs_key_type
       ON song_computed_attributes(key, value_type);
+  )");
+
+  return true;
+}
+
+bool DatabaseManager::ensurePlayStatsSchema(QSqlQuery &q) {
+  if (!execOrWarn(q,
+                  R"(
+        CREATE TABLE IF NOT EXISTS song_play_stats (
+            identity_id             INTEGER PRIMARY KEY,
+            play_count              INTEGER NOT NULL DEFAULT 0,
+            last_played_timestamp   INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY(identity_id) REFERENCES song_identities(identity_id)
+        );
+    )",
+                  "Error creating song_play_stats table:")) {
+    return false;
+  }
+
+  q.exec(R"(
+      CREATE INDEX IF NOT EXISTS idx_song_play_stats_last_played
+      ON song_play_stats(last_played_timestamp);
   )");
 
   return true;
