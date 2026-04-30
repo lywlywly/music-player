@@ -289,10 +289,11 @@
     <addaction name="actionCursor_follows_playback"/>
    </widget>
    <widget class="QMenu" name="menuLibrary">
-    <property name="title">
+   <property name="title">
      <string>Library</string>
     </property>
     <addaction name="actionSearch"/>
+    <addaction name="actionManual_cloud_rebase"/>
    </widget>
    <addaction name="menuFile"/>
    <addaction name="menuEdit"/>
@@ -395,6 +396,11 @@
    </property>
    <property name="menuRole">
     <enum>QAction::MenuRole::PreferencesRole</enum>
+   </property>
+  </action>
+  <action name="actionManual_cloud_rebase">
+   <property name="text">
+    <string>Manual Cloud Rebase</string>
    </property>
   </action>
  </widget>

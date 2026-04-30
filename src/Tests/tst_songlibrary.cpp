@@ -53,6 +53,10 @@ private slots:
   void markSongPlayedAtStart_updatesTimestampOnly();
   void incrementPlayCount_updatesMemoryAndDb();
   void playStats_sharedAcrossSameIdentityKey();
+  void songIdentityKeyBySongPk_returnsIdentityKey();
+  void identityPlayCounts_returnsPerIdentityCounts();
+  void applyCloudPlayCount_mergesByMaxAndFansOut();
+  void applyCloudPlayCount_handlesUnknownIdentityKey();
   void search_matchesCaseInsensitiveExact();
   void search_supportsAndOr();
   void search_supportsParentheses();
@@ -289,6 +293,63 @@ void TestSongLibrary::playStats_sharedAcrossSameIdentityKey() {
   QCOMPARE(second.at("play_count").text, std::string("2"));
   QCOMPARE(first.at("last_played_timestamp").text, std::string("1722000000"));
   QCOMPARE(second.at("last_played_timestamp").text, std::string("1722000000"));
+}
+
+void TestSongLibrary::songIdentityKeyBySongPk_returnsIdentityKey() {
+  const int songId = library_->addTolibrary(
+      makeSong("Identity Song", "Artist", "/tmp/id-song.mp3", "Album"));
+  const std::string key = library_->songIdentityKeyBySongPk(songId);
+  QVERIFY(!key.empty());
+  QCOMPARE(key, std::string("identity song|artist|album"));
+}
+
+void TestSongLibrary::identityPlayCounts_returnsPerIdentityCounts() {
+  const int firstId =
+      library_->addTolibrary(makeSong("Song", "Artist", "/tmp/counts-1.mp3"));
+  const int secondId =
+      library_->addTolibrary(makeSong("Song", "Artist", "/tmp/counts-2.mp3"));
+  const int thirdId =
+      library_->addTolibrary(makeSong("Other", "Artist", "/tmp/counts-3.mp3"));
+  QVERIFY(library_->markSongPlayedAtStart(firstId, 1723000000));
+  QVERIFY(library_->incrementPlayCount(firstId));
+  QVERIFY(library_->incrementPlayCount(firstId));
+  QVERIFY(library_->markSongPlayedAtStart(thirdId, 1723000001));
+  QVERIFY(library_->incrementPlayCount(thirdId));
+
+  const auto counts = library_->identityPlayCounts();
+  QCOMPARE(counts.at("song|artist|"), 2);
+  QCOMPARE(counts.at("other|artist|"), 1);
+  Q_UNUSED(secondId);
+}
+
+void TestSongLibrary::applyCloudPlayCount_mergesByMaxAndFansOut() {
+  const int firstId =
+      library_->addTolibrary(makeSong("Song", "Artist", "/tmp/max-1.mp3"));
+  const int secondId =
+      library_->addTolibrary(makeSong("Song", "Artist", "/tmp/max-2.mp3"));
+
+  QVERIFY(library_->markSongPlayedAtStart(firstId, 1723000000));
+  QVERIFY(library_->incrementPlayCount(firstId)); // local count = 1
+  const std::string identityKey = library_->songIdentityKeyBySongPk(firstId);
+
+  std::vector<int> affected = library_->applyCloudPlayCount(identityKey, 5, 0);
+  QCOMPARE(affected.size(), size_t(2));
+  QCOMPARE(library_->getSongByPK(firstId).at("play_count").text,
+           std::string("5"));
+  QCOMPARE(library_->getSongByPK(secondId).at("play_count").text,
+           std::string("5"));
+
+  affected = library_->applyCloudPlayCount(identityKey, 3, 0); // max keeps 5
+  QCOMPARE(library_->getSongByPK(firstId).at("play_count").text,
+           std::string("5"));
+  QCOMPARE(library_->getSongByPK(secondId).at("play_count").text,
+           std::string("5"));
+}
+
+void TestSongLibrary::applyCloudPlayCount_handlesUnknownIdentityKey() {
+  std::vector<int> affected =
+      library_->applyCloudPlayCount("ghost|artist|album", 2, 0);
+  QVERIFY(affected.empty());
 }
 
 void TestSongLibrary::search_matchesCaseInsensitiveExact() {

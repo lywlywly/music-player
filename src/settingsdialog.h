@@ -25,6 +25,7 @@ public:
 signals:
   void backendChanged(PlaybackBackendManager::Backend backend);
   void customFieldsChanged();
+  void cloudUuidChanged(const QString &uuid);
 
 private:
   void refreshCustomFieldsList();
@@ -33,6 +34,7 @@ private:
   void addComputedFieldFromForm();
   void removeSelectedCustomField();
   void removeSelectedComputedField();
+  void updateCloudUuidStatus();
   void applySettings();
   ColumnDefinition buildCustomFieldDefinitionFromForm() const;
   ColumnDefinition buildComputedFieldDefinitionFromForm() const;
@@ -45,6 +47,10 @@ private:
   QList<ColumnDefinition> computedFields_;
   QSet<QString> originalCustomFieldIds_;
   QSet<QString> originalComputedFieldIds_;
+  QString initialCloudUuid_;
+  bool initialCloudDisabledByUser_ = false;
+  QString pendingCloudUuid_;
+  bool pendingCloudDisabledByUser_ = false;
 };
 
 #endif // SETTINGSDIALOG_H

@@ -662,7 +662,11 @@ bool SongLibrary::incrementPlayCount(int songPk) {
   qint64 lastPlayedTs = 0;
   auto tsIt = songs[songPk].find("last_played_timestamp");
   if (tsIt != songs[songPk].end()) {
-    lastPlayedTs = QString::fromStdString(tsIt->second.text).toLongLong();
+    if (tsIt->second.type == ColumnValueType::DateTime) {
+      lastPlayedTs = static_cast<qint64>(tsIt->second.typed.epochMs);
+    } else {
+      lastPlayedTs = QString::fromStdString(tsIt->second.text).toLongLong();
+    }
   }
 
   QSqlQuery query(db);
@@ -688,6 +692,102 @@ bool SongLibrary::incrementPlayCount(int songPk) {
         FieldValue(std::to_string(newCount), ColumnValueType::Number);
   }
   return true;
+}
+
+std::string SongLibrary::songIdentityKeyBySongPk(int songPk) const {
+  if (songPk < 0 || songPk >= static_cast<int>(songs.size()) ||
+      songs[songPk].empty()) {
+    return {};
+  }
+  auto it = songs[songPk].find("song_identity_key");
+  if (it == songs[songPk].end()) {
+    return {};
+  }
+  return it->second.text;
+}
+
+std::vector<int>
+SongLibrary::applyCloudPlayCount(const std::string &identityKey,
+                                 int cloudPlayCount, qint64) {
+  std::vector<int> affected;
+  if (identityKey.empty() || cloudPlayCount < 0) {
+    return affected;
+  }
+
+  const int identityId = ensureSongIdentityId(identityKey);
+  if (identityId <= 0) {
+    return affected;
+  }
+
+  QSqlDatabase &db = databaseManager_.db();
+  qint64 lastPlayedTs = 0;
+  int localCount = 0;
+  QSqlQuery readQuery(db);
+  readQuery.prepare(R"(
+      SELECT play_count, last_played_timestamp
+      FROM song_play_stats
+      WHERE identity_id=:identity_id
+  )");
+  readQuery.bindValue(":identity_id", identityId);
+  if (readQuery.exec() && readQuery.next()) {
+    localCount = readQuery.value(0).toInt();
+    lastPlayedTs = readQuery.value(1).toLongLong();
+  }
+  const int merged = std::max(localCount, cloudPlayCount);
+
+  QSqlQuery upsert(db);
+  upsert.prepare(R"(
+      INSERT INTO song_play_stats(identity_id, play_count, last_played_timestamp)
+      VALUES(:identity_id, :play_count, :last_played_timestamp)
+      ON CONFLICT(identity_id) DO UPDATE SET
+          play_count=excluded.play_count
+  )");
+  upsert.bindValue(":identity_id", identityId);
+  upsert.bindValue(":play_count", merged);
+  upsert.bindValue(":last_played_timestamp", lastPlayedTs);
+  if (!upsert.exec()) {
+    qFatal("applyCloudPlayCount upsert failed: %s",
+           upsert.lastError().text().toUtf8().data());
+  }
+
+  auto identityIt = songIdsByIdentityId_.find(identityId);
+  if (identityIt == songIdsByIdentityId_.end()) {
+    return affected;
+  }
+  affected.reserve(identityIt->second.size());
+  for (int songPk : identityIt->second) {
+    songs[songPk]["play_count"] =
+        FieldValue(std::to_string(merged), ColumnValueType::Number);
+    affected.push_back(songPk);
+  }
+  return affected;
+}
+
+std::unordered_map<std::string, int> SongLibrary::identityPlayCounts() const {
+  std::unordered_map<std::string, int> counts;
+  counts.reserve(songs.size());
+  for (const MSong &song : songs) {
+    if (song.empty()) {
+      continue;
+    }
+    auto keyIt = song.find("song_identity_key");
+    if (keyIt == song.end() || keyIt->second.text.empty()) {
+      continue;
+    }
+    int count = 0;
+    auto countIt = song.find("play_count");
+    if (countIt != song.end() &&
+        countIt->second.type == ColumnValueType::Number) {
+      count = static_cast<int>(countIt->second.typed.number);
+    }
+    auto existing = counts.find(keyIt->second.text);
+    if (existing == counts.end()) {
+      counts.emplace(keyIt->second.text, count);
+    } else {
+      existing->second = std::max(existing->second, count);
+    }
+  }
+  return counts;
 }
 
 void SongLibrary::syncComputedValuesBySongId(int songId, const MSong &song) {

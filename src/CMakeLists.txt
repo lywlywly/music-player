@@ -14,7 +14,7 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Sql Test Multimedia)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Sql Test Multimedia Network)
 if(LINUX)
   find_package(Qt6 REQUIRED COMPONENTS DBus)
 endif()
@@ -50,6 +50,10 @@ set(PROJECT_SOURCES
   artworkutils.h
   checksumcalculator.h
   checksumcalculator.cpp
+  cloudplaystatssyncservice.h
+  cloudplaystatssyncservice.cpp
+  cloudplaystatssynccoordinator.h
+  cloudplaystatssynccoordinator.cpp
   columndefinition.h
   columnregistry.h
   columnregistry.cpp
@@ -158,6 +162,7 @@ target_link_libraries(
   Qt6::Widgets
   Qt6::Sql
   Qt6::Multimedia
+  Qt6::Network
   ${ICU_LIBRARIES}
   TagLib::tag
   PkgConfig::GST

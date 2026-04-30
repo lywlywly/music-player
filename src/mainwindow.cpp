@@ -10,6 +10,9 @@
 #elif defined(Q_OS_LINUX)
 #include "mprismediainterface.h"
 #elif defined(Q_OS_WIN)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include "windowsmediacenter.h"
 #endif
 #include "databasemanager.h"
@@ -52,7 +55,9 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), ui(new Ui::MainWindow), control{playbackQueue_},
       columnLayoutManager_(columnRegistry_, this),
       databaseManager_(columnRegistry_),
-      songLibrary(columnRegistry_, databaseManager_), lyricsManager{this} {
+      songLibrary(columnRegistry_, databaseManager_), lyricsManager{this},
+      cloudPlayStatsSyncCoordinator_(songLibrary, cloudPlayStatsSyncService_,
+                                     this) {
   ui->setupUi(this);
   updatePlaybackTimeStatus();
   setUpMenuBar();
@@ -63,6 +68,17 @@ MainWindow::MainWindow(QWidget *parent)
   setUpLyricsPanel();
   setUpSplitter();
   setupSystemMediaInterface();
+  initCloudSync();
+}
+
+void MainWindow::initCloudSync() {
+  connect(&cloudPlayStatsSyncCoordinator_,
+          &CloudPlayStatsSyncCoordinator::songDataChanged, this,
+          [this](int songPk) {
+            playlistTabs->notifySongDataChangedInAllPlaylists(songPk);
+          });
+  cloudPlayStatsSyncCoordinator_.startSync();
+  refreshManualCloudRebaseActionEnabled();
 }
 
 void MainWindow::setupSystemMediaInterface() {
@@ -107,6 +123,8 @@ void MainWindow::setUpMenuBar() {
   ui->actionDefault->setChecked(true);
   connect(ui->actionSearch, &QAction::triggered, this,
           &MainWindow::openLibrarySearchDialog);
+  connect(ui->actionManual_cloud_rebase, &QAction::triggered, this,
+          &MainWindow::triggerManualCloudRebase);
 }
 
 void MainWindow::setUpPlaylist() {
@@ -155,6 +173,13 @@ void MainWindow::initSettings() {
       columnLayoutManager_.refreshFromRegistry();
       // TODO: refresh custom/computed attributes
     });
+    connect(dialog, &SettingsDialog::cloudUuidChanged, this,
+            [this](const QString &uuid) {
+              refreshManualCloudRebaseActionEnabled();
+              if (!uuid.isEmpty()) {
+                cloudPlayStatsSyncCoordinator_.triggerManualRebase();
+              }
+            });
     dialog->show();
   });
 }
@@ -490,8 +515,18 @@ void MainWindow::maybeCountCompletedPlay() {
   }
   completionCounted_ = true;
   playlistTabs->notifySongDataChangedInAllPlaylists(currentTrackPk_);
+  cloudPlayStatsSyncCoordinator_.pushIncrementForSongPk(currentTrackPk_);
 }
 
 qint64 MainWindow::unixNowSeconds() {
   return QDateTime::currentSecsSinceEpoch();
+}
+
+void MainWindow::triggerManualCloudRebase() {
+  cloudPlayStatsSyncCoordinator_.triggerManualRebase();
+}
+
+void MainWindow::refreshManualCloudRebaseActionEnabled() {
+  ui->actionManual_cloud_rebase->setEnabled(
+      cloudPlayStatsSyncCoordinator_.hasValidUuid());
 }

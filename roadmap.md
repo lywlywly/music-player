@@ -22,7 +22,7 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
   - ✅ `play_count` with near-complete gating (seek-to-end alone does not count)
   - ✅ `last_played_timestamp`
   - ✅ Identity-based stats aggregation (shared by normalized title/artist/album)
-  - ⬜ Cloud sync for playback statistics
+  - ✅ Cloud sync for playback statistics
 - ⬜ CLI tool and headless mode
 - 🟡 System media integration
   - ✅ macOS (`MediaPlayer`)

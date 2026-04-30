@@ -94,6 +94,13 @@ public:
   // Increments play_count for the identity of songPk.
   // This also updates all in-memory songs with the same identity.
   bool incrementPlayCount(int songPk);
+  std::string songIdentityKeyBySongPk(int songPk) const;
+  // Applies cloud play_count for identity key with merge=max(local, cloud).
+  // Returns affected song pks for UI refresh.
+  std::vector<int> applyCloudPlayCount(const std::string &identityKey,
+                                       int cloudPlayCount,
+                                       qint64 cloudUpdatedAt);
+  std::unordered_map<std::string, int> identityPlayCounts() const;
   // Appends one song to DB table `playlist_items` at the given playlist
   // position.
   void appendSongToPlaylistInDb(int playlistId, int songId, int position);

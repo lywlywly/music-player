@@ -1,6 +1,8 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
+#include "cloudplaystatssynccoordinator.h"
+#include "cloudplaystatssyncservice.h"
 #include "columnregistry.h"
 #include "databasemanager.h"
 #include "globalcolumnlayoutmanager.h"
@@ -57,10 +59,13 @@ private:
   void setUpPlaybackBackend();
   void setUpPlaybackActions();
   void setUpPlaylist();
+  void initCloudSync();
   void setUpMenuBar();
   void openLibrarySearchDialog();
   void resetPlayStatsSession(int songPk);
   void maybeCountCompletedPlay();
+  void triggerManualCloudRebase();
+  void refreshManualCloudRebaseActionEnabled();
   static qint64 unixNowSeconds();
   // TODO: remove song from current playlist, check if any other playlist
   // references the song, if no, remove from library
@@ -87,5 +92,7 @@ private:
   qint64 sessionListenedMs_ = 0;
   qint64 lastPositionSampleMs_ = -1;
   bool completionCounted_ = false;
+  CloudPlayStatsSyncService cloudPlayStatsSyncService_;
+  CloudPlayStatsSyncCoordinator cloudPlayStatsSyncCoordinator_;
 };
 #endif // MAINWINDOW_H
