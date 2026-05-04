@@ -23,6 +23,7 @@
 #include <QApplication>
 #include <QDateTime>
 #include <QDebug>
+#include <QEvent>
 #include <QFileDialog>
 #include <QProgressDialog>
 #include <QSettings>
@@ -337,6 +338,13 @@ void MainWindow::setUpImageAndLyrics(MSong song) {
     ui->label->setText("No cover");
   }
   ui->lyricsPanel->setLyricsPanel(lyricsManager.getCurrentLyricsMap());
+}
+
+bool MainWindow::event(QEvent *event) {
+  if (event->type() == QEvent::StatusTip) {
+    return true;
+  }
+  return QMainWindow::event(event);
 }
 
 void MainWindow::resizeEvent(QResizeEvent *event) {
