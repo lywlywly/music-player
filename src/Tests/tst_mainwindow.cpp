@@ -120,11 +120,7 @@ private slots:
   void librarySearchDialog_canCreateNewPlaylistTabFromResults();
   void playStats_seekToEndWithoutListenDoesNotCount();
   void playStats_nearEndWithListenCountsOnceAndRefreshes();
-  void cloudSync_startupPull_appliesCloudPlayCountAndUpdatesCursor();
-  void cloudSync_playCountIncrement_pushesToCloud();
-  void cloudSync_rebase_cloudHigher_noPushAndClearsPending();
-  void cloudSync_rebase_localHigher_pushesDeltaAndClearsPending();
-  void cloudSync_rebase_partialPushFailure_keepsPending();
+  void cloudSync_startupPull_appliesCloudPlayCount_integration();
 
 private:
   MainWindow *window_ = nullptr;
@@ -135,9 +131,6 @@ private:
 void TestMainWindow::init() {
   qputenv("MYPLAYER_USE_DUMMY_AUDIO_PLAYER", "1");
   qputenv("MYPLAYER_USE_DUMMY_MEDIA_INTERFACE", "1");
-  qputenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC", "1");
-  CloudPlayStatsSyncService::clearDummyPullPages();
-  CloudPlayStatsSyncService::clearDummyPushCalls();
   const QString org =
       QStringLiteral("music-player-tests-%1")
           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
@@ -146,8 +139,6 @@ void TestMainWindow::init() {
           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
   QCoreApplication::setOrganizationName(org);
   QCoreApplication::setApplicationName(app);
-  QSettings settings;
-  settings.clear();
 
   workDir_ = new QTemporaryDir();
   QVERIFY(workDir_->isValid());
@@ -166,7 +157,6 @@ void TestMainWindow::cleanup() {
   workDir_ = nullptr;
   qunsetenv("MYPLAYER_USE_DUMMY_AUDIO_PLAYER");
   qunsetenv("MYPLAYER_USE_DUMMY_MEDIA_INTERFACE");
-  qunsetenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC");
 }
 
 void TestMainWindow::menuPlaybackActions_areWired() {
@@ -623,10 +613,13 @@ void TestMainWindow::playStats_nearEndWithListenCountsOnceAndRefreshes() {
   QVERIFY(q.value(1).toLongLong() > 0);
 }
 
-void TestMainWindow::
-    cloudSync_startupPull_appliesCloudPlayCountAndUpdatesCursor() {
+void TestMainWindow::cloudSync_startupPull_appliesCloudPlayCount_integration() {
   delete window_;
   window_ = nullptr;
+
+  qputenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC", "1");
+  CloudPlayStatsSyncService::clearDummyPullPages();
+  CloudPlayStatsSyncService::clearDummyPushCalls();
 
   const QString dbPath = workDir_->filePath("myplayer.db");
   const QString seedConn =
@@ -654,16 +647,15 @@ void TestMainWindow::
   }
   QSqlDatabase::removeDatabase(seedConn);
 
-  const QString userUuid = "11111111-1111-1111-1111-111111111111";
   QSettings settings;
-  settings.setValue("cloud_sync/user_uuid", userUuid);
+  settings.setValue("cloud_sync/user_uuid",
+                    "11111111-1111-1111-1111-111111111111");
   settings.setValue("cloud_sync/last_synced_at", 1000);
   settings.setValue("cloud_sync/rebase_pending", false);
 
-  CloudPlayStatItem item;
-  item.songIdentityKey = "song|artist|album";
-  item.playCount = 7;
-  item.updatedAt = 2000;
+  CloudPlayStatItem item{.songIdentityKey = "song|artist|album",
+                         .playCount = 7,
+                         .updatedAt = 2000};
   CloudPlayStatsSyncService::setDummyPullPages({{item}}, true, 2000);
 
   window_ = new MainWindow();
@@ -678,192 +670,10 @@ void TestMainWindow::
   const qint64 syncedAt =
       settings.value("cloud_sync/last_synced_at", 0).toLongLong();
   QVERIFY(syncedAt >= 2000);
-}
 
-void TestMainWindow::cloudSync_playCountIncrement_pushesToCloud() {
-  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
-  QVERIFY(tabs != nullptr);
-  Playlist *playlist = tabs->currentPlaylist();
-  QVERIFY(playlist != nullptr);
-  PlaybackBackendManager *backend =
-      window_->findChild<PlaybackBackendManager *>();
-  QVERIFY(backend != nullptr);
-  DummyAudioPlayer *dummyPlayer =
-      qobject_cast<DummyAudioPlayer *>(backend->player());
-  QVERIFY(dummyPlayer != nullptr);
-
-  QSettings settings;
-  settings.setValue("cloud_sync/user_uuid",
-                    "11111111-1111-1111-1111-111111111111");
+  CloudPlayStatsSyncService::clearDummyPullPages();
   CloudPlayStatsSyncService::clearDummyPushCalls();
-
-  const QString wav = workDir_->filePath("cloud-push.wav");
-  QVERIFY(writeSilentWav(wav));
-  playlist->addSong(makeSong("Song", "Artist", wav));
-  playlist->setLastPlayed(playlist->getPkByIndex(0));
-  dummyPlayer->setDurationForTest(120000);
-
-  QAction *playAction = window_->findChild<QAction *>("actionPlay");
-  QVERIFY(playAction != nullptr);
-  playAction->trigger();
-
-  backend->player()->setPosition(1000);
-  backend->player()->setPosition(35000);
-  backend->player()->setPosition(70000);
-  backend->player()->setPosition(109000);
-  backend->player()->setPosition(115000);
-  backend->player()->setPosition(119000);
-
-  QTRY_VERIFY(!CloudPlayStatsSyncService::dummyPushCalls().empty());
-  const auto calls = CloudPlayStatsSyncService::dummyPushCalls();
-  QCOMPARE(calls.back().userUuid,
-           QString("11111111-1111-1111-1111-111111111111"));
-  QVERIFY(!calls.back().songIdentityKey.empty());
-  QVERIFY(calls.back().songIdentityKey.find('|') != std::string::npos);
-  QCOMPARE(calls.back().delta, 1);
-}
-
-void TestMainWindow::cloudSync_rebase_cloudHigher_noPushAndClearsPending() {
-  delete window_;
-  window_ = nullptr;
-
-  const QString dbPath = workDir_->filePath("myplayer.db");
-  const QString seedConn =
-      QStringLiteral("seed_mainwindow_rebase1_%1")
-          .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
-  {
-    QSqlDatabase seedDb = QSqlDatabase::addDatabase("QSQLITE", seedConn);
-    seedDb.setDatabaseName(dbPath);
-    QVERIFY(seedDb.open());
-    QSqlQuery q(seedDb);
-    QVERIFY(q.exec("PRAGMA foreign_keys = ON"));
-    QVERIFY(q.exec("INSERT OR REPLACE INTO song_identities(identity_id, "
-                   "song_identity_key) VALUES (1, 'song|artist|album')"));
-    QVERIFY(q.exec("INSERT OR REPLACE INTO songs(song_id, title, artist, "
-                   "album, discnumber, tracknumber, date, genre, filepath, "
-                   "identity_id) VALUES "
-                   "(1, 'Song', 'Artist', 'Album', 1, 1, '2024-01-01', "
-                   "'genre', '/tmp/cloud-rebase1.wav', 1)"));
-    QVERIFY(q.exec("INSERT OR REPLACE INTO song_play_stats(identity_id, "
-                   "play_count, last_played_timestamp) VALUES (1, 3, 0)"));
-    QVERIFY(q.exec("INSERT OR REPLACE INTO playlists(playlist_id, name, "
-                   "last_played) VALUES (1, 'Default Playlist', 1)"));
-    QVERIFY(
-        q.exec("INSERT OR REPLACE INTO playlist_items(playlist_id, song_id, "
-               "position) VALUES (1, 1, 1)"));
-    seedDb.close();
-  }
-  QSqlDatabase::removeDatabase(seedConn);
-
-  QSettings settings;
-  settings.setValue("cloud_sync/user_uuid",
-                    "11111111-1111-1111-1111-111111111111");
-  settings.setValue("cloud_sync/rebase_pending", true);
-  settings.setValue("cloud_sync/last_synced_at", 0);
-  CloudPlayStatsSyncService::clearDummyPushCalls();
-  CloudPlayStatsSyncService::setDummyPushResults({});
-  CloudPlayStatItem item{.songIdentityKey = "song|artist|album",
-                         .playCount = 10,
-                         .updatedAt = 3000};
-  CloudPlayStatsSyncService::setDummyPullPages({{item}}, true, 3000);
-
-  window_ = new MainWindow();
-  QTRY_VERIFY(!settings.value("cloud_sync/rebase_pending").toBool());
-  QCOMPARE(CloudPlayStatsSyncService::dummyPushCalls().size(), size_t(0));
-}
-
-void TestMainWindow::
-    cloudSync_rebase_localHigher_pushesDeltaAndClearsPending() {
-  delete window_;
-  window_ = nullptr;
-
-  const QString dbPath = workDir_->filePath("myplayer.db");
-  const QString seedConn =
-      QStringLiteral("seed_mainwindow_rebase2_%1")
-          .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
-  {
-    QSqlDatabase seedDb = QSqlDatabase::addDatabase("QSQLITE", seedConn);
-    seedDb.setDatabaseName(dbPath);
-    QVERIFY(seedDb.open());
-    QSqlQuery q(seedDb);
-    QVERIFY(q.exec("PRAGMA foreign_keys = ON"));
-    QVERIFY(q.exec("INSERT OR REPLACE INTO song_identities(identity_id, "
-                   "song_identity_key) VALUES (1, 'song|artist|album')"));
-    QVERIFY(q.exec("INSERT OR REPLACE INTO songs(song_id, title, artist, "
-                   "album, discnumber, tracknumber, date, genre, filepath, "
-                   "identity_id) VALUES "
-                   "(1, 'Song', 'Artist', 'Album', 1, 1, '2024-01-01', "
-                   "'genre', '/tmp/cloud-rebase2.wav', 1)"));
-    QVERIFY(q.exec("INSERT OR REPLACE INTO song_play_stats(identity_id, "
-                   "play_count, last_played_timestamp) VALUES (1, 8, 0)"));
-    seedDb.close();
-  }
-  QSqlDatabase::removeDatabase(seedConn);
-
-  QSettings settings;
-  settings.setValue("cloud_sync/user_uuid",
-                    "11111111-1111-1111-1111-111111111111");
-  settings.setValue("cloud_sync/rebase_pending", true);
-  settings.setValue("cloud_sync/last_synced_at", 0);
-  CloudPlayStatsSyncService::clearDummyPushCalls();
-  CloudPlayStatsSyncService::setDummyPushResults({true});
-  CloudPlayStatItem item{.songIdentityKey = "song|artist|album",
-                         .playCount = 3,
-                         .updatedAt = 3001};
-  CloudPlayStatsSyncService::setDummyPullPages({{item}}, true, 3001);
-
-  window_ = new MainWindow();
-  QTRY_VERIFY(!settings.value("cloud_sync/rebase_pending").toBool());
-  const auto calls = CloudPlayStatsSyncService::dummyPushCalls();
-  QCOMPARE(calls.size(), size_t(1));
-  QCOMPARE(calls.front().songIdentityKey, std::string("song|artist|album"));
-  QCOMPARE(calls.front().delta, 5);
-}
-
-void TestMainWindow::cloudSync_rebase_partialPushFailure_keepsPending() {
-  delete window_;
-  window_ = nullptr;
-
-  const QString dbPath = workDir_->filePath("myplayer.db");
-  const QString seedConn =
-      QStringLiteral("seed_mainwindow_rebase3_%1")
-          .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
-  {
-    QSqlDatabase seedDb = QSqlDatabase::addDatabase("QSQLITE", seedConn);
-    seedDb.setDatabaseName(dbPath);
-    QVERIFY(seedDb.open());
-    QSqlQuery q(seedDb);
-    QVERIFY(q.exec("PRAGMA foreign_keys = ON"));
-    QVERIFY(q.exec("INSERT OR REPLACE INTO song_identities(identity_id, "
-                   "song_identity_key) VALUES (1, 'song|artist|album')"));
-    QVERIFY(q.exec("INSERT OR REPLACE INTO songs(song_id, title, artist, "
-                   "album, discnumber, tracknumber, date, genre, filepath, "
-                   "identity_id) VALUES "
-                   "(1, 'Song', 'Artist', 'Album', 1, 1, '2024-01-01', "
-                   "'genre', '/tmp/cloud-rebase3.wav', 1)"));
-    QVERIFY(q.exec("INSERT OR REPLACE INTO song_play_stats(identity_id, "
-                   "play_count, last_played_timestamp) VALUES (1, 8, 0)"));
-    seedDb.close();
-  }
-  QSqlDatabase::removeDatabase(seedConn);
-
-  QSettings settings;
-  settings.setValue("cloud_sync/user_uuid",
-                    "11111111-1111-1111-1111-111111111111");
-  settings.setValue("cloud_sync/rebase_pending", true);
-  settings.setValue("cloud_sync/last_synced_at", 0);
-  CloudPlayStatsSyncService::clearDummyPushCalls();
-  CloudPlayStatsSyncService::setDummyPushResults({false});
-  CloudPlayStatItem item{.songIdentityKey = "song|artist|album",
-                         .playCount = 3,
-                         .updatedAt = 3002};
-  CloudPlayStatsSyncService::setDummyPullPages({{item}}, true, 3002);
-
-  window_ = new MainWindow();
-  QTRY_VERIFY(settings.value("cloud_sync/rebase_pending").toBool());
-  const auto calls = CloudPlayStatsSyncService::dummyPushCalls();
-  QCOMPARE(calls.size(), size_t(1));
-  QCOMPARE(calls.front().delta, 5);
+  qunsetenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC");
 }
 
 QTEST_MAIN(TestMainWindow)

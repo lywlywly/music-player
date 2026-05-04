@@ -23,6 +23,8 @@ set(TEST_NAMES
     dummyaudioplayer
     dummysystemmediainterface
     libraryexpression
+    cloudplaystatssyncservice
+    cloudplaystatssynccoordinator
     librarysearchdialog_ui
     mainwindow
     playbackqueue
