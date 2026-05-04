@@ -14,7 +14,7 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Sql Test Multimedia Network)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Sql Test Multimedia Network Concurrent)
 if(LINUX)
   find_package(Qt6 REQUIRED COMPONENTS DBus)
 endif()
@@ -163,6 +163,7 @@ target_link_libraries(
   Qt6::Sql
   Qt6::Multimedia
   Qt6::Network
+  Qt6::Concurrent
   ${ICU_LIBRARIES}
   TagLib::tag
   PkgConfig::GST

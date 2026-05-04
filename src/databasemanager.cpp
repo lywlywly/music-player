@@ -1,11 +1,20 @@
 #include "databasemanager.h"
 #include "columnregistry.h"
 #include <QDebug>
+#include <QDir>
 #include <QSqlError>
 #include <QSqlQuery>
+#include <QStandardPaths>
 #include <QStringList>
 
 namespace {
+QString defaultDatabasePath() {
+  const QString baseDir =
+      QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+  QDir().mkpath(baseDir);
+  return QDir(baseDir).filePath("myplayer.db");
+}
+
 QString toSqlType(ColumnValueType valueType) {
   switch (valueType) {
   case ColumnValueType::Number:
@@ -48,9 +57,13 @@ DatabaseManager::DatabaseManager(const ColumnRegistry &columnRegistry,
                                  QString databaseName, QString connectionName)
     : columnRegistry_(columnRegistry),
       db_(QSqlDatabase::addDatabase("QSQLITE", connectionName)) {
+  if (databaseName.isEmpty()) {
+    databaseName = defaultDatabasePath();
+  }
   db_.setDatabaseName(databaseName);
   if (!db_.open()) {
-    qFatal("Could not open SQLite database: %s",
+    qFatal("Could not open SQLite database: %s %s",
+           db_.databaseName().toUtf8().data(),
            db_.lastError().text().toUtf8().data());
   }
 
@@ -139,7 +152,8 @@ bool DatabaseManager::ensurePlaylistsSchema(QSqlQuery &q) {
         CREATE TABLE IF NOT EXISTS playlists (
             playlist_id  INTEGER PRIMARY KEY AUTOINCREMENT,
             name         TEXT NOT NULL,
-            last_played  INTEGER NOT NULL
+            last_played  INTEGER NOT NULL,
+            tab_order    INTEGER NOT NULL DEFAULT 0
         );
     )",
                   "Error creating playlists table:")) {
@@ -167,6 +181,8 @@ bool DatabaseManager::ensurePlaylistsSchema(QSqlQuery &q) {
 
   q.exec(
       R"(CREATE INDEX IF NOT EXISTS idx_playlist_items_songid ON playlist_items(song_id);)");
+  q.exec(
+      R"(CREATE INDEX IF NOT EXISTS idx_playlists_tab_order ON playlists(tab_order);)");
 
   return true;
 }

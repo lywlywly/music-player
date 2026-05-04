@@ -51,6 +51,8 @@ private slots:
   void emitSongDataChangedBySongPk_targetsGivenSong();
   void refreshMetadataFromFiles_updatesSongsAndReportsProgress();
   void columnCount_tracksVisibilityChanges();
+  void addSongsAndRemoveSong_updateRowCountAndOrder();
+  void setLastPlayed_roundTrips();
 
 private:
   ColumnRegistry *registry_ = nullptr;
@@ -93,7 +95,7 @@ void TestPlaylist::cleanup() {
 }
 
 void TestPlaylist::data_returnsSongFieldsAndPlayingStatus() {
-  SongStore store(*library_, -1);
+  SongStore store(*library_, *databaseManager_, -1);
   store.addSong(makeSong("First", "Artist", "/tmp/pl-first.mp3", "1"));
   store.addSong(makeSong("Second", "Artist", "/tmp/pl-second.mp3", "2"));
 
@@ -116,7 +118,7 @@ void TestPlaylist::data_returnsSongFieldsAndPlayingStatus() {
 }
 
 void TestPlaylist::sortByColumnId_statusNoop_tracknumberSorts() {
-  SongStore store(*library_, -1);
+  SongStore store(*library_, *databaseManager_, -1);
   store.addSong(makeSong("A", "Artist", "/tmp/pl-a.mp3", "10"));
   store.addSong(makeSong("B", "Artist", "/tmp/pl-b.mp3", "2"));
   store.addSong(makeSong("C", "Artist", "/tmp/pl-c.mp3", "1"));
@@ -133,7 +135,7 @@ void TestPlaylist::sortByColumnId_statusNoop_tracknumberSorts() {
 }
 
 void TestPlaylist::emitSongDataChangedBySongPk_emitsOnlyWhenMatched() {
-  SongStore store(*library_, -1);
+  SongStore store(*library_, *databaseManager_, -1);
   store.addSong(makeSong("A", "Artist", "/tmp/pl-signal-a.mp3", "1"));
   store.addSong(makeSong("B", "Artist", "/tmp/pl-signal-b.mp3", "2"));
   Playlist playlist(std::move(store), *queue_, 1, *layout_);
@@ -149,7 +151,7 @@ void TestPlaylist::emitSongDataChangedBySongPk_emitsOnlyWhenMatched() {
 }
 
 void TestPlaylist::emitSongDataChangedBySongPk_targetsGivenSong() {
-  SongStore store(*library_, -1);
+  SongStore store(*library_, *databaseManager_, -1);
   store.addSong(makeSong("A1", "Artist", "/tmp/pl-same.mp3", "1"));
   store.addSong(makeSong("B", "Artist", "/tmp/pl-other.mp3", "2"));
   store.addSong(makeSong("A2", "Artist", "/tmp/pl-same.mp3", "3"));
@@ -186,7 +188,7 @@ void TestPlaylist::refreshMetadataFromFiles_updatesSongsAndReportsProgress() {
                         "1");
       });
 
-  SongStore store(localLibrary, -1);
+  SongStore store(localLibrary, *databaseManager_, -1);
   store.addSong(makeSong("Old A", "Artist A", "/tmp/pl-refresh-a.mp3", "1"));
   store.addSong(makeSong("Old B", "Artist B", "/tmp/pl-refresh-b.mp3", "2"));
   Playlist playlist(std::move(store), *queue_, 1, *layout_);
@@ -216,7 +218,7 @@ void TestPlaylist::refreshMetadataFromFiles_updatesSongsAndReportsProgress() {
 }
 
 void TestPlaylist::columnCount_tracksVisibilityChanges() {
-  SongStore store(*library_, -1);
+  SongStore store(*library_, *databaseManager_, -1);
   store.addSong(makeSong("A", "Artist", "/tmp/pl-cols-a.mp3", "1"));
   Playlist playlist(std::move(store), *queue_, 1, *layout_);
 
@@ -224,6 +226,32 @@ void TestPlaylist::columnCount_tracksVisibilityChanges() {
   const int before = playlist.columnCount();
   layout_->setColumnVisible("genre", true);
   QCOMPARE(playlist.columnCount(), before + 1);
+}
+
+void TestPlaylist::addSongsAndRemoveSong_updateRowCountAndOrder() {
+  SongStore store(*library_, *databaseManager_, -1);
+  Playlist playlist(std::move(store), *queue_, 1, *layout_);
+  QCOMPARE(playlist.songCount(), 0);
+
+  std::vector<MSong> songs;
+  songs.push_back(makeSong("A", "Artist", "/tmp/pl-addsongs-a.mp3", "1"));
+  songs.push_back(makeSong("B", "Artist", "/tmp/pl-addsongs-b.mp3", "2"));
+  playlist.addSongs(std::move(songs));
+  QCOMPARE(playlist.songCount(), 2);
+  QCOMPARE(playlist.getSongByIndex(0).at("title").text, std::string("A"));
+  QCOMPARE(playlist.getSongByIndex(1).at("title").text, std::string("B"));
+
+  playlist.removeSong(0);
+  QCOMPARE(playlist.songCount(), 1);
+  QCOMPARE(playlist.getSongByIndex(0).at("title").text, std::string("B"));
+}
+
+void TestPlaylist::setLastPlayed_roundTrips() {
+  SongStore store(*library_, *databaseManager_, -1);
+  Playlist playlist(std::move(store), *queue_, 1, *layout_);
+  QCOMPARE(playlist.getLastPlayed(), 1);
+  playlist.setLastPlayed(42);
+  QCOMPARE(playlist.getLastPlayed(), 42);
 }
 
 QTEST_MAIN(TestPlaylist)

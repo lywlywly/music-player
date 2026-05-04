@@ -11,6 +11,7 @@
 #include <QSlider>
 #include <QSqlDatabase>
 #include <QSqlQuery>
+#include <QStandardPaths>
 #include <QStatusBar>
 #include <QTableView>
 #include <QTemporaryDir>
@@ -614,6 +615,9 @@ void TestMainWindow::playStats_nearEndWithListenCountsOnceAndRefreshes() {
 }
 
 void TestMainWindow::cloudSync_startupPull_appliesCloudPlayCount_integration() {
+  const QString dbPath = QSqlDatabase::database("myplayer_main").databaseName();
+  QVERIFY(!dbPath.isEmpty());
+
   delete window_;
   window_ = nullptr;
 
@@ -621,7 +625,6 @@ void TestMainWindow::cloudSync_startupPull_appliesCloudPlayCount_integration() {
   CloudPlayStatsSyncService::clearDummyPullPages();
   CloudPlayStatsSyncService::clearDummyPushCalls();
 
-  const QString dbPath = workDir_->filePath("myplayer.db");
   const QString seedConn =
       QStringLiteral("seed_mainwindow_%1")
           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));

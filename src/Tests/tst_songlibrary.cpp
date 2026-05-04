@@ -73,7 +73,6 @@ private slots:
   void search_noMatchReturnsEmpty();
   void refreshSongFromFile_usesInjectedParserAndSyncsDb();
   void refreshSongsFromFilepaths_dedupesAndReportsProgress();
-  void appendAndRemovePlaylistItems();
   void registerQuery_tracksLaterInsertions();
   void queryHelpers_skipEmptySongSlots();
 
@@ -800,37 +799,6 @@ void TestSongLibrary::refreshSongsFromFilepaths_dedupesAndReportsProgress() {
            std::string("Refreshed:/tmp/refresh-list-a.mp3"));
   QCOMPARE(localLibrary.getSongByPK(idB).at("title").text,
            std::string("Refreshed:/tmp/refresh-list-b.mp3"));
-}
-
-void TestSongLibrary::appendAndRemovePlaylistItems() {
-  QSqlDatabase &db = databaseManager_->db();
-  QSqlQuery q(db);
-  QVERIFY(q.exec("INSERT INTO playlists(playlist_id, name, last_played) VALUES "
-                 "(1, 'P1', 1), (2, 'P2', 1)"));
-
-  const int songId = library_->addTolibrary(
-      makeSong("Song", "Artist", "/tmp/song-for-playlist.mp3"));
-  library_->appendSongToPlaylistInDb(1, songId, 1);
-  library_->appendSongToPlaylistInDb(1, songId, 2);
-  library_->appendSongToPlaylistInDb(2, songId, 1);
-
-  QVERIFY(q.exec("SELECT COUNT(*) FROM playlist_items WHERE playlist_id=1"));
-  QVERIFY(q.next());
-  QCOMPARE(q.value(0).toInt(), 2);
-
-  QVERIFY(q.exec("SELECT COUNT(*) FROM playlist_items WHERE playlist_id=2"));
-  QVERIFY(q.next());
-  QCOMPARE(q.value(0).toInt(), 1);
-
-  library_->removePlaylistItemsInDb(1);
-
-  QVERIFY(q.exec("SELECT COUNT(*) FROM playlist_items WHERE playlist_id=1"));
-  QVERIFY(q.next());
-  QCOMPARE(q.value(0).toInt(), 0);
-
-  QVERIFY(q.exec("SELECT COUNT(*) FROM playlist_items WHERE playlist_id=2"));
-  QVERIFY(q.next());
-  QCOMPARE(q.value(0).toInt(), 1);
 }
 
 void TestSongLibrary::registerQuery_tracksLaterInsertions() {

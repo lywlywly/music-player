@@ -56,6 +56,9 @@ private slots:
   void sortByField_missingValuesLast();
   void clear_removesPersistedPlaylistItems();
   void loadPlaylistState_readsDbOrder();
+  void addSongByPk_persistsPlaylistItems();
+  void removeSongByPk_rebuildsIndices();
+  void setLastPlayed_persistsPlaylistMetadata();
 
 private:
   ColumnRegistry *registry_ = nullptr;
@@ -85,7 +88,7 @@ void TestSongStore::cleanup() {
 }
 
 void TestSongStore::sortByField_numericAndDate() {
-  SongStore store(*library_, -1);
+  SongStore store(*library_, *databaseManager_, -1);
   store.addSong(makeSong("A", "Artist", "/tmp/sort-a.mp3", "10", "2023-01-01"));
   store.addSong(makeSong("B", "Artist", "/tmp/sort-b.mp3", "2", "2021"));
   store.addSong(makeSong("C", "Artist", "/tmp/sort-c.mp3", "1", "2022-12-01"));
@@ -140,7 +143,7 @@ void TestSongStore::dateFormats_timezoneAndInvalid() {
 }
 
 void TestSongStore::sortByField_missingValuesLast() {
-  SongStore store(*library_, -1);
+  SongStore store(*library_, *databaseManager_, -1);
   store.addSong(
       makeSong("Has Rock", "Artist", "/tmp/g1.mp3", "1", "2023", "rock"));
   store.addSong(makeSong("No Genre", "Artist", "/tmp/g2.mp3", "2", "2023"));
@@ -153,14 +156,15 @@ void TestSongStore::sortByField_missingValuesLast() {
 }
 
 void TestSongStore::clear_removesPersistedPlaylistItems() {
-  SongStore store(*library_, 1);
+  SongStore store(*library_, *databaseManager_, 1);
+  QSqlQuery q(databaseManager_->db());
+  QVERIFY(q.exec("INSERT INTO playlists(playlist_id, name, last_played, "
+                 "tab_order) VALUES (1, 'Default', 1, 0)"));
   int lastPlayed = -1;
   QVERIFY(store.loadPlaylistState(lastPlayed));
 
   store.addSong(makeSong("S1", "Artist", "/tmp/persist-1.mp3"));
   store.addSong(makeSong("S2", "Artist", "/tmp/persist-2.mp3"));
-
-  QSqlQuery q(databaseManager_->db());
   QVERIFY(q.exec("SELECT COUNT(*) FROM playlist_items WHERE playlist_id=1"));
   QVERIFY(q.next());
   QCOMPARE(q.value(0).toInt(), 2);
@@ -194,13 +198,74 @@ void TestSongStore::loadPlaylistState_readsDbOrder() {
                          "position) VALUES(3, %1, 2)")
                      .arg(s3)));
 
-  SongStore store(*library_, 3);
+  SongStore store(*library_, *databaseManager_, 3);
   int lastPlayed = -1;
   QVERIFY(store.loadPlaylistState(lastPlayed));
   QCOMPARE(store.songCount(), 3);
   QCOMPARE(store.getPkByIndex(0), s2);
   QCOMPARE(store.getPkByIndex(1), s3);
   QCOMPARE(store.getPkByIndex(2), s1);
+}
+
+void TestSongStore::addSongByPk_persistsPlaylistItems() {
+  const int songId =
+      library_->addTolibrary(makeSong("S1", "Artist", "/tmp/add-by-pk.mp3"));
+
+  QSqlQuery q(databaseManager_->db());
+  QVERIFY(q.exec("INSERT INTO playlists(playlist_id, name, last_played, "
+                 "tab_order) VALUES (1, 'Default', 1, 0)"));
+
+  SongStore store(*library_, *databaseManager_, 1);
+  int lastPlayed = -1;
+  QVERIFY(store.loadPlaylistState(lastPlayed));
+  QCOMPARE(store.songCount(), 0);
+
+  store.addSongByPk(songId);
+  QCOMPARE(store.songCount(), 1);
+  QCOMPARE(store.getPkByIndex(0), songId);
+
+  QVERIFY(q.exec(
+      "SELECT song_id, position FROM playlist_items WHERE playlist_id=1"));
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toInt(), songId);
+  QCOMPARE(q.value(1).toInt(), 1);
+}
+
+void TestSongStore::removeSongByPk_rebuildsIndices() {
+  SongStore store(*library_, *databaseManager_, -1);
+  store.addSong(makeSong("S1", "Artist", "/tmp/remove-a.mp3"));
+  store.addSong(makeSong("S2", "Artist", "/tmp/remove-b.mp3"));
+  store.addSong(makeSong("S3", "Artist", "/tmp/remove-c.mp3"));
+
+  const int pk0 = store.getPkByIndex(0);
+  const int pk1 = store.getPkByIndex(1);
+  const int pk2 = store.getPkByIndex(2);
+
+  store.removeSongByPk(pk1);
+  QCOMPARE(store.songCount(), 2);
+  QCOMPARE(store.getPkByIndex(0), pk0);
+  QCOMPARE(store.getPkByIndex(1), pk2);
+  QVERIFY(!store.containsPk(pk1));
+  QVERIFY_THROWS_EXCEPTION(std::logic_error, store.getIndexByPk(pk1));
+}
+
+void TestSongStore::setLastPlayed_persistsPlaylistMetadata() {
+  const int songId =
+      library_->addTolibrary(makeSong("S1", "Artist", "/tmp/lastplayed.mp3"));
+
+  QSqlQuery q(databaseManager_->db());
+  QVERIFY(q.exec("INSERT INTO playlists(playlist_id, name, last_played, "
+                 "tab_order) VALUES (1, 'Default', 1, 0)"));
+
+  SongStore store(*library_, *databaseManager_, 1);
+  int lastPlayed = -1;
+  QVERIFY(store.loadPlaylistState(lastPlayed));
+  QCOMPARE(lastPlayed, 1);
+
+  store.setLastPlayed(songId);
+  QVERIFY(q.exec("SELECT last_played FROM playlists WHERE playlist_id=1"));
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toInt(), songId);
 }
 
 QTEST_MAIN(TestSongStore)

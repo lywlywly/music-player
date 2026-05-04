@@ -33,11 +33,10 @@ using SongParseFn =
 // is mainly used for dedup and parser refresh lookup. Songs are indexed by
 // song_id and filepath in memory; play statistics are keyed by song identity
 // (normalized title|artist|album) in DB. Multiple songs can share the same
-// identity.
+// identity. Playlist metadata and playlist_items persistence are handled
+// outside SongLibrary.
 // Normal single-song updates are synchronous; bulk loads and refreshes may take
-// time; UI-first playlist clears update memory immediately and delete DB rows
-// asynchronously; startup load and playlist restore stay synchronous so memory
-// matches the database before use.
+// time.
 class SongLibrary {
 public:
 #ifdef MYPLAYER_TESTING
@@ -58,9 +57,6 @@ public:
   std::vector<int> query(std::string) const;
   const std::vector<int> &registerQuery(std::string) const;
   void unregisterQuery(std::string) const;
-  // no duplicate
-  // std::unordered_set<const std::string*, StringPtrHash, StringPtrEqual>
-  // queryField(std::string) const;
   std::unordered_set<std::string> queryField(std::string) const;
   const std::unordered_set<std::string> &registerQueryField(std::string) const;
   void unRegisterQueryField(std::string) const;
@@ -70,10 +66,6 @@ public:
   // Loads the full song set (built-in columns + dynamic attributes) from DB
   // into memory. This can take noticeable time on large libraries.
   void loadFromDatabase();
-  // Loads playlist state from DB table `playlists` and DB table
-  // `playlist_items` for playlistId.
-  bool loadPlaylistState(int playlistId, int &lastPlayed,
-                         std::vector<int> &songIds);
   // Re-parses one song by filepath, updates DB + in-memory fields, and returns
   // the refreshed in-memory song.
   const MSong &refreshSongFromFile(const std::string &path);
@@ -101,13 +93,6 @@ public:
                                        int cloudPlayCount,
                                        qint64 cloudUpdatedAt);
   std::unordered_map<std::string, int> identityPlayCounts() const;
-  // Appends one song to DB table `playlist_items` at the given playlist
-  // position.
-  void appendSongToPlaylistInDb(int playlistId, int songId, int position);
-  // Removes all rows from DB table `playlist_items` for the given playlistId.
-  // This does not delete any rows from DB table `songs`. For file-backed DBs
-  // this is dispatched asynchronously so UI clear can stay immediate.
-  void removePlaylistItemsInDb(int playlistId);
 
 private:
   void loadBuiltInSongs();

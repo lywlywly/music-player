@@ -91,7 +91,7 @@ void TestPlaybackManager::cleanup() {
 }
 
 void TestPlaybackManager::playIndex_setsCurrentAndLastPlayed() {
-  SongStore store(*library_, -1);
+  SongStore store(*library_, *databaseManager_, -1);
   store.addSong(makeSong("S1", "Artist", "/tmp/pm-playindex-1.mp3", "1"));
   store.addSong(makeSong("S2", "Artist", "/tmp/pm-playindex-2.mp3", "2"));
   Playlist playlist(std::move(store), *queue_, 1, *layout_);
@@ -109,7 +109,7 @@ void TestPlaybackManager::playIndex_setsCurrentAndLastPlayed() {
 }
 
 void TestPlaybackManager::next_prefersQueuedSongsThenFallsBackToPolicy() {
-  SongStore store(*library_, -1);
+  SongStore store(*library_, *databaseManager_, -1);
   store.addSong(makeSong("S1", "Artist", "/tmp/pm-next-1.mp3", "1"));
   store.addSong(makeSong("S2", "Artist", "/tmp/pm-next-2.mp3", "2"));
   store.addSong(makeSong("S3", "Artist", "/tmp/pm-next-3.mp3", "3"));
@@ -139,7 +139,7 @@ void TestPlaybackManager::next_prefersQueuedSongsThenFallsBackToPolicy() {
 }
 
 void TestPlaybackManager::prev_wrapsToLastInSequentialPolicy() {
-  SongStore store(*library_, -1);
+  SongStore store(*library_, *databaseManager_, -1);
   store.addSong(makeSong("S1", "Artist", "/tmp/pm-prev-1.mp3", "1"));
   store.addSong(makeSong("S2", "Artist", "/tmp/pm-prev-2.mp3", "2"));
   store.addSong(makeSong("S3", "Artist", "/tmp/pm-prev-3.mp3", "3"));
@@ -156,7 +156,7 @@ void TestPlaybackManager::prev_wrapsToLastInSequentialPolicy() {
 }
 
 void TestPlaybackManager::playPauseStop_updatesPlaybackQueueState() {
-  SongStore store(*library_, -1);
+  SongStore store(*library_, *databaseManager_, -1);
   store.addSong(makeSong("S1", "Artist", "/tmp/pm-state-1.mp3", "1"));
   Playlist playlist(std::move(store), *queue_, 1, *layout_);
 

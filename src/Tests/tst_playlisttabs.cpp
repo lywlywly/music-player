@@ -1,10 +1,12 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
+#include <QGuiApplication>
 #include <QObject>
 #include <QSettings>
 #include <QSignalSpy>
 #include <QSqlDatabase>
+#include <QSqlQuery>
 #include <QTableView>
 #include <QTest>
 #include <QTimer>
@@ -56,6 +58,48 @@ QActionGroup *makePlaybackOrderGroup(QObject *parent = nullptr) {
   group->addAction(shuffleAction);
   return group;
 }
+
+int insertPlaylistRow(QSqlDatabase &db, const QString &name, int tabOrder) {
+  QSqlQuery q(db);
+  q.prepare(R"(
+      INSERT INTO playlists(name, last_played, tab_order)
+      VALUES(:name, 1, :tab_order)
+  )");
+  q.bindValue(":name", name);
+  q.bindValue(":tab_order", tabOrder);
+  if (!q.exec()) {
+    return -1;
+  }
+  return q.lastInsertId().toInt();
+}
+
+bool updatePlaylistTabOrder(QSqlDatabase &db, const QList<int> &playlistIds) {
+  if (playlistIds.isEmpty()) {
+    return true;
+  }
+  if (!db.transaction()) {
+    return false;
+  }
+  QSqlQuery q(db);
+  q.prepare(R"(
+      UPDATE playlists
+      SET tab_order=:tab_order
+      WHERE playlist_id=:playlist_id
+  )");
+  for (int i = 0; i < playlistIds.size(); ++i) {
+    q.bindValue(":tab_order", i);
+    q.bindValue(":playlist_id", playlistIds[i]);
+    if (!q.exec()) {
+      db.rollback();
+      return false;
+    }
+  }
+  if (!db.commit()) {
+    db.rollback();
+    return false;
+  }
+  return true;
+}
 } // namespace
 
 class TestPlaylistTabs : public QObject {
@@ -66,11 +110,21 @@ private slots:
   void cleanup();
 
   void init_createsDefaultPlaylistAndActions();
+  void init_persistsDefaultPlaylistMetadataRow();
   void helperMethods_mapAndFindPlaylist();
   void navigateIndex_selectsTargetRow();
   void notifySongDataChangedInAllPlaylists_notifiesMatchingRows();
   void customContextMenu_bindsRowIntoQueueActions();
   void createNewPlaylistTabFromSongIds_createsTabAndCopiesSongs();
+  void createNewPlaylistTabFromSongIds_emptyNoop();
+  void startupRestore_loadsAllPlaylistsInSavedOrder();
+  void startupRestore_recoversCorruptedTabOrder();
+  void removeTab_deletesNonDefaultPlaylist();
+  void removeTab_rejectsWhenSingleTab();
+  void removeTab_invalidIndexRejected();
+  void removeTab_allowsRemovingDefaultWhenMultipleTabs();
+  void tabMove_persistsOrderInDb();
+  void renameTab_updatesTabTextAndDb();
 
 private:
   ColumnRegistry *registry_ = nullptr;
@@ -103,7 +157,7 @@ void TestPlaylistTabs::init() {
   playbackOrderGroup_ = makePlaybackOrderGroup();
   tabs_ = new PlaylistTabs();
   tabs_->init(library_, queue_, manager_, playbackOrderGroup_, registry_,
-              layout_);
+              layout_, databaseManager_);
 }
 
 void TestPlaylistTabs::cleanup() {
@@ -132,6 +186,14 @@ void TestPlaylistTabs::init_createsDefaultPlaylistAndActions() {
   QVERIFY(tabs_->playEndAction() != nullptr);
   QCOMPARE(tabs_->tabWidget()->count(), 1);
   QCOMPARE(tabs_->tabWidget()->tabText(0), QString("Default"));
+}
+
+void TestPlaylistTabs::init_persistsDefaultPlaylistMetadataRow() {
+  QSqlQuery q(databaseManager_->db());
+  QVERIFY(q.exec("SELECT name, tab_order FROM playlists WHERE playlist_id=1"));
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toString(), QString("Default"));
+  QCOMPARE(q.value(1).toInt(), 0);
 }
 
 void TestPlaylistTabs::helperMethods_mapAndFindPlaylist() {
@@ -179,6 +241,10 @@ void TestPlaylistTabs::
 }
 
 void TestPlaylistTabs::customContextMenu_bindsRowIntoQueueActions() {
+  if (QGuiApplication::primaryScreen() == nullptr) {
+    QSKIP("No screen available for popup menu test");
+  }
+
   Playlist *pl = tabs_->currentPlaylist();
   QVERIFY(pl != nullptr);
   pl->addSong(makeSong("A", "Artist", "/tmp/pt-menu-a.mp3", "1"));
@@ -228,6 +294,188 @@ void TestPlaylistTabs::
   QCOMPARE(newPlaylist->songCount(), 2);
   QCOMPARE(newPlaylist->getSongByIndex(0).at("title").text, std::string("A"));
   QCOMPARE(newPlaylist->getSongByIndex(1).at("title").text, std::string("B"));
+}
+
+void TestPlaylistTabs::createNewPlaylistTabFromSongIds_emptyNoop() {
+  QCOMPARE(tabs_->tabWidget()->count(), 1);
+  tabs_->createNewPlaylistTabFromSongIds({});
+  QCOMPARE(tabs_->tabWidget()->count(), 1);
+}
+
+void TestPlaylistTabs::startupRestore_loadsAllPlaylistsInSavedOrder() {
+  const int playlistA = insertPlaylistRow(databaseManager_->db(), "A", 1);
+  const int playlistB = insertPlaylistRow(databaseManager_->db(), "B", 2);
+  QVERIFY(playlistA > 0);
+  QVERIFY(playlistB > 0);
+  QVERIFY(updatePlaylistTabOrder(databaseManager_->db(),
+                                 {1, playlistB, playlistA}));
+
+  delete tabs_;
+  tabs_ = new PlaylistTabs();
+  tabs_->init(library_, queue_, manager_, playbackOrderGroup_, registry_,
+              layout_, databaseManager_);
+
+  QCOMPARE(tabs_->tabWidget()->count(), 3);
+  QCOMPARE(tabs_->tabWidget()->tabText(0), QString("Default"));
+  QCOMPARE(tabs_->tabWidget()->tabText(1), QString("B"));
+  QCOMPARE(tabs_->tabWidget()->tabText(2), QString("A"));
+  QCOMPARE(tabs_->tabWidget()->tabBar()->tabData(0).toInt(), 1);
+  QCOMPARE(tabs_->tabWidget()->tabBar()->tabData(1).toInt(), playlistB);
+  QCOMPARE(tabs_->tabWidget()->tabBar()->tabData(2).toInt(), playlistA);
+}
+
+void TestPlaylistTabs::startupRestore_recoversCorruptedTabOrder() {
+  const int playlistA = insertPlaylistRow(databaseManager_->db(), "A", 1);
+  const int playlistB = insertPlaylistRow(databaseManager_->db(), "B", 2);
+  QVERIFY(playlistA > 0);
+  QVERIFY(playlistB > 0);
+
+  QSqlQuery q(databaseManager_->db());
+  QVERIFY(q.exec("UPDATE playlists SET tab_order=1 WHERE playlist_id=1"));
+  QVERIFY(
+      q.exec(QString("UPDATE playlists SET tab_order=2 WHERE playlist_id=%1")
+                 .arg(playlistA)));
+  QVERIFY(
+      q.exec(QString("UPDATE playlists SET tab_order=3 WHERE playlist_id=%1")
+                 .arg(playlistB)));
+
+  delete tabs_;
+  tabs_ = new PlaylistTabs();
+  tabs_->init(library_, queue_, manager_, playbackOrderGroup_, registry_,
+              layout_, databaseManager_);
+
+  QCOMPARE(tabs_->tabWidget()->count(), 3);
+  QCOMPARE(tabs_->tabWidget()->tabBar()->tabData(0).toInt(), 1);
+  QCOMPARE(tabs_->tabWidget()->tabBar()->tabData(1).toInt(), playlistA);
+  QCOMPARE(tabs_->tabWidget()->tabBar()->tabData(2).toInt(), playlistB);
+
+  QVERIFY(q.exec("SELECT tab_order FROM playlists ORDER BY tab_order ASC"));
+  int expected = 0;
+  while (q.next()) {
+    QCOMPARE(q.value(0).toInt(), expected);
+    expected += 1;
+  }
+  QCOMPARE(expected, 3);
+}
+
+void TestPlaylistTabs::removeTab_deletesNonDefaultPlaylist() {
+  Playlist *pl = tabs_->currentPlaylist();
+  QVERIFY(pl != nullptr);
+  pl->addSong(makeSong("A", "Artist", "/tmp/pt-remove-a.mp3", "1"));
+
+  const QList<int> songIds = {pl->getPkByIndex(0)};
+  tabs_->createNewPlaylistTabFromSongIds(songIds);
+  QCOMPARE(tabs_->tabWidget()->count(), 2);
+
+  const int removedPlaylistId =
+      tabs_->tabWidget()->tabBar()->tabData(1).toInt();
+  QVERIFY(removedPlaylistId > 1);
+
+  QSqlQuery q(databaseManager_->db());
+  QVERIFY(
+      q.exec(QString("SELECT COUNT(*) FROM playlist_items WHERE playlist_id=%1")
+                 .arg(removedPlaylistId)));
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toInt(), 1);
+
+  QVERIFY(tabs_->removePlaylistTabByIndex(1));
+  QCOMPARE(tabs_->tabWidget()->count(), 1);
+
+  QVERIFY(q.exec(QString("SELECT COUNT(*) FROM playlists WHERE playlist_id=%1")
+                     .arg(removedPlaylistId)));
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toInt(), 0);
+
+  QVERIFY(
+      q.exec(QString("SELECT COUNT(*) FROM playlist_items WHERE playlist_id=%1")
+                 .arg(removedPlaylistId)));
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toInt(), 0);
+}
+
+void TestPlaylistTabs::removeTab_rejectsWhenSingleTab() {
+  QCOMPARE(tabs_->tabWidget()->count(), 1);
+  QVERIFY(!tabs_->removePlaylistTabByIndex(0));
+  QCOMPARE(tabs_->tabWidget()->count(), 1);
+}
+
+void TestPlaylistTabs::removeTab_invalidIndexRejected() {
+  QCOMPARE(tabs_->tabWidget()->count(), 1);
+  QVERIFY(!tabs_->removePlaylistTabByIndex(-1));
+  QVERIFY(!tabs_->removePlaylistTabByIndex(99));
+  QCOMPARE(tabs_->tabWidget()->count(), 1);
+}
+
+void TestPlaylistTabs::removeTab_allowsRemovingDefaultWhenMultipleTabs() {
+  Playlist *pl = tabs_->currentPlaylist();
+  QVERIFY(pl != nullptr);
+  pl->addSong(makeSong("A", "Artist", "/tmp/pt-remove-default-a.mp3", "1"));
+
+  tabs_->createNewPlaylistTabFromSongIds({pl->getPkByIndex(0)});
+  QCOMPARE(tabs_->tabWidget()->count(), 2);
+  QCOMPARE(tabs_->tabWidget()->tabBar()->tabData(0).toInt(), 1);
+
+  QVERIFY(tabs_->removePlaylistTabByIndex(0));
+  QCOMPARE(tabs_->tabWidget()->count(), 1);
+  QVERIFY(tabs_->tabWidget()->tabBar()->tabData(0).toInt() != 1);
+
+  QSqlQuery q(databaseManager_->db());
+  QVERIFY(q.exec("SELECT COUNT(*) FROM playlists WHERE playlist_id=1"));
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toInt(), 0);
+}
+
+void TestPlaylistTabs::tabMove_persistsOrderInDb() {
+  Playlist *pl = tabs_->currentPlaylist();
+  QVERIFY(pl != nullptr);
+  pl->addSong(makeSong("A", "Artist", "/tmp/pt-move-a.mp3", "1"));
+  pl->addSong(makeSong("B", "Artist", "/tmp/pt-move-b.mp3", "2"));
+
+  tabs_->createNewPlaylistTabFromSongIds({pl->getPkByIndex(0)});
+  tabs_->createNewPlaylistTabFromSongIds({pl->getPkByIndex(1)});
+  QCOMPARE(tabs_->tabWidget()->count(), 3);
+
+  const int idAt1 = tabs_->tabWidget()->tabBar()->tabData(1).toInt();
+  const int idAt2 = tabs_->tabWidget()->tabBar()->tabData(2).toInt();
+  QVERIFY(idAt1 > 1);
+  QVERIFY(idAt2 > 1);
+
+  tabs_->tabWidget()->tabBar()->moveTab(2, 1);
+
+  QSqlQuery q(databaseManager_->db());
+  QVERIFY(q.exec(QString("SELECT tab_order FROM playlists WHERE playlist_id=%1")
+                     .arg(idAt1)));
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toInt(), 2);
+  QVERIFY(q.exec(QString("SELECT tab_order FROM playlists WHERE playlist_id=%1")
+                     .arg(idAt2)));
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toInt(), 1);
+  QVERIFY(q.exec("SELECT tab_order FROM playlists WHERE playlist_id=1"));
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toInt(), 0);
+}
+
+void TestPlaylistTabs::renameTab_updatesTabTextAndDb() {
+  const int playlistId = insertPlaylistRow(databaseManager_->db(), "Old", 1);
+  QVERIFY(playlistId > 0);
+
+  delete tabs_;
+  tabs_ = new PlaylistTabs();
+  tabs_->init(library_, queue_, manager_, playbackOrderGroup_, registry_,
+              layout_, databaseManager_);
+
+  QCOMPARE(tabs_->tabWidget()->count(), 2);
+  QCOMPARE(tabs_->tabWidget()->tabText(1), QString("Old"));
+
+  QVERIFY(tabs_->renamePlaylistTabByIndex(1, "Renamed"));
+  QCOMPARE(tabs_->tabWidget()->tabText(1), QString("Renamed"));
+
+  QSqlQuery q(databaseManager_->db());
+  QVERIFY(q.exec(QString("SELECT name FROM playlists WHERE playlist_id=%1")
+                     .arg(playlistId)));
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toString(), QString("Renamed"));
 }
 
 QTEST_MAIN(TestPlaylistTabs)

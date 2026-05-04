@@ -137,7 +137,7 @@ void MainWindow::setUpPlaylist() {
   songLibrary.loadFromDatabase();
   playlistTabs->init(&songLibrary, &playbackQueue_, &control,
                      playbackOrderMenuActionGroup, &columnRegistry_,
-                     &columnLayoutManager_);
+                     &columnLayoutManager_, &databaseManager_);
   connect(playlistTabs, &PlaylistTabs::doubleClicked, [this](QModelIndex i) {
     MSong song = control.playIndex(i.row());
     playSong(song, i.row(), playlistTabs->currentPlaylist());
@@ -148,8 +148,12 @@ void MainWindow::setUpPlaylist() {
   connect(ui->actionAdd_folder, &QAction::triggered, this,
           &MainWindow::openFolder);
   connect(ui->actionAdd, &QAction::triggered, this, &MainWindow::addEntry);
-  connect(ui->actionClear_Playlist, &QAction::triggered,
-          playlistTabs->currentPlaylist(), &Playlist::clear);
+  connect(ui->actionClear_Playlist, &QAction::triggered, this, [this]() {
+    Playlist *current = playlistTabs->currentPlaylist();
+    if (current != nullptr) {
+      current->clear();
+    }
+  });
 }
 
 void MainWindow::initSettings() {

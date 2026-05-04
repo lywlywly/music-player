@@ -1,4 +1,9 @@
 #include "songstore.h"
+#include "databasemanager.h"
+#include <QSqlError>
+#include <QSqlQuery>
+#include <QUuid>
+#include <QtConcurrent>
 #include <optional>
 #include <stdexcept>
 #include <unicode/coll.h>
@@ -71,8 +76,9 @@ SortValue resolveSortValue(const SongLibrary &library, int songPk,
 }
 } // namespace
 
-SongStore::SongStore(SongLibrary &lib, int pid)
-    : library{lib}, playlistId{pid} {}
+SongStore::SongStore(SongLibrary &lib, DatabaseManager &databaseManager,
+                     int pid)
+    : playlistId{pid}, library{lib}, databaseManager_{databaseManager} {}
 
 int SongStore::songCount() const { return songPKs.size(); }
 
@@ -91,7 +97,7 @@ void SongStore::addSongByPk(int songId) {
     indices.resize(songId + 1, -1);
   indices[songId] = songPKs.size() - 1;
   if (playlistId > 0) {
-    library.appendSongToPlaylistInDb(playlistId, songId, songPKs.size());
+    appendSongToPlaylistInDb(songId, songPKs.size());
   }
 }
 
@@ -106,7 +112,7 @@ void SongStore::clear() {
   songPKs.clear();
   indices.clear();
   if (playlistId > 0) {
-    library.removePlaylistItemsInDb(playlistId);
+    removePlaylistItemsInDb();
   }
 }
 
@@ -165,6 +171,25 @@ const std::vector<int> &SongStore::getSongsView() const { return songPKs; }
 
 const std::vector<int> &SongStore::getIndices() const { return indices; }
 
+void SongStore::setLastPlayed(int songPk) {
+  if (playlistId <= 0 || songPk < 0) {
+    return;
+  }
+
+  QSqlDatabase &db = databaseManager_.db();
+  QSqlQuery q(db);
+  q.prepare(R"(
+      UPDATE playlists
+      SET last_played=:last_played
+      WHERE playlist_id=:playlist_id
+  )");
+  q.bindValue(":last_played", songPk);
+  q.bindValue(":playlist_id", playlistId);
+  if (!q.exec()) {
+    qFatal("setLastPlayed failed: %s", q.lastError().text().toUtf8().data());
+  }
+}
+
 void SongStore::refreshSongsFromFilepaths(
     const std::vector<std::string> &filepaths,
     const std::function<void(int current, int total)> &progressCallback) {
@@ -172,12 +197,110 @@ void SongStore::refreshSongsFromFilepaths(
 }
 
 bool SongStore::loadPlaylistState(int &lastPlayed) {
-  if (!library.loadPlaylistState(playlistId, lastPlayed, songPKs)) {
+  if (playlistId <= 0) {
     return false;
+  }
+
+  QSqlDatabase &db = databaseManager_.db();
+  QSqlQuery qPlaylist(db);
+  qPlaylist.prepare(R"(
+      SELECT last_played
+      FROM playlists
+      WHERE playlist_id=:playlist_id
+  )");
+  qPlaylist.bindValue(":playlist_id", playlistId);
+  if (!qPlaylist.exec() || !qPlaylist.next()) {
+    return false;
+  }
+  lastPlayed = qPlaylist.value(0).toInt();
+
+  songPKs.clear();
+  QSqlQuery qItems(db);
+  qItems.prepare(R"(
+      SELECT song_id
+      FROM playlist_items
+      WHERE playlist_id=:playlist_id
+      ORDER BY position ASC
+  )");
+  qItems.bindValue(":playlist_id", playlistId);
+  if (!qItems.exec()) {
+    return false;
+  }
+  while (qItems.next()) {
+    songPKs.push_back(qItems.value(0).toInt());
   }
 
   rebuildIndices();
   return true;
+}
+
+void SongStore::appendSongToPlaylistInDb(int songId, int position) {
+  QSqlDatabase &db = databaseManager_.db();
+  QSqlQuery q(db);
+  q.prepare(R"(
+      INSERT INTO playlist_items(playlist_id, song_id, position)
+      VALUES(:playlist_id, :song_id, :position)
+  )");
+  q.bindValue(":playlist_id", playlistId);
+  q.bindValue(":song_id", songId);
+  q.bindValue(":position", position);
+  if (!q.exec()) {
+    qFatal("appendSongToPlaylistInDb failed: %s",
+           q.lastError().text().toUtf8().data());
+  }
+}
+
+void SongStore::removePlaylistItemsInDb() {
+  if (playlistId <= 0) {
+    return;
+  }
+
+  QSqlDatabase &mainDb = databaseManager_.db();
+  const QString dbPath = mainDb.databaseName();
+  if (dbPath.isEmpty() || dbPath == ":memory:") {
+    QSqlQuery q(mainDb);
+    q.prepare(R"(
+        DELETE FROM playlist_items
+        WHERE playlist_id=:playlist_id
+    )");
+    q.bindValue(":playlist_id", playlistId);
+    if (!q.exec()) {
+      qFatal("removePlaylistItemsInDb failed: %s",
+             q.lastError().text().toUtf8().data());
+    }
+    return;
+  }
+
+  const int targetPlaylistId = playlistId;
+  QtConcurrent::run([dbPath, targetPlaylistId]() {
+    const QString connectionName =
+        QStringLiteral("remove_playlist_items_%1")
+            .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
+    db.setDatabaseName(dbPath);
+    if (!db.open()) {
+      qWarning() << "removePlaylistItemsInDb worker open failed:"
+                 << db.lastError().text();
+      db = QSqlDatabase();
+      QSqlDatabase::removeDatabase(connectionName);
+      return;
+    }
+
+    QSqlQuery q(db);
+    q.prepare(R"(
+        DELETE FROM playlist_items
+        WHERE playlist_id=:playlist_id
+    )");
+    q.bindValue(":playlist_id", targetPlaylistId);
+    if (!q.exec()) {
+      qWarning() << "removePlaylistItemsInDb worker delete failed:"
+                 << q.lastError().text();
+    }
+
+    db.close();
+    db = QSqlDatabase();
+    QSqlDatabase::removeDatabase(connectionName);
+  });
 }
 
 void SongStore::rebuildIndices() {

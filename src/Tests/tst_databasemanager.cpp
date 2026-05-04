@@ -59,6 +59,16 @@ void TestDatabaseManager::createsSongsSchemaFromRegistry() {
              qPrintable(QString("Missing songs column: %1").arg(id)));
   }
   QVERIFY(!actualColumns.contains("status"));
+
+  QVERIFY(q.exec("PRAGMA table_info(playlists)"));
+  bool hasTabOrder = false;
+  while (q.next()) {
+    if (q.value(1).toString() == "tab_order") {
+      hasTabOrder = true;
+      break;
+    }
+  }
+  QVERIFY(hasTabOrder);
 }
 
 void TestDatabaseManager::createsComputedAttributesSchema() {

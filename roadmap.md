@@ -8,6 +8,7 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
 - 🟡 ReplayGain
 - ✅ Sorting
 - ✅ Multiple playlists
+  - ✅ Persistent playlist identity (`playlist_id`) and tab order (`tab_order`)
 - ⬜ Playlist serialize/deserialize
 - 🟡 Database improvements
 - 🟡 Lyrics panel polish

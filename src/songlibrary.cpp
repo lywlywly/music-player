@@ -6,9 +6,7 @@
 #include <QSet>
 #include <QSqlError>
 #include <QSqlQuery>
-#include <QUuid>
 #include <algorithm>
-#include <thread>
 
 #ifdef MYPLAYER_TESTING
 SongLibrary::SongLibrary(const ColumnRegistry &columnRegistry,
@@ -823,68 +821,6 @@ void SongLibrary::upsertComputedFieldValueInDb(
   }
 }
 
-bool SongLibrary::loadPlaylistState(int playlistId, int &lastPlayed,
-                                    std::vector<int> &songIds) {
-  if (playlistId <= 0) {
-    qWarning() << "loadPlaylistState: invalid playlist id:" << playlistId;
-    return false;
-  }
-
-  QSqlDatabase &db = databaseManager_.db();
-  const QString playlistName = (playlistId == 1)
-                                   ? QStringLiteral("Default Playlist")
-                                   : QString("Playlist %1").arg(playlistId);
-
-  QSqlQuery ensurePlaylist(db);
-  ensurePlaylist.prepare(
-      "INSERT OR IGNORE INTO playlists(playlist_id, name, last_played) "
-      "VALUES(:playlist_id, :name, :last_played)");
-  ensurePlaylist.bindValue(":playlist_id", playlistId);
-  ensurePlaylist.bindValue(":name", playlistName);
-  ensurePlaylist.bindValue(":last_played", 1);
-  if (!ensurePlaylist.exec()) {
-    qWarning() << "loadPlaylistState ensure playlist failed:"
-               << ensurePlaylist.lastError().text();
-    return false;
-  }
-
-  songIds.clear();
-  QSqlQuery qItems(db);
-  qItems.prepare(R"(
-      SELECT song_id
-      FROM playlist_items
-      WHERE playlist_id=:playlist_id
-      ORDER BY position ASC
-  )");
-  qItems.bindValue(":playlist_id", playlistId);
-  if (!qItems.exec()) {
-    qWarning() << "loadPlaylistState load items failed:"
-               << qItems.lastError().text();
-    return false;
-  }
-  while (qItems.next()) {
-    songIds.push_back(qItems.value(0).toInt());
-  }
-
-  QSqlQuery qPlaylist(db);
-  qPlaylist.prepare(R"(
-      SELECT last_played
-      FROM playlists
-      WHERE playlist_id=:playlist_id
-  )");
-  qPlaylist.bindValue(":playlist_id", playlistId);
-  if (!qPlaylist.exec()) {
-    qWarning() << "loadPlaylistState load metadata failed:"
-               << qPlaylist.lastError().text();
-    return false;
-  }
-  lastPlayed = 1;
-  if (qPlaylist.next()) {
-    lastPlayed = qPlaylist.value(0).toInt();
-  }
-  return true;
-}
-
 const MSong &SongLibrary::refreshSongFromFile(const std::string &path) {
   if (path.empty()) {
     qFatal("refreshSongFromFile: filepath is empty");
@@ -943,71 +879,6 @@ void SongLibrary::refreshSongsFromFilepaths(
       progressCallback(i + 1, total);
     }
   }
-}
-
-void SongLibrary::appendSongToPlaylistInDb(int playlistId, int songId,
-                                           int position) {
-  QSqlDatabase &db = databaseManager_.db();
-  QSqlQuery q(db);
-  q.prepare(R"(
-      INSERT INTO playlist_items(playlist_id, song_id, position)
-      VALUES(:playlist_id, :song_id, :position)
-  )");
-  q.bindValue(":playlist_id", playlistId);
-  q.bindValue(":song_id", songId);
-  q.bindValue(":position", position);
-  if (!q.exec()) {
-    qFatal("appendSongToPlaylistInDb failed: %s",
-           q.lastError().text().toUtf8().data());
-  }
-}
-
-void SongLibrary::removePlaylistItemsInDb(int playlistId) {
-  if (playlistId <= 0) {
-    return;
-  }
-
-  QSqlDatabase &mainDb = databaseManager_.db();
-  const QString dbPath = mainDb.databaseName();
-  const QString deleteSql =
-      QString("DELETE FROM playlist_items WHERE playlist_id=%1")
-          .arg(playlistId);
-  if (dbPath.isEmpty() || dbPath == ":memory:") {
-    QSqlQuery q(mainDb);
-    if (!q.exec(deleteSql)) {
-      qFatal("removePlaylistItemsInDb failed: %s",
-             q.lastError().text().toUtf8().data());
-    }
-    return;
-  }
-
-  const QString connectionName =
-      QStringLiteral("remove_playlist_items_%1")
-          .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
-  std::thread([dbPath, deleteSql, connectionName]() {
-    QSqlDatabase workerDb =
-        QSqlDatabase::addDatabase("QSQLITE", connectionName);
-    workerDb.setDatabaseName(dbPath);
-    if (!workerDb.open()) {
-      qWarning() << "removePlaylistItemsInDb worker open failed:"
-                 << workerDb.lastError().text();
-      workerDb = QSqlDatabase();
-      QSqlDatabase::removeDatabase(connectionName);
-      return;
-    }
-
-    {
-      QSqlQuery q(workerDb);
-      if (!q.exec(deleteSql)) {
-        qWarning() << "removePlaylistItemsInDb worker delete failed:"
-                   << q.lastError().text();
-      }
-    }
-
-    workerDb.close();
-    workerDb = QSqlDatabase();
-    QSqlDatabase::removeDatabase(connectionName);
-  }).detach();
 }
 
 int SongLibrary::ensureSongInDb(MSong &song) {

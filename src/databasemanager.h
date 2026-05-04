@@ -11,7 +11,7 @@ class QSqlQuery;
 class DatabaseManager {
 public:
   explicit DatabaseManager(const ColumnRegistry &columnRegistry,
-                           QString databaseName = "myplayer.db",
+                           QString databaseName = {},
                            QString connectionName = "myplayer_main");
   ~DatabaseManager();
   DatabaseManager(const DatabaseManager &) = delete;

@@ -208,7 +208,13 @@ void Playlist::unsetSizeChangeCallback() const {
   this->sizeChangeCallback = nullptr;
 }
 
-void Playlist::setLastPlayed(int newLastPlayed) { lastPlayed = newLastPlayed; }
+void Playlist::setLastPlayed(int newLastPlayed) {
+  if (newLastPlayed < 0) {
+    return;
+  }
+  lastPlayed = newLastPlayed;
+  store.setLastPlayed(newLastPlayed);
+}
 
 int Playlist::getLastPlayed() const { return lastPlayed; }
 
