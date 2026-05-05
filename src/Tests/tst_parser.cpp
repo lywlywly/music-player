@@ -6,6 +6,7 @@
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QObject>
+#include <QTemporaryDir>
 #include <QTest>
 
 #include "../lyricsloader.h"
@@ -19,6 +20,7 @@ public:
 
 private slots:
   void parseRepositoryInputFiles();
+  void writeTags_updatesOnlySpecifiedFields_roundTrip();
   void parseLyricsText_parsesLrcLines();
   void parseLyricsText_handlesInvalidInput();
 };
@@ -92,6 +94,61 @@ void TestParser::parseRepositoryInputFiles() {
                it.value().toString());
     }
   }
+}
+
+void TestParser::writeTags_updatesOnlySpecifiedFields_roundTrip() {
+  const QString inputDirPath = QFINDTESTDATA("parser_inputs");
+  QVERIFY2(!inputDirPath.isEmpty(),
+           "Missing test input directory: src/Tests/parser_inputs");
+
+  const QString configPath = QDir(inputDirPath).filePath("parser_cases.json");
+  QFile configFile(configPath);
+  QVERIFY2(configFile.exists(), "Missing parser config file");
+  QVERIFY2(configFile.open(QIODevice::ReadOnly),
+           "Failed to open parser config");
+
+  QJsonParseError parseError;
+  const QJsonDocument doc =
+      QJsonDocument::fromJson(configFile.readAll(), &parseError);
+  QVERIFY(parseError.error == QJsonParseError::NoError);
+  const QJsonArray cases = doc.object().value("cases").toArray();
+  QVERIFY(!cases.isEmpty());
+
+  const QString relFile = cases[0].toObject().value("file").toString();
+  QVERIFY(!relFile.isEmpty());
+  const QString sourcePath =
+      QFileInfo(QDir(inputDirPath).filePath(relFile)).absoluteFilePath();
+  QVERIFY(QFileInfo::exists(sourcePath));
+
+  QTemporaryDir tempDir;
+  QVERIFY(tempDir.isValid());
+  const QString editedPath = QDir(tempDir.path()).filePath("parser-write.flac");
+  QVERIFY(QFile::copy(sourcePath, editedPath));
+
+  std::unordered_map<std::string, std::string> beforeRemaining;
+  const MSong before = SongParser::parse(editedPath.toStdString(),
+                                         columnRegistry, &beforeRemaining);
+  QVERIFY(before.contains("artist"));
+
+  const std::unordered_map<std::string, std::string> updates = {
+      {"title", "Edited Title"},
+      {"lyrics", "[00:01.00]edited-line"},
+      {"custom_note", "hello-note"},
+  };
+  QVERIFY(
+      SongParser::writeTags(editedPath.toStdString(), updates, columnRegistry));
+
+  std::unordered_map<std::string, std::string> afterRemaining;
+  const MSong after = SongParser::parse(editedPath.toStdString(),
+                                        columnRegistry, &afterRemaining);
+
+  QVERIFY(after.contains("title"));
+  QCOMPARE(after.at("title").text, std::string("Edited Title"));
+  QCOMPARE(after.at("artist").text, before.at("artist").text);
+  QVERIFY(afterRemaining.contains("lyrics"));
+  QCOMPARE(afterRemaining.at("lyrics"), std::string("[00:01.00]edited-line"));
+  QVERIFY(afterRemaining.contains("custom_note"));
+  QCOMPARE(afterRemaining.at("custom_note"), std::string("hello-note"));
 }
 
 void TestParser::parseLyricsText_parsesLrcLines() {

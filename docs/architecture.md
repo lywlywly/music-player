@@ -32,18 +32,35 @@ of `README.md`.
   * Parses files (`loadSongFromFile`), upserts song rows (`addTolibrary`), refreshes metadata, and evaluates computed fields.
   * Evaluates search expressions.
   * Maintains identity-based play stats using normalized `title|artist|album`.
+* `SongParser`
+  * Parses file tags into built-in + dynamic fields and remaining raw tag fields.
+  * Writes updated/removed tags back to audio files (`writeTags`).
 
 ### Playlist domain
 
 * `PlaylistTabs`
   * Owns playlist metadata behavior (`playlists` table): create/delete playlist rows, restore/reorder tabs, repair invalid `tab_order`.
   * Creates one `Playlist` per tab and connects UI interactions.
+  * Opens per-song Properties dialog from row context menu and refreshes playlist rows after successful save.
 * `Playlist`
   * `QAbstractTableModel` adapter for one playlist.
   * Delegates storage/order to `SongStore` and renders status column from `PlaybackQueue`.
 * `SongStore`
   * Per-playlist song-id ordering and sorting.
   * Owns `playlist_items` persistence (append/clear/load by playlist).
+
+### Song Properties UI
+
+* `SongPropertiesDialog`
+  * Shows refreshed parsed/computed fields first, then remaining raw tag fields.
+  * Buffers edits in-memory and writes once on `Save`.
+  * If there are no pending changes, `Save` just closes the dialog.
+  * Supports edit/add/remove for writable tag rows.
+  * Computed fields are read-only and non-removable.
+* `FieldEditDialog`
+  * Secondary editor for a row value (multiline text).
+* `AddFieldDialog`
+  * Adds a new raw tag key/value pair (no `attr:` prefix input).
 
 ### Playback domain
 
@@ -92,6 +109,8 @@ of `README.md`.
 
 * Ingest path: parse file -> evaluate computed fields -> generate identity key -> upsert song -> sync dynamic/computed attributes.
 * Refresh path re-parses file and syncs built-in/dynamic/computed fields to DB + memory.
+* Properties save path:
+  * collect dirty/removed rows -> `SongParser::writeTags(...)` -> `SongLibrary::refreshSongFromFile(...)` -> emit song-updated signal for playlist model refresh.
 * Two bulk user-triggered flows are intentionally blocking with progress UI:
   * `PlaylistTabs::refreshPlaylistMetadata(...)` (playlist-wide metadata refresh)
   * `MainWindow::openFolder()` (folder import)

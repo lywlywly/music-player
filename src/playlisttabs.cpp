@@ -480,6 +480,7 @@ void PlaylistTabs::openPropertiesForCurrentContextRow() {
     return;
   }
   const MSong &song = currentPlaylist_->getSongByIndex(row);
+  const int songPk = currentPlaylist_->getPkByIndex(row);
   auto filepathIt = song.find("filepath");
   if (filepathIt == song.end() || filepathIt->second.text.empty()) {
     return;
@@ -489,10 +490,15 @@ void PlaylistTabs::openPropertiesForCurrentContextRow() {
   const MSong &refreshedSong = songLibrary->refreshSongFromFile(
       filepathIt->second.text, &remainingFields);
 
-  auto *dialog = new SongPropertiesDialog(refreshedSong, remainingFields,
-                                          *columnRegistry_, this);
+  auto *dialog = new SongPropertiesDialog(
+      songPk, filepathIt->second.text, *songLibrary, refreshedSong,
+      remainingFields, *columnRegistry_, this);
   dialog->setAttribute(Qt::WA_DeleteOnClose);
   dialog->setModal(true);
+  connect(dialog, &SongPropertiesDialog::songUpdated, this,
+          [this](int updatedSongPk) {
+            notifySongDataChangedInAllPlaylists(updatedSongPk);
+          });
   dialog->show();
 }
 

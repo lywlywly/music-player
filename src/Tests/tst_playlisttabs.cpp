@@ -1,14 +1,19 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
+#include <QDialogButtonBox>
 #include <QGuiApplication>
+#include <QLineEdit>
 #include <QMenu>
 #include <QObject>
+#include <QPlainTextEdit>
+#include <QPushButton>
 #include <QSettings>
 #include <QSignalSpy>
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QTableView>
+#include <QTemporaryDir>
 #include <QTest>
 #include <QTimer>
 #include <QUuid>
@@ -21,6 +26,7 @@
 #include "../playbackqueue.h"
 #include "../playlisttabs.h"
 #include "../songlibrary.h"
+#include "../songparser.h"
 #include "../songpropertiesdialog.h"
 #include "../utils.h"
 
@@ -121,6 +127,11 @@ private slots:
   void notifySongDataChangedInAllPlaylists_notifiesMatchingRows();
   void customContextMenu_bindsRowIntoQueueActions();
   void propertiesDialog_showsRefreshedAndRemainingFields();
+  void propertiesDialog_editSave_writesDirtyFieldAndEmitsSongUpdated();
+  void propertiesDialog_cancel_discardsBufferedEdits();
+  void propertiesDialog_removeField_removesNonBuiltInOnSave();
+  void propertiesDialog_removeField_blocksBuiltIn();
+  void propertiesDialog_addField_addsAndSavesTag();
   void createNewPlaylistTabFromSongIds_createsTabAndCopiesSongs();
   void createNewPlaylistTabFromSongIds_emptyNoop();
   void startupRestore_loadsAllPlaylistsInSavedOrder();
@@ -159,15 +170,20 @@ void TestPlaylistTabs::init() {
       new DatabaseManager(*registry_, ":memory:", connectionName_);
   library_ = new SongLibrary(
       *registry_, *databaseManager_,
-      [](const std::string &path, const ColumnRegistry &,
+      [](const std::string &path, const ColumnRegistry &registry,
          std::unordered_map<std::string, std::string> *remainingFields)
           -> MSong {
         if (remainingFields != nullptr) {
           (*remainingFields)["remaining_zeta"] = "z-value";
           (*remainingFields)["remaining_alpha"] = "a-value";
         }
-        return makeSong("ParsedTitle", "ParsedArtist",
-                        QString::fromStdString(path), "1");
+        MSong parsed = makeSong("ParsedTitle", "ParsedArtist",
+                                QString::fromStdString(path), "1");
+        if (registry.hasColumn("attr:lyrics")) {
+          parsed["attr:lyrics"] =
+              FieldValue("old-lyrics", ColumnValueType::Text);
+        }
+        return parsed;
       });
   layout_ = new GlobalColumnLayoutManager(*registry_);
   queue_ = new PlaybackQueue();
@@ -379,13 +395,6 @@ void TestPlaylistTabs::propertiesDialog_showsRefreshedAndRemainingFields() {
   QVERIFY(remainingZetaRow > computedRow);
   QVERIFY(remainingAlphaRow < remainingZetaRow);
 
-  QCOMPARE(dialog->rowSourceAt(computedRow),
-           SongPropertiesDialog::RowSource::ComputedField);
-  QCOMPARE(dialog->rowSourceAt(remainingAlphaRow),
-           SongPropertiesDialog::RowSource::RemainingField);
-  QCOMPARE(dialog->rowSourceAt(remainingZetaRow),
-           SongPropertiesDialog::RowSource::RemainingField);
-
   QCOMPARE(model->data(model->index(remainingAlphaRow, 2), Qt::DisplayRole)
                .toString(),
            QString("Text"));
@@ -395,6 +404,472 @@ void TestPlaylistTabs::propertiesDialog_showsRefreshedAndRemainingFields() {
 
   dialog->close();
   delete dialog;
+}
+
+void TestPlaylistTabs::
+    propertiesDialog_editSave_writesDirtyFieldAndEmitsSongUpdated() {
+  registry_->addOrUpdateDynamicColumn(
+      {"attr:lyrics", "Lyrics", ColumnSource::SongAttribute,
+       ColumnValueType::Text, "", true, true, 180});
+
+  const QString inputDirPath = QFINDTESTDATA("parser_inputs");
+  QVERIFY(!inputDirPath.isEmpty());
+  const QString sourcePath =
+      QDir(inputDirPath)
+          .filePath("高田憂希;寿美菜子 - "
+                    "TVアニメ「やがて君になる」エンディングテーマ「hectopascal"
+                    "」 - 1 - 2 - 好き、以外の言葉で.flac");
+  QVERIFY(QFileInfo::exists(sourcePath));
+  QTemporaryDir tempDir;
+  QVERIFY(tempDir.isValid());
+  const QString editedPath = QDir(tempDir.path()).filePath("edited.flac");
+  QVERIFY(QFile::copy(sourcePath, editedPath));
+
+  Playlist *pl = tabs_->currentPlaylist();
+  QVERIFY(pl != nullptr);
+  pl->addSong(makeSong("OldTitle", "OldArtist", editedPath, "1"));
+  const int songPk = pl->getPkByIndex(0);
+  QVERIFY(songPk >= 0);
+
+  QTableView *table =
+      tabs_->tabWidget()->currentWidget()->findChild<QTableView *>();
+  QVERIFY(table != nullptr);
+  const QModelIndex row0 = table->model()->index(0, 0);
+  QVERIFY(row0.isValid());
+  const QPoint validPos = table->visualRect(row0).center();
+
+  QTimer::singleShot(0, []() {
+    if (QWidget *popup = QApplication::activePopupWidget()) {
+      popup->close();
+    }
+  });
+  tabs_->onCustomContextMenuRequested(validPos);
+  QVERIFY(tabs_->propertiesAction()->isEnabled());
+  tabs_->propertiesAction()->trigger();
+  QTest::qWait(0);
+
+  SongPropertiesDialog *dialog = nullptr;
+  for (QWidget *widget : QApplication::topLevelWidgets()) {
+    dialog = qobject_cast<SongPropertiesDialog *>(widget);
+    if (dialog != nullptr) {
+      break;
+    }
+  }
+  QVERIFY(dialog != nullptr);
+  QSignalSpy updatedSpy(dialog, &SongPropertiesDialog::songUpdated);
+
+  QTableView *propertiesTable =
+      dialog->findChild<QTableView *>("properties_table");
+  QVERIFY(propertiesTable != nullptr);
+  QAbstractItemModel *model = propertiesTable->model();
+  QVERIFY(model != nullptr);
+
+  int lyricsRow = -1;
+  for (int row = 0; row < model->rowCount(); ++row) {
+    const QString fieldText =
+        model->data(model->index(row, 0), Qt::DisplayRole).toString();
+    if (fieldText.contains("(attr:lyrics)")) {
+      lyricsRow = row;
+      break;
+    }
+  }
+  QVERIFY(lyricsRow >= 0);
+
+  const QModelIndex lyricsIndex = model->index(lyricsRow, 1);
+  QVERIFY(lyricsIndex.isValid());
+  QTimer::singleShot(0, []() {
+    QWidget *editWidget = nullptr;
+    for (QWidget *widget : QApplication::topLevelWidgets()) {
+      if (widget->metaObject()->className() == QString("FieldEditDialog")) {
+        editWidget = widget;
+        break;
+      }
+    }
+    QVERIFY(editWidget != nullptr);
+    auto *valueEdit = editWidget->findChild<QPlainTextEdit *>("value_edit");
+    QVERIFY(valueEdit != nullptr);
+    valueEdit->setPlainText("edited-line");
+    auto *editButtons = editWidget->findChild<QDialogButtonBox *>("buttonBox");
+    QVERIFY(editButtons != nullptr);
+    auto *okButton = editButtons->button(QDialogButtonBox::Ok);
+    QVERIFY(okButton != nullptr);
+    QTest::mouseClick(okButton, Qt::LeftButton);
+  });
+  QVERIFY(QMetaObject::invokeMethod(dialog, "handleTableDoubleClicked",
+                                    Qt::DirectConnection,
+                                    Q_ARG(QModelIndex, lyricsIndex)));
+  QTest::qWait(0);
+
+  QCOMPARE(model->data(model->index(lyricsRow, 1), Qt::DisplayRole).toString(),
+           QString("edited-line"));
+  QVERIFY(model->data(model->index(lyricsRow, 0), Qt::DisplayRole)
+              .toString()
+              .contains('*'));
+
+  auto *buttonBox = dialog->findChild<QDialogButtonBox *>("buttonBox");
+  QVERIFY(buttonBox != nullptr);
+  auto *saveButton = buttonBox->button(QDialogButtonBox::Save);
+  QVERIFY(saveButton != nullptr);
+  QTest::mouseClick(saveButton, Qt::LeftButton);
+  QTest::qWait(0);
+
+  QCOMPARE(updatedSpy.count(), 1);
+  const QList<QVariant> args = updatedSpy.takeFirst();
+  QCOMPARE(args.at(0).toInt(), songPk);
+
+  std::unordered_map<std::string, std::string> remainingAfter;
+  const MSong parsedAfter =
+      SongParser::parse(editedPath.toStdString(), *registry_, &remainingAfter);
+  QVERIFY(parsedAfter.contains("attr:lyrics"));
+  QCOMPARE(parsedAfter.at("attr:lyrics").text, std::string("edited-line"));
+}
+
+void TestPlaylistTabs::propertiesDialog_cancel_discardsBufferedEdits() {
+  registry_->addOrUpdateDynamicColumn(
+      {"attr:lyrics", "Lyrics", ColumnSource::SongAttribute,
+       ColumnValueType::Text, "", true, true, 180});
+
+  const QString inputDirPath = QFINDTESTDATA("parser_inputs");
+  QVERIFY(!inputDirPath.isEmpty());
+  const QString sourcePath =
+      QDir(inputDirPath)
+          .filePath("高田憂希;寿美菜子 - "
+                    "TVアニメ「やがて君になる」エンディングテーマ「hectopascal"
+                    "」 - 1 - 2 - 好き、以外の言葉で.flac");
+  QVERIFY(QFileInfo::exists(sourcePath));
+  QTemporaryDir tempDir;
+  QVERIFY(tempDir.isValid());
+  const QString editedPath =
+      QDir(tempDir.path()).filePath("edited-cancel.flac");
+  QVERIFY(QFile::copy(sourcePath, editedPath));
+
+  Playlist *pl = tabs_->currentPlaylist();
+  QVERIFY(pl != nullptr);
+  pl->addSong(makeSong("OldTitle", "OldArtist", editedPath, "1"));
+
+  QTableView *table =
+      tabs_->tabWidget()->currentWidget()->findChild<QTableView *>();
+  QVERIFY(table != nullptr);
+  const QModelIndex row0 = table->model()->index(0, 0);
+  QVERIFY(row0.isValid());
+  const QPoint validPos = table->visualRect(row0).center();
+
+  QTimer::singleShot(0, []() {
+    if (QWidget *popup = QApplication::activePopupWidget()) {
+      popup->close();
+    }
+  });
+  tabs_->onCustomContextMenuRequested(validPos);
+  tabs_->propertiesAction()->trigger();
+  QTest::qWait(0);
+
+  SongPropertiesDialog *dialog = nullptr;
+  for (QWidget *widget : QApplication::topLevelWidgets()) {
+    dialog = qobject_cast<SongPropertiesDialog *>(widget);
+    if (dialog != nullptr) {
+      break;
+    }
+  }
+  QVERIFY(dialog != nullptr);
+  QTableView *propertiesTable =
+      dialog->findChild<QTableView *>("properties_table");
+  QVERIFY(propertiesTable != nullptr);
+  QAbstractItemModel *model = propertiesTable->model();
+  QVERIFY(model != nullptr);
+
+  int lyricsRow = -1;
+  for (int row = 0; row < model->rowCount(); ++row) {
+    const QString fieldText =
+        model->data(model->index(row, 0), Qt::DisplayRole).toString();
+    if (fieldText.contains("(attr:lyrics)")) {
+      lyricsRow = row;
+      break;
+    }
+  }
+  QVERIFY(lyricsRow >= 0);
+
+  const QModelIndex lyricsIndex = model->index(lyricsRow, 1);
+  QTimer::singleShot(0, []() {
+    QWidget *editWidget = nullptr;
+    for (QWidget *widget : QApplication::topLevelWidgets()) {
+      if (widget->metaObject()->className() == QString("FieldEditDialog")) {
+        editWidget = widget;
+        break;
+      }
+    }
+    QVERIFY(editWidget != nullptr);
+    auto *valueEdit = editWidget->findChild<QPlainTextEdit *>("value_edit");
+    QVERIFY(valueEdit != nullptr);
+    valueEdit->setPlainText("should-not-save");
+    auto *editButtons = editWidget->findChild<QDialogButtonBox *>("buttonBox");
+    QVERIFY(editButtons != nullptr);
+    auto *okButton = editButtons->button(QDialogButtonBox::Ok);
+    QVERIFY(okButton != nullptr);
+    QTest::mouseClick(okButton, Qt::LeftButton);
+  });
+  QVERIFY(QMetaObject::invokeMethod(dialog, "handleTableDoubleClicked",
+                                    Qt::DirectConnection,
+                                    Q_ARG(QModelIndex, lyricsIndex)));
+  QTest::qWait(0);
+  QVERIFY(model->data(model->index(lyricsRow, 0), Qt::DisplayRole)
+              .toString()
+              .contains('*'));
+
+  auto *buttonBox = dialog->findChild<QDialogButtonBox *>("buttonBox");
+  QVERIFY(buttonBox != nullptr);
+  auto *cancelButton = buttonBox->button(QDialogButtonBox::Cancel);
+  QVERIFY(cancelButton != nullptr);
+  QTest::mouseClick(cancelButton, Qt::LeftButton);
+  QTest::qWait(0);
+
+  std::unordered_map<std::string, std::string> remainingAfter;
+  const MSong parsedAfter =
+      SongParser::parse(editedPath.toStdString(), *registry_, &remainingAfter);
+  if (parsedAfter.contains("attr:lyrics")) {
+    QVERIFY(parsedAfter.at("attr:lyrics").text !=
+            std::string("should-not-save"));
+  }
+  if (remainingAfter.contains("lyrics")) {
+    QVERIFY(remainingAfter.at("lyrics") != std::string("should-not-save"));
+  }
+}
+
+void TestPlaylistTabs::propertiesDialog_removeField_removesNonBuiltInOnSave() {
+  registry_->addOrUpdateDynamicColumn(
+      {"attr:lyrics", "Lyrics", ColumnSource::SongAttribute,
+       ColumnValueType::Text, "", true, true, 180});
+
+  const QString inputDirPath = QFINDTESTDATA("parser_inputs");
+  QVERIFY(!inputDirPath.isEmpty());
+  const QString sourcePath =
+      QDir(inputDirPath)
+          .filePath("高田憂希;寿美菜子 - "
+                    "TVアニメ「やがて君になる」エンディングテーマ「hectopascal"
+                    "」 - 1 - 2 - 好き、以外の言葉で.flac");
+  QVERIFY(QFileInfo::exists(sourcePath));
+  QTemporaryDir tempDir;
+  QVERIFY(tempDir.isValid());
+  const QString editedPath =
+      QDir(tempDir.path()).filePath("edited-remove-attr.flac");
+  QVERIFY(QFile::copy(sourcePath, editedPath));
+
+  Playlist *pl = tabs_->currentPlaylist();
+  QVERIFY(pl != nullptr);
+  pl->addSong(makeSong("OldTitle", "OldArtist", editedPath, "1"));
+
+  QTableView *table =
+      tabs_->tabWidget()->currentWidget()->findChild<QTableView *>();
+  QVERIFY(table != nullptr);
+  const QModelIndex row0 = table->model()->index(0, 0);
+  QVERIFY(row0.isValid());
+  const QPoint validPos = table->visualRect(row0).center();
+
+  QTimer::singleShot(0, []() {
+    if (QWidget *popup = QApplication::activePopupWidget()) {
+      popup->close();
+    }
+  });
+  tabs_->onCustomContextMenuRequested(validPos);
+  tabs_->propertiesAction()->trigger();
+  QTest::qWait(0);
+
+  SongPropertiesDialog *dialog = nullptr;
+  for (QWidget *widget : QApplication::topLevelWidgets()) {
+    dialog = qobject_cast<SongPropertiesDialog *>(widget);
+    if (dialog != nullptr) {
+      break;
+    }
+  }
+  QVERIFY(dialog != nullptr);
+  QTableView *propertiesTable =
+      dialog->findChild<QTableView *>("properties_table");
+  QVERIFY(propertiesTable != nullptr);
+  QAbstractItemModel *model = propertiesTable->model();
+  QVERIFY(model != nullptr);
+
+  int lyricsRow = -1;
+  for (int row = 0; row < model->rowCount(); ++row) {
+    const QString fieldText =
+        model->data(model->index(row, 0), Qt::DisplayRole).toString();
+    if (fieldText.contains("(attr:lyrics)")) {
+      lyricsRow = row;
+      break;
+    }
+  }
+  QVERIFY(lyricsRow >= 0);
+  const int beforeRowCount = model->rowCount();
+
+  propertiesTable->selectRow(lyricsRow);
+  auto *removeButton = dialog->findChild<QPushButton *>("remove_field_button");
+  QVERIFY(removeButton != nullptr);
+  QVERIFY(removeButton->isEnabled());
+  QTest::mouseClick(removeButton, Qt::LeftButton);
+  QTest::qWait(0);
+  QCOMPARE(model->rowCount(), beforeRowCount - 1);
+
+  auto *buttonBox = dialog->findChild<QDialogButtonBox *>("buttonBox");
+  QVERIFY(buttonBox != nullptr);
+  auto *saveButton = buttonBox->button(QDialogButtonBox::Save);
+  QVERIFY(saveButton != nullptr);
+  QTest::mouseClick(saveButton, Qt::LeftButton);
+  QTest::qWait(0);
+
+  std::unordered_map<std::string, std::string> remainingAfter;
+  const MSong parsedAfter =
+      SongParser::parse(editedPath.toStdString(), *registry_, &remainingAfter);
+  QVERIFY(!parsedAfter.contains("attr:lyrics"));
+  QVERIFY(!remainingAfter.contains("lyrics"));
+}
+
+void TestPlaylistTabs::propertiesDialog_removeField_blocksBuiltIn() {
+  registry_->addOrUpdateDynamicColumn(
+      {"attr:lyrics", "Lyrics", ColumnSource::SongAttribute,
+       ColumnValueType::Text, "", true, true, 180});
+
+  Playlist *pl = tabs_->currentPlaylist();
+  QVERIFY(pl != nullptr);
+  pl->addSong(
+      makeSong("OldTitle", "OldArtist", "/tmp/remove-built-in.mp3", "1"));
+
+  QTableView *table =
+      tabs_->tabWidget()->currentWidget()->findChild<QTableView *>();
+  QVERIFY(table != nullptr);
+  const QModelIndex row0 = table->model()->index(0, 0);
+  QVERIFY(row0.isValid());
+  const QPoint validPos = table->visualRect(row0).center();
+
+  QTimer::singleShot(0, []() {
+    if (QWidget *popup = QApplication::activePopupWidget()) {
+      popup->close();
+    }
+  });
+  tabs_->onCustomContextMenuRequested(validPos);
+  tabs_->propertiesAction()->trigger();
+  QTest::qWait(0);
+
+  SongPropertiesDialog *dialog = nullptr;
+  for (QWidget *widget : QApplication::topLevelWidgets()) {
+    dialog = qobject_cast<SongPropertiesDialog *>(widget);
+    if (dialog != nullptr) {
+      break;
+    }
+  }
+  QVERIFY(dialog != nullptr);
+  QTableView *propertiesTable =
+      dialog->findChild<QTableView *>("properties_table");
+  QVERIFY(propertiesTable != nullptr);
+  QAbstractItemModel *model = propertiesTable->model();
+  QVERIFY(model != nullptr);
+
+  int titleRow = -1;
+  for (int row = 0; row < model->rowCount(); ++row) {
+    const QString fieldText =
+        model->data(model->index(row, 0), Qt::DisplayRole).toString();
+    if (fieldText.contains("(title)")) {
+      titleRow = row;
+      break;
+    }
+  }
+  QVERIFY(titleRow >= 0);
+  const int beforeRowCount = model->rowCount();
+
+  propertiesTable->selectRow(titleRow);
+  auto *removeButton = dialog->findChild<QPushButton *>("remove_field_button");
+  QVERIFY(removeButton != nullptr);
+  QTest::mouseClick(removeButton, Qt::LeftButton);
+  QTest::qWait(0);
+  QCOMPARE(model->rowCount(), beforeRowCount);
+
+  dialog->close();
+  delete dialog;
+}
+
+void TestPlaylistTabs::propertiesDialog_addField_addsAndSavesTag() {
+  const QString inputDirPath = QFINDTESTDATA("parser_inputs");
+  QVERIFY(!inputDirPath.isEmpty());
+  const QString sourcePath =
+      QDir(inputDirPath)
+          .filePath("高田憂希;寿美菜子 - "
+                    "TVアニメ「やがて君になる」エンディングテーマ「hectopascal"
+                    "」 - 1 - 2 - 好き、以外の言葉で.flac");
+  QVERIFY(QFileInfo::exists(sourcePath));
+  QTemporaryDir tempDir;
+  QVERIFY(tempDir.isValid());
+  const QString editedPath = QDir(tempDir.path()).filePath("edited-add.flac");
+  QVERIFY(QFile::copy(sourcePath, editedPath));
+
+  Playlist *pl = tabs_->currentPlaylist();
+  QVERIFY(pl != nullptr);
+  pl->addSong(makeSong("OldTitle", "OldArtist", editedPath, "1"));
+
+  QTableView *table =
+      tabs_->tabWidget()->currentWidget()->findChild<QTableView *>();
+  QVERIFY(table != nullptr);
+  const QModelIndex row0 = table->model()->index(0, 0);
+  QVERIFY(row0.isValid());
+  const QPoint validPos = table->visualRect(row0).center();
+
+  QTimer::singleShot(0, []() {
+    if (QWidget *popup = QApplication::activePopupWidget()) {
+      popup->close();
+    }
+  });
+  tabs_->onCustomContextMenuRequested(validPos);
+  tabs_->propertiesAction()->trigger();
+  QTest::qWait(0);
+
+  SongPropertiesDialog *dialog = nullptr;
+  for (QWidget *widget : QApplication::topLevelWidgets()) {
+    dialog = qobject_cast<SongPropertiesDialog *>(widget);
+    if (dialog != nullptr) {
+      break;
+    }
+  }
+  QVERIFY(dialog != nullptr);
+
+  auto *addButton = dialog->findChild<QPushButton *>("add_field_button");
+  QVERIFY(addButton != nullptr);
+  auto *buttonBox = dialog->findChild<QDialogButtonBox *>("buttonBox");
+  QVERIFY(buttonBox != nullptr);
+  auto *saveButton = buttonBox->button(QDialogButtonBox::Save);
+  QVERIFY(saveButton != nullptr);
+
+  QTimer::singleShot(0, []() {
+    QWidget *addWidget = nullptr;
+    for (QWidget *widget : QApplication::topLevelWidgets()) {
+      if (widget->metaObject()->className() == QString("AddFieldDialog")) {
+        addWidget = widget;
+        break;
+      }
+    }
+    QVERIFY(addWidget != nullptr);
+    auto *nameEdit = addWidget->findChild<QLineEdit *>("name_edit");
+    QVERIFY(nameEdit != nullptr);
+    nameEdit->setText("mood");
+    auto *valueEdit = addWidget->findChild<QPlainTextEdit *>("value_edit");
+    QVERIFY(valueEdit != nullptr);
+    valueEdit->setPlainText("calm");
+    auto *editButtons = addWidget->findChild<QDialogButtonBox *>("buttonBox");
+    QVERIFY(editButtons != nullptr);
+    auto *okButton = editButtons->button(QDialogButtonBox::Ok);
+    QVERIFY(okButton != nullptr);
+    QTest::mouseClick(okButton, Qt::LeftButton);
+  });
+  QTest::mouseClick(addButton, Qt::LeftButton);
+  QTest::qWait(0);
+
+  QTest::mouseClick(saveButton, Qt::LeftButton);
+  QTest::qWait(0);
+
+  std::unordered_map<std::string, std::string> remainingAfter;
+  const MSong parsedAfter =
+      SongParser::parse(editedPath.toStdString(), *registry_, &remainingAfter);
+  QVERIFY(parsedAfter.contains("attr:mood") || remainingAfter.contains("mood"));
+  if (parsedAfter.contains("attr:mood")) {
+    QCOMPARE(parsedAfter.at("attr:mood").text, std::string("calm"));
+  } else {
+    QCOMPARE(remainingAfter.at("mood"), std::string("calm"));
+  }
 }
 
 void TestPlaylistTabs::

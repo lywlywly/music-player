@@ -45,6 +45,9 @@ set(PROJECT_SOURCES
   addentrydialog.ui
   addentrydialog.h
   addentrydialog.cpp
+  addfielddialog.ui
+  addfielddialog.h
+  addfielddialog.cpp
   audioplayer.h
   audioplayer.cpp
   artworkutils.h
@@ -61,6 +64,9 @@ set(PROJECT_SOURCES
   databasemanager.cpp
   fieldvalue.h
   fieldvalue.cpp
+  fieldeditdialog.ui
+  fieldeditdialog.h
+  fieldeditdialog.cpp
   filesystemcomparer.h
   filesystemcomparer.cpp
   gstaudioplayer.h

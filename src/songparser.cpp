@@ -1,5 +1,4 @@
 #include "songparser.h"
-#include "columnregistry.h"
 #include "utils.h"
 #include <QDebug>
 #include <cctype>
@@ -42,6 +41,59 @@ std::string normalizeCurrentPart(std::string value) {
   return trimAscii(value.substr(0, slashPos));
 }
 } // namespace
+
+bool SongParser::writeTags(
+    const std::string &filepath,
+    const std::unordered_map<std::string, std::string> &updatedFields,
+    const ColumnRegistry &columnRegistry) {
+  if (updatedFields.empty()) {
+    return true;
+  }
+
+#ifdef _WIN32
+  int wlen = MultiByteToWideChar(CP_UTF8, 0, filepath.c_str(), -1, nullptr, 0);
+  std::wstring wpath(wlen, L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, filepath.c_str(), -1, wpath.data(), wlen);
+  TagLib::FileRef file(wpath.c_str());
+#else
+  TagLib::FileRef file(filepath.c_str());
+#endif
+  if (file.isNull() || file.file() == nullptr) {
+    qWarning() << "SongParser::writeTags failed to open file:"
+               << QString::fromStdString(filepath);
+    return false;
+  }
+
+  TagLib::PropertyMap properties = file.file()->properties();
+  for (const auto &[appKey, value] : updatedFields) {
+    if (appKey.empty()) {
+      continue;
+    }
+
+    const ColumnDefinition *definition =
+        columnRegistry.findColumn(QString::fromStdString(appKey));
+    if (definition != nullptr && definition->source == ColumnSource::Computed) {
+      continue;
+    }
+    std::string tagKey = util::canonicalizeTagKey(appKey);
+    if (tagKey.empty()) {
+      continue;
+    }
+
+    const TagLib::String propertyKey(tagKey.c_str(), TagLib::String::UTF8);
+    if (value.empty()) {
+      properties.erase(propertyKey);
+      continue;
+    }
+
+    TagLib::StringList list;
+    list.append(TagLib::String(value.c_str(), TagLib::String::UTF8));
+    properties.replace(propertyKey, list);
+  }
+
+  file.file()->setProperties(properties);
+  return file.file()->save();
+}
 
 MSong SongParser::parse(
     const std::string &filepath, const ColumnRegistry &columnRegistry,
