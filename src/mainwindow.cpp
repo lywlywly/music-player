@@ -165,7 +165,6 @@ void MainWindow::setUpPlaylist() {
   connect(playlistTabs, &PlaylistTabs::doubleClicked, [this](QModelIndex i) {
     MSong song = control.playIndex(i.row());
     playSong(song, i.row(), playlistTabs->currentPlaylist());
-    setUpImageAndLyrics(song);
   });
   // playlist operations
   connect(ui->actionOpen, &QAction::triggered, this, &MainWindow::open);
@@ -270,7 +269,9 @@ void MainWindow::playSong(const MSong &song, int row, Playlist *pl) {
   if (filepath.empty()) {
     qFatal("playSong: filepath is empty");
   }
-  const MSong &activeSong = songLibrary.refreshSongFromFile(filepath);
+  std::unordered_map<std::string, std::string> remainingFields;
+  const MSong &activeSong =
+      songLibrary.refreshSongFromFile(filepath, &remainingFields);
   resetPlayStatsSession(songPk);
   songLibrary.markSongPlayedAtStart(songPk, unixNowSeconds());
   playlistTabs->notifySongDataChangedInAllPlaylists(songPk);
@@ -281,6 +282,7 @@ void MainWindow::playSong(const MSong &song, int row, Playlist *pl) {
   sysMedia->setTitleAndArtist(
       QString::fromStdString(activeSong.at("title").text),
       QString::fromStdString(activeSong.at("artist").text));
+  setUpImageAndLyrics(activeSong, remainingFields);
   control.play();
   updatePlaybackTimeStatus();
 }
@@ -291,7 +293,7 @@ void MainWindow::next() {
     return;
 
   playSong(song, row, pl);
-  navigateIndex(song, row, pl);
+  navigateIndex(row, pl);
 }
 
 void MainWindow::prev() {
@@ -300,7 +302,7 @@ void MainWindow::prev() {
     return;
 
   playSong(song, row, pl);
-  navigateIndex(song, row, pl);
+  navigateIndex(row, pl);
 }
 
 void MainWindow::play() {
@@ -341,14 +343,39 @@ void MainWindow::stop() {
   sysMedia->setPlaybackState(ISystemMediaInterface::PlaybackState::Stopped);
 }
 
-void MainWindow::navigateIndex(MSong song, int row, Playlist *pl) {
-  playlistTabs->navigateIndex(song, row, pl);
-  setUpImageAndLyrics(song);
+void MainWindow::navigateIndex(int row, Playlist *pl) {
+  playlistTabs->navigateIndex(row, pl);
 }
 
-void MainWindow::setUpImageAndLyrics(MSong song) {
-  lyricsManager.setLyrics(
-      lyricsLoader.getLyrics(song.at("title").text, song.at("artist").text));
+void MainWindow::setUpImageAndLyrics(
+    const MSong &song,
+    const std::unordered_map<std::string, std::string> &remainingFields) {
+  std::string lyricsText;
+  for (const char *key : {"attr:unsynced_lyrics", "attr:lyrics"}) {
+    auto it = song.find(key);
+    if (it != song.end() && !it->second.text.empty()) {
+      lyricsText = it->second.text;
+      break;
+    }
+  }
+  if (lyricsText.empty()) {
+    for (const char *key : {"unsynced_lyrics", "lyrics"}) {
+      auto it = remainingFields.find(key);
+      if (it != remainingFields.end() && !it->second.empty()) {
+        lyricsText = it->second;
+        break;
+      }
+    }
+  }
+  std::map<int, std::string> lyrics;
+  if (!lyricsText.empty()) {
+    lyrics = LyricsLoader::parseLyricsText(lyricsText);
+  }
+  if (lyrics.empty()) {
+    lyrics =
+        LyricsLoader::getLyrics(song.at("title").text, song.at("artist").text);
+  }
+  lyricsManager.setLyrics(std::move(lyrics));
   auto [data, size] = SongParser::extractCoverImage(song.at("filepath").text);
   if (size > 0) {
     pixmap.loadFromData(data.data(), size);

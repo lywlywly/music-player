@@ -83,6 +83,8 @@ of `README.md`.
   * Bridge to OS media controls/metadata.
 * `LyricsLoader` / `LyricsManager`
   * Lyrics fetch + timed line updates from playback position.
+  * On play, `MainWindow` refreshes song metadata once and prefers embedded
+    lyrics from parsed tag fields; file-based `.lrc` loading is fallback.
 
 ## Core Feature Implementation Notes
 

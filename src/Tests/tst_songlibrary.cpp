@@ -72,6 +72,8 @@ private slots:
   void search_supportsComputedFields();
   void search_noMatchReturnsEmpty();
   void refreshSongFromFile_usesInjectedParserAndSyncsDb();
+  void refreshSongFromFile_populatesRemainingFields();
+  void refreshSongFromFile_customLyricsFieldsPersist();
   void refreshSongsFromFilepaths_dedupesAndReportsProgress();
   void registerQuery_tracksLaterInsertions();
   void queryHelpers_skipEmptySongSlots();
@@ -718,7 +720,8 @@ void TestSongLibrary::refreshSongFromFile_usesInjectedParserAndSyncsDb() {
   std::string parsedPath;
   SongLibrary localLibrary(
       *registry_, *databaseManager_,
-      [&](const std::string &path, const ColumnRegistry &) -> MSong {
+      [&](const std::string &path, const ColumnRegistry &,
+          std::unordered_map<std::string, std::string> *) -> MSong {
         ++parseCallCount;
         parsedPath = path;
         MSong parsed =
@@ -769,7 +772,8 @@ void TestSongLibrary::refreshSongsFromFilepaths_dedupesAndReportsProgress() {
   std::vector<std::string> parsedPaths;
   SongLibrary localLibrary(
       *registry_, *databaseManager_,
-      [&](const std::string &path, const ColumnRegistry &) -> MSong {
+      [&](const std::string &path, const ColumnRegistry &,
+          std::unordered_map<std::string, std::string> *) -> MSong {
         ++parseCallCount;
         parsedPaths.push_back(path);
         return makeSong(QString::fromStdString("Refreshed:" + path), "Artist",
@@ -799,6 +803,83 @@ void TestSongLibrary::refreshSongsFromFilepaths_dedupesAndReportsProgress() {
            std::string("Refreshed:/tmp/refresh-list-a.mp3"));
   QCOMPARE(localLibrary.getSongByPK(idB).at("title").text,
            std::string("Refreshed:/tmp/refresh-list-b.mp3"));
+}
+
+void TestSongLibrary::refreshSongFromFile_populatesRemainingFields() {
+  bool sawNullRemaining = false;
+  bool sawProvidedRemaining = false;
+  SongLibrary localLibrary(
+      *registry_, *databaseManager_,
+      [&](const std::string &path, const ColumnRegistry &,
+          std::unordered_map<std::string, std::string> *remainingFields)
+          -> MSong {
+        if (remainingFields) {
+          sawProvidedRemaining = true;
+          (*remainingFields)["unsynced_lyrics"] = "[00:01.00]embedded";
+        } else {
+          sawNullRemaining = true;
+        }
+        return makeSong("Loaded", "Artist", QString::fromStdString(path));
+      });
+
+  localLibrary.loadSongFromFile("/tmp/embedded-off.mp3");
+  QVERIFY(sawNullRemaining);
+  QVERIFY(!sawProvidedRemaining);
+
+  const std::string path = "/tmp/embedded-on.mp3";
+  localLibrary.addTolibrary(
+      makeSong("Old", "Artist", QString::fromStdString(path)));
+  std::unordered_map<std::string, std::string> remainingFields;
+  localLibrary.refreshSongFromFile(path, &remainingFields);
+  QVERIFY(sawProvidedRemaining);
+  QCOMPARE(remainingFields.at("unsynced_lyrics"),
+           std::string("[00:01.00]embedded"));
+}
+
+void TestSongLibrary::refreshSongFromFile_customLyricsFieldsPersist() {
+  registry_->addOrUpdateDynamicColumn(
+      {"attr:unsynced_lyrics", "Unsynced Lyrics", ColumnSource::SongAttribute,
+       ColumnValueType::Text, "", true, false, 200});
+  registry_->addOrUpdateDynamicColumn(
+      {"attr:lyrics", "Lyrics", ColumnSource::SongAttribute,
+       ColumnValueType::Text, "", true, false, 200});
+
+  SongLibrary localLibrary(
+      *registry_, *databaseManager_,
+      [&](const std::string &path, const ColumnRegistry &,
+          std::unordered_map<std::string, std::string> *remainingFields)
+          -> MSong {
+        if (remainingFields) {
+          (*remainingFields)["unsynced_lyrics"] = "[00:00.50]from-tag";
+        }
+        MSong parsed =
+            makeSong("Refreshed", "Artist", QString::fromStdString(path));
+        parsed["attr:unsynced_lyrics"] =
+            FieldValue("big text", ColumnValueType::Text);
+        parsed["attr:lyrics"] =
+            FieldValue("fallback text", ColumnValueType::Text);
+        return parsed;
+      });
+
+  const std::string path = "/tmp/embedded-refresh.mp3";
+  localLibrary.addTolibrary(
+      makeSong("Old", "Artist", QString::fromStdString(path)));
+
+  std::unordered_map<std::string, std::string> remainingFields;
+  const MSong &refreshed =
+      localLibrary.refreshSongFromFile(path, &remainingFields);
+  QCOMPARE(remainingFields.at("unsynced_lyrics"),
+           std::string("[00:00.50]from-tag"));
+  QVERIFY(refreshed.contains("attr:unsynced_lyrics"));
+  QVERIFY(refreshed.contains("attr:lyrics"));
+  QCOMPARE(refreshed.at("attr:unsynced_lyrics").text, std::string("big text"));
+  QCOMPARE(refreshed.at("attr:lyrics").text, std::string("fallback text"));
+
+  QSqlQuery q(databaseManager_->db());
+  QVERIFY(q.exec("SELECT COUNT(*) FROM song_attributes WHERE key IN "
+                 "('unsynced_lyrics', 'lyrics')"));
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toInt(), 2);
 }
 
 void TestSongLibrary::registerQuery_tracksLaterInsertions() {

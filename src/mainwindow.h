@@ -15,6 +15,7 @@
 #include "playlisttabs.h"
 #include "songlibrary.h"
 #include <QMainWindow>
+#include <unordered_map>
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -39,7 +40,9 @@ private:
   void statusChanged(QMediaPlayer::MediaStatus status);
   void updatePlaybackTimeStatus();
   void updateImageSize();
-  void setUpImageAndLyrics(MSong song);
+  void setUpImageAndLyrics(
+      const MSong &song,
+      const std::unordered_map<std::string, std::string> &remainingFields);
   void open();
   void openFolder();
   void seek(int mseconds);
@@ -51,7 +54,7 @@ private:
   void toggle();
   void stop();
   void playSong(const MSong &, int row, Playlist *pl);
-  void navigateIndex(MSong song, int, Playlist *);
+  void navigateIndex(int row, Playlist *);
   void setUpSplitter();
   void setUpLyricsPanel();
   void setupSystemMediaInterface();
@@ -80,7 +83,6 @@ private:
   DatabaseManager databaseManager_;
   SongLibrary songLibrary;
   PlaylistTabs *playlistTabs;
-  LyricsLoader lyricsLoader;   // TODO: use value type
   LyricsManager lyricsManager; // TODO: use value type
   QPixmap pixmap;
   QActionGroup *playbackOrderMenuActionGroup;

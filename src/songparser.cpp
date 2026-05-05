@@ -43,8 +43,9 @@ std::string normalizeCurrentPart(std::string value) {
 }
 } // namespace
 
-MSong SongParser::parse(const std::string &filepath,
-                        const ColumnRegistry &columnRegistry) {
+MSong SongParser::parse(
+    const std::string &filepath, const ColumnRegistry &columnRegistry,
+    std::unordered_map<std::string, std::string> *remainingFields) {
 #ifdef _WIN32
   // convert UTF-8 std::string → UTF-16 std::wstring
   int wlen = MultiByteToWideChar(CP_UTF8, 0, filepath.c_str(), -1, nullptr, 0);
@@ -58,6 +59,9 @@ MSong SongParser::parse(const std::string &filepath,
   TagLib::FileRef file(filepath.c_str());
 #endif
   MSong tags;
+  if (remainingFields) {
+    remainingFields->clear();
+  }
 
   if (!file.isNull() && file.file()) {
     const TagLib::PropertyMap properties = file.file()->properties();
@@ -88,6 +92,8 @@ MSong SongParser::parse(const std::string &filepath,
           tags[columnId.toStdString()] =
               FieldValue(value, definition ? definition->valueType
                                            : ColumnValueType::Text);
+        } else if (remainingFields) {
+          (*remainingFields)[key] = value;
         }
       }
     }

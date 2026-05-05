@@ -1,42 +1,28 @@
 #include "lyricsloader.h"
 #include "utils.h"
 
-#include <QDebug>
-#include <QTextStream>
+#include <filesystem>
 #include <format>
 #include <fstream>
 #include <iostream>
 #include <regex>
+#include <sstream>
 
-LyricsLoader::LyricsLoader() {}
-
-void testTmp(const std::string &) {}
-void testTmp(const std::string &&) = delete;
-
-std::map<int, std::string> LyricsLoader::getLyrics(std::string_view title,
-                                                   std::string_view artist) {
-  std::ifstream file(findFileByTitleAndArtist(title, artist));
+namespace {
+std::map<int, std::string> parseLyricsStream(std::istream &stream) {
   std::map<int, std::string> lyricsMap;
-  std::map<std::string, std::string> metadata;
-
-  if (!file.is_open()) {
-    std::cerr << "Could not open lyrics file.\n";
-    return lyricsMap;
-  }
-
   std::regex patternMetadata(R"(\[([a-zA-Z]+):(.*)\])");
   std::regex patternTime(R"(\[(.*?)\])");
   std::regex patternText(R"(\]([^\[\]]*)$)");
 
   std::string line;
-  while (std::getline(file, line)) {
+  while (std::getline(stream, line)) {
     if (!line.empty() && line.back() == '\r') {
-      line.pop_back(); // Remove carriage return from CRLF lines
+      line.pop_back();
     }
 
     std::smatch matchMetadata;
     if (std::regex_search(line, matchMetadata, patternMetadata)) {
-      metadata[matchMetadata.str(1)] = matchMetadata.str(2);
       continue;
     }
 
@@ -52,7 +38,6 @@ std::map<int, std::string> LyricsLoader::getLyrics(std::string_view title,
             (minutes * 60 + seconds) * 1000 + static_cast<int>(fraction * 10);
         timeStamps.push_back(totalMs);
       } catch (...) {
-        // Handle malformed timestamps gracefully
         continue;
       }
     }
@@ -69,9 +54,25 @@ std::map<int, std::string> LyricsLoader::getLyrics(std::string_view title,
   return lyricsMap;
 }
 
-std::filesystem::path
-LyricsLoader::findFileByTitleAndArtist(std::string_view title,
-                                       std::string_view artist) {
+std::filesystem::path findFileByTitleAndArtist(std::string_view title,
+                                               std::string_view artist) {
   std::string filename = std::format("{} - {}.lrc", artist, title);
   return util::getHomePath() / "Music" / filename;
+}
+} // namespace
+
+std::map<int, std::string> LyricsLoader::getLyrics(std::string_view title,
+                                                   std::string_view artist) {
+  std::ifstream file(findFileByTitleAndArtist(title, artist));
+  if (!file.is_open()) {
+    std::cerr << "Could not open lyrics file.\n";
+    return {};
+  }
+  return parseLyricsStream(file);
+}
+
+std::map<int, std::string>
+LyricsLoader::parseLyricsText(std::string_view rawText) {
+  std::istringstream stream{std::string(rawText)};
+  return parseLyricsStream(stream);
 }

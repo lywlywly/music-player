@@ -7,7 +7,6 @@ class TestLyrics : public QObject {
   Q_OBJECT
 public:
   explicit TestLyrics(QObject *parent = nullptr);
-  LyricsLoader lyricsHandler;
 
 signals:
 private slots:
@@ -21,7 +20,7 @@ TestLyrics::TestLyrics(QObject *parent) : QObject{parent} {}
 
 void TestLyrics::testLoadLyricsFile1() {
   std::map<int, std::string> lyricsMap =
-      lyricsHandler.getLyrics("みちしるべ", "茅原実里");
+      LyricsLoader::getLyrics("みちしるべ", "茅原実里");
   auto it = lyricsMap.begin();
   std::advance(it, 0);
   QCOMPARE(it->first, 0);
@@ -50,7 +49,7 @@ void TestLyrics::testLoadLyricsFile1() {
 
 void TestLyrics::testLoadLyricsFile2() {
   std::map<int, std::string> lyricsMap =
-      lyricsHandler.getLyrics("社会距離", "40mP feat. 可不");
+      LyricsLoader::getLyrics("社会距離", "40mP feat. 可不");
   auto it = lyricsMap.begin();
   std::advance(it, 0);
   QCOMPARE(it->second, " 作词 : 40mP");
@@ -60,7 +59,7 @@ void TestLyrics::testLoadLyricsFile2() {
 
 void TestLyrics::testLoadLyricsFile3() {
   std::map<int, std::string> lyricsMap =
-      lyricsHandler.getLyrics("海阔天空", "BEYOND");
+      LyricsLoader::getLyrics("海阔天空", "BEYOND");
   auto it = lyricsMap.begin();
   std::advance(it, 1);
   QCOMPARE(it->second, "词：黄家驹");

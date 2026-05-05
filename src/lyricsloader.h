@@ -1,19 +1,14 @@
 #ifndef LYRICSLOADER_H
 #define LYRICSLOADER_H
 
-#include <filesystem>
 #include <map>
 #include <string>
+#include <string_view>
 
-class LyricsLoader {
-public:
-  explicit LyricsLoader();
-  std::map<int, std::string> getLyrics(std::string_view title,
-                                       std::string_view artist);
-
-private:
-  std::filesystem::path findFileByTitleAndArtist(std::string_view title,
-                                                 std::string_view artist);
-};
+namespace LyricsLoader {
+std::map<int, std::string> getLyrics(std::string_view title,
+                                     std::string_view artist);
+std::map<int, std::string> parseLyricsText(std::string_view rawText);
+} // namespace LyricsLoader
 
 #endif // LYRICSLOADER_H

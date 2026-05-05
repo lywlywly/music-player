@@ -174,7 +174,8 @@ void TestPlaylist::refreshMetadataFromFiles_updatesSongsAndReportsProgress() {
   int parseCallCount = 0;
   SongLibrary localLibrary(
       *registry_, *databaseManager_,
-      [&](const std::string &path, const ColumnRegistry &) -> MSong {
+      [&](const std::string &path, const ColumnRegistry &,
+          std::unordered_map<std::string, std::string> *) -> MSong {
         ++parseCallCount;
         if (path == "/tmp/pl-refresh-a.mp3") {
           return makeSong("Refreshed A", "Artist A2",

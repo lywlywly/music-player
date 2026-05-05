@@ -218,8 +218,7 @@ void TestPlaylistTabs::navigateIndex_selectsTargetRow() {
   pl->addSong(makeSong("A", "Artist", "/tmp/pt-nav-a.mp3", "1"));
   pl->addSong(makeSong("B", "Artist", "/tmp/pt-nav-b.mp3", "2"));
 
-  const MSong &song = pl->getSongByIndex(1);
-  tabs_->navigateIndex(song, 1, pl);
+  tabs_->navigateIndex(1, pl);
 
   QTableView *table =
       tabs_->tabWidget()->currentWidget()->findChild<QTableView *>();

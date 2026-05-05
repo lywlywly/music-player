@@ -821,7 +821,23 @@ void SongLibrary::upsertComputedFieldValueInDb(
   }
 }
 
-const MSong &SongLibrary::refreshSongFromFile(const std::string &path) {
+MSong SongLibrary::loadPreparedSongFromFile(
+    const std::string &path,
+    std::unordered_map<std::string, std::string> *remainingFields) const {
+#ifdef MYPLAYER_TESTING
+  MSong parsed = parseSong_(path, columnRegistry_, remainingFields);
+#else
+  MSong parsed = SongParser::parse(path, columnRegistry_, remainingFields);
+#endif
+  evaluateComputedFieldsInSong(parsed, columnRegistry_);
+  parsed["song_identity_key"] =
+      FieldValue(songIdentityKeyFromSong(parsed), ColumnValueType::Text);
+  return parsed;
+}
+
+const MSong &SongLibrary::refreshSongFromFile(
+    const std::string &path,
+    std::unordered_map<std::string, std::string> *remainingFields) {
   if (path.empty()) {
     qFatal("refreshSongFromFile: filepath is empty");
   }
@@ -837,7 +853,7 @@ const MSong &SongLibrary::refreshSongFromFile(const std::string &path) {
            path.c_str());
   }
 
-  MSong parsed = loadSongFromFile(path);
+  MSong parsed = loadPreparedSongFromFile(path, remainingFields);
   syncBuiltInFieldsBySongId(songId, parsed);
   syncDynamicAttributesBySongId(songId, parsed);
   syncComputedValuesBySongId(songId, parsed);
@@ -845,15 +861,7 @@ const MSong &SongLibrary::refreshSongFromFile(const std::string &path) {
 }
 
 MSong SongLibrary::loadSongFromFile(const std::string &path) const {
-#ifdef MYPLAYER_TESTING
-  MSong parsed = parseSong_(path, columnRegistry_);
-#else
-  MSong parsed = SongParser::parse(path, columnRegistry_);
-#endif
-  evaluateComputedFieldsInSong(parsed, columnRegistry_);
-  parsed["song_identity_key"] =
-      FieldValue(songIdentityKeyFromSong(parsed), ColumnValueType::Text);
-  return parsed;
+  return loadPreparedSongFromFile(path, nullptr);
 }
 
 void SongLibrary::refreshSongsFromFilepaths(

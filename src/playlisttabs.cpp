@@ -66,7 +66,7 @@ void PlaylistTabs::setUpPlaylist() {
   initializePlaylists();
 }
 
-void PlaylistTabs::navigateIndex(MSong, int row, Playlist *pl) {
+void PlaylistTabs::navigateIndex(int row, Playlist *pl) {
   int tabIdx = -1;
   for (int i = 0; i < ui->tabWidget->count(); ++i) {
     Playlist *playlist = playlistForTabIndex(i);

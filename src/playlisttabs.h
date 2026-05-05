@@ -44,7 +44,7 @@ public:
   void createNewPlaylistTabFromSongIds(const QList<int> &songIds);
   bool renamePlaylistTabByIndex(int index, const QString &newName);
   void setUpTableView(Playlist *, QTableView *);
-  void navigateIndex(MSong, int row, Playlist *pl);
+  void navigateIndex(int row, Playlist *pl);
   // Emits row data-changed notifications for this songPk in every playlist
   // model. This is a UI/model refresh signal path and does not mutate song
   // data.
