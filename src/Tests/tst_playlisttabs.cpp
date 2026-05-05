@@ -50,11 +50,13 @@ QActionGroup *makePlaybackOrderGroup(QObject *parent = nullptr) {
 
   QAction *defaultAction = new QAction("Default", group);
   defaultAction->setCheckable(true);
+  defaultAction->setData(Policy::Sequential);
   defaultAction->setChecked(true);
   group->addAction(defaultAction);
 
   QAction *shuffleAction = new QAction("Shuffle (tracks)", group);
   shuffleAction->setCheckable(true);
+  shuffleAction->setData(Policy::Shuffle);
   group->addAction(shuffleAction);
   return group;
 }
@@ -197,9 +199,10 @@ void TestPlaylistTabs::init_persistsDefaultPlaylistMetadataRow() {
 }
 
 void TestPlaylistTabs::helperMethods_mapAndFindPlaylist() {
-  QCOMPARE(tabs_->string2Policy("Default"), Policy::Sequential);
-  QCOMPARE(tabs_->string2Policy("Shuffle (tracks)"), Policy::Shuffle);
-  QVERIFY_THROWS_EXCEPTION(std::logic_error, tabs_->string2Policy("invalid"));
+  QAction *defaultAction = playbackOrderGroup_->actions().at(0);
+  QAction *shuffleAction = playbackOrderGroup_->actions().at(1);
+  QCOMPARE(defaultAction->data().toInt(), static_cast<int>(Policy::Sequential));
+  QCOMPARE(shuffleAction->data().toInt(), static_cast<int>(Policy::Shuffle));
 
   Playlist *pl = tabs_->currentPlaylist();
   QVERIFY(pl != nullptr);

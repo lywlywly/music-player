@@ -117,6 +117,7 @@ private slots:
   void playlistTableBackspace_removesSelectedRow();
   void queueActions_fromContextMenu_areWired();
   void playbackOrderMenuActions_areExclusive();
+  void playbackOrderMenuActions_persistToSettings();
   void librarySearchAction_opensDialog();
   void librarySearchDialog_canCreateNewPlaylistTabFromResults();
   void playStats_seekToEndWithoutListenDoesNotCount();
@@ -477,6 +478,30 @@ void TestMainWindow::playbackOrderMenuActions_areExclusive() {
     c.trigger->trigger();
     QTRY_VERIFY(c.checked->isChecked());
     QVERIFY(!c.unchecked->isChecked());
+  }
+}
+
+void TestMainWindow::playbackOrderMenuActions_persistToSettings() {
+  QAction *defaultAction = window_->findChild<QAction *>("actionDefault");
+  QAction *shuffleAction =
+      window_->findChild<QAction *>("actionShuffle_tracks");
+  QVERIFY(defaultAction != nullptr);
+  QVERIFY(shuffleAction != nullptr);
+
+  shuffleAction->trigger();
+  QTRY_VERIFY(shuffleAction->isChecked());
+  {
+    QSettings settings;
+    QCOMPARE(settings.value("playback/order_action").toString(),
+             QString("actionShuffle_tracks"));
+  }
+
+  defaultAction->trigger();
+  QTRY_VERIFY(defaultAction->isChecked());
+  {
+    QSettings settings;
+    QCOMPARE(settings.value("playback/order_action").toString(),
+             QString("actionDefault"));
   }
 }
 

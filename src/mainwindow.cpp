@@ -117,11 +117,34 @@ void MainWindow::setupSystemMediaInterface() {
 void MainWindow::setUpMenuBar() {
   playbackOrderMenuActionGroup = new QActionGroup(this);
   playbackOrderMenuActionGroup->setExclusive(true);
-  for (QAction *act : {ui->actionDefault, ui->actionShuffle_tracks}) {
+  ui->actionDefault->setData(Sequential);
+  ui->actionShuffle_tracks->setData(Shuffle);
+  const QList<QAction *> playbackOrderActions = {ui->actionDefault,
+                                                 ui->actionShuffle_tracks};
+  for (QAction *act : playbackOrderActions) {
     act->setCheckable(true);
     playbackOrderMenuActionGroup->addAction(act);
   }
-  ui->actionDefault->setChecked(true);
+
+  QSettings settings;
+  const QString savedPlaybackOrder =
+      settings.value("playback/order_action", "actionDefault").toString();
+  QAction *actionToCheck = ui->actionDefault;
+  for (QAction *act : playbackOrderActions) {
+    if (act->objectName() == savedPlaybackOrder) {
+      actionToCheck = act;
+      break;
+    }
+  }
+  actionToCheck->setChecked(true);
+
+  // TODO: extract menu/settings persistence wiring to a settings coordinator.
+  connect(playbackOrderMenuActionGroup, &QActionGroup::triggered, this,
+          [](QAction *action) {
+            QSettings settings;
+            settings.setValue("playback/order_action", action->objectName());
+          });
+
   connect(ui->actionSearch, &QAction::triggered, this,
           &MainWindow::openLibrarySearchDialog);
   connect(ui->actionManual_cloud_rebase, &QAction::triggered, this,

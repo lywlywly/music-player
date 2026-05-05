@@ -109,10 +109,8 @@ void PlaylistTabs::notifySongDataChangedInAllPlaylists(int songPk) {
 
 void PlaylistTabs::setUpPlaybackManager() {
   connect(playbackOrderMenuActionGroup, &QActionGroup::triggered, this,
-          [this](QAction *) {
-            QAction *checked = playbackOrderMenuActionGroup->checkedAction();
-            QString selectedText = checked->text();
-            control->setPolicy(string2Policy(selectedText));
+          [this](QAction *action) {
+            control->setPolicy(static_cast<Policy>(action->data().toInt()));
           });
   connect(playNextAction_, &QAction::triggered, this, [this]() {
     QModelIndex index = playNextAction_->data().value<QModelIndex>();
@@ -187,10 +185,9 @@ void PlaylistTabs::onTabChanged(int index) {
 }
 
 void PlaylistTabs::setUpCurrentPlaylist() {
-  control->setView(currentPlaylist_);
-  QAction *checked = playbackOrderMenuActionGroup->checkedAction();
-  QString selectedText = checked->text();
-  control->setPolicy(string2Policy(selectedText));
+  Q_ASSERT(currentPlaylist_ != nullptr);
+  control->setView(*currentPlaylist_);
+  control->setPolicy(selectedPlaybackPolicy());
 }
 
 void PlaylistTabs::initializePlaylists() {
@@ -350,14 +347,6 @@ QString PlaylistTabs::getNewPlaylistName() {
   }
 }
 
-Policy PlaylistTabs::string2Policy(QString s) {
-  if (s == "Default")
-    return Policy::Sequential;
-  else if (s == "Shuffle (tracks)")
-    return Policy::Shuffle;
-  throw std::logic_error("Never");
-}
-
 std::string PlaylistTabs::findPlaylistName(Playlist *pl) {
   for (int i = 0; i < ui->tabWidget->count(); ++i) {
     if (playlistForTabIndex(i) == pl) {
@@ -443,6 +432,11 @@ void PlaylistTabs::commitInlineRename() {
 void PlaylistTabs::cancelInlineRename() {
   renamingTabIndex_ = -1;
   tabRenameEditor_->hide();
+}
+
+Policy PlaylistTabs::selectedPlaybackPolicy() const {
+  return static_cast<Policy>(
+      playbackOrderMenuActionGroup->checkedAction()->data().toInt());
 }
 
 QAction *PlaylistTabs::playNextAction() const { return playNextAction_; }

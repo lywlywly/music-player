@@ -96,7 +96,7 @@ void TestPlaybackManager::playIndex_setsCurrentAndLastPlayed() {
   store.addSong(makeSong("S2", "Artist", "/tmp/pm-playindex-2.mp3", "2"));
   Playlist playlist(std::move(store), *queue_, 1, *layout_);
 
-  manager_->setView(&playlist);
+  manager_->setView(playlist);
   manager_->setPolicy(Sequential);
 
   const MSong &song = manager_->playIndex(1);
@@ -115,7 +115,7 @@ void TestPlaybackManager::next_prefersQueuedSongsThenFallsBackToPolicy() {
   store.addSong(makeSong("S3", "Artist", "/tmp/pm-next-3.mp3", "3"));
   Playlist playlist(std::move(store), *queue_, 1, *layout_);
 
-  manager_->setView(&playlist);
+  manager_->setView(playlist);
   manager_->setPolicy(Sequential);
   manager_->playIndex(0);
 
@@ -145,7 +145,7 @@ void TestPlaybackManager::prev_wrapsToLastInSequentialPolicy() {
   store.addSong(makeSong("S3", "Artist", "/tmp/pm-prev-3.mp3", "3"));
   Playlist playlist(std::move(store), *queue_, 1, *layout_);
 
-  manager_->setView(&playlist);
+  manager_->setView(playlist);
   manager_->setPolicy(Sequential);
   manager_->playIndex(0);
 
@@ -160,7 +160,7 @@ void TestPlaybackManager::playPauseStop_updatesPlaybackQueueState() {
   store.addSong(makeSong("S1", "Artist", "/tmp/pm-state-1.mp3", "1"));
   Playlist playlist(std::move(store), *queue_, 1, *layout_);
 
-  manager_->setView(&playlist);
+  manager_->setView(playlist);
   manager_->setPolicy(Sequential);
   manager_->playIndex(0);
 

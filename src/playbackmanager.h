@@ -9,6 +9,9 @@
 enum Policy { Sequential, Shuffle };
 
 // Operations on song switching, abstract layer over `PlaybackQueue`
+// call `setView(Playlist&)` with a valid playlist before using playback
+// operations (`playIndex`, `next`, `prev`, queue operations) or changing
+// policy.
 class PlaybackManager : public QObject {
   Q_OBJECT
 public:
@@ -29,15 +32,18 @@ public:
   void queueStart(int);
   // add to queue (cursor)
   void enqueueWeak(int);
-  void setView(Playlist *);
+  void setView(Playlist &);
   void setPolicy(Policy);
+  Policy currentPolicy() const;
   PlaybackQueue::PlaybackStatus getStatus();
 
 private:
+  void syncPolicyContext();
   // const Playlist *playlist;
-  Playlist *playlist;
+  Playlist *playlist = nullptr;
   PlaybackQueue &queue;
   std::unique_ptr<PlaybackPolicy> policy;
+  Policy currentPolicy_ = Sequential;
   int candidateWeak = -1;
 };
 

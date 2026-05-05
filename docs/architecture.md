@@ -51,6 +51,7 @@ of `README.md`.
   * Current song pointer + explicit queued songs.
 * `PlaybackManager`
   * Playback policy orchestration (`next/prev/play/pause/stop`) on top of `PlaybackQueue` + active `Playlist`.
+  * Requires `setView(Playlist&)` with a valid playlist before playback/policy operations.
 * `PlaybackBackendManager`
   * Runtime backend owner/switcher (`QMediaPlayer` or `GStreamer`).
   * Manages GLib loop thread for GStreamer on macOS/Windows.

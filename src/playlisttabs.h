@@ -34,7 +34,6 @@ public:
   void onCustomContextMenuRequested(const QPoint &pos);
   void onTabContextMenuRequested(const QPoint &pos);
   QString getNewPlaylistName();
-  Policy string2Policy(QString);
   std::string findPlaylistName(Playlist *);
   int findPlaylistIndex(QString);
   bool removePlaylistTabByIndex(int index);
@@ -87,6 +86,7 @@ private:
   void beginInlineRename(int index);
   void commitInlineRename();
   void cancelInlineRename();
+  Policy selectedPlaybackPolicy() const;
   void applyLayoutToTableView(QTableView *tbv);
   void persistVisibleOrder(QTableView *tbv);
   void showHeaderColumnsMenu(QTableView *tbv, const QPoint &pos);

@@ -1,12 +1,16 @@
 #include "playbackmanager.h"
 #include "playbackpolicysequential.h"
 #include "playbackpolicyshuffle.h"
-#include <QDebug>
+#include <QtGlobal>
 
 PlaybackManager::PlaybackManager(PlaybackQueue &q, QObject *parent)
-    : queue{q}, QObject{parent} {}
+    : queue{q}, QObject{parent} {
+  policy = std::make_unique<PlaybackPolicySequential>();
+  currentPolicy_ = Sequential;
+}
 
 const MSong &PlaybackManager::playIndex(int currentIndex) {
+  Q_ASSERT(playlist != nullptr);
   int pk = playlist->getPkByIndex(currentIndex);
   policy->setCurrentPk(pk);
   queue.setCurrentId(pk, playlist);
@@ -15,6 +19,7 @@ const MSong &PlaybackManager::playIndex(int currentIndex) {
 }
 
 std::tuple<const MSong &, int, Playlist *> PlaybackManager::next() {
+  Q_ASSERT(playlist != nullptr);
   int pk;
   Playlist *pl;
 
@@ -37,6 +42,7 @@ std::tuple<const MSong &, int, Playlist *> PlaybackManager::next() {
 }
 
 std::tuple<const MSong &, int, Playlist *> PlaybackManager::prev() {
+  Q_ASSERT(playlist != nullptr);
   int pk = policy->prevPk();
 
   if (pk < 0) {
@@ -63,18 +69,29 @@ void PlaybackManager::stop() {
 }
 
 void PlaybackManager::queueEnd(int currentIndex) {
+  Q_ASSERT(playlist != nullptr);
   queue.addLast(playlist->getPkByIndex(currentIndex), playlist);
 }
 
 void PlaybackManager::queueStart(int currentIndex) {
+  Q_ASSERT(playlist != nullptr);
   queue.addNext(playlist->getPkByIndex(currentIndex), playlist);
 }
 
 void PlaybackManager::enqueueWeak(int i) { candidateWeak = i; }
 
-void PlaybackManager::setView(Playlist *view) { playlist = view; }
+void PlaybackManager::setView(Playlist &view) {
+  playlist = &view;
+  syncPolicyContext();
+}
 
 void PlaybackManager::setPolicy(Policy policyEnum) {
+  if (currentPolicy_ == policyEnum) {
+    syncPolicyContext();
+    return;
+  }
+  currentPolicy_ = policyEnum;
+
   switch (policyEnum) {
   case Sequential:
     policy = std::make_unique<PlaybackPolicySequential>();
@@ -83,13 +100,18 @@ void PlaybackManager::setPolicy(Policy policyEnum) {
     policy = std::make_unique<PlaybackPolicyShuffle>();
     break;
   }
+  syncPolicyContext();
+}
 
+Policy PlaybackManager::currentPolicy() const { return currentPolicy_; }
+
+void PlaybackManager::syncPolicyContext() {
+  Q_ASSERT(playlist != nullptr);
   policy->setPlaylist(playlist);
-
-  // notify PlaybackPolicy current song
   const auto &[curPk, curPl] = queue.getCurrentPk();
-  if (curPl == playlist)
+  if (curPl == playlist) {
     policy->setCurrentPk(curPk);
+  }
 }
 
 PlaybackQueue::PlaybackStatus PlaybackManager::getStatus() {
