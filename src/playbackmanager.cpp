@@ -3,6 +3,13 @@
 #include "playbackpolicyshuffle.h"
 #include <QtGlobal>
 
+namespace {
+const MSong &emptySongRef() {
+  static const MSong emptySong;
+  return emptySong;
+}
+} // namespace
+
 PlaybackManager::PlaybackManager(PlaybackQueue &q, QObject *parent)
     : queue{q}, QObject{parent} {
   policy = std::make_unique<PlaybackPolicySequential>();
@@ -36,7 +43,7 @@ std::tuple<const MSong &, int, Playlist *> PlaybackManager::next() {
 
   if (pk < 0) {
     queue.setCurrentId(-1, nullptr);
-    return {{}, -1, pl};
+    return {emptySongRef(), -1, pl};
   }
 
   int row = pk < 0 ? -1 : pl->getIndexByPk(pk);
@@ -51,7 +58,7 @@ std::tuple<const MSong &, int, Playlist *> PlaybackManager::prev() {
   int pk = policy->prevPk();
 
   if (pk < 0) {
-    return {{}, -1, playlist};
+    return {emptySongRef(), -1, playlist};
   }
 
   queue.setCurrentId(pk, playlist);
