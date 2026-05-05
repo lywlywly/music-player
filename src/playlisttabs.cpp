@@ -6,6 +6,7 @@
 #include <QHeaderView>
 #include <QKeyEvent>
 #include <QProgressDialog>
+#include <QSettings>
 #include <QSignalBlocker>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -182,6 +183,8 @@ void PlaylistTabs::onTabChanged(int index) {
   currentTableView = tab->findChild<QTableView *>();
 
   setUpCurrentPlaylist();
+  QSettings settings;
+  settings.setValue("playlist/last_opened_id", playlistIdForTabIndex(index));
 }
 
 void PlaylistTabs::setUpCurrentPlaylist() {
@@ -207,9 +210,19 @@ void PlaylistTabs::initializePlaylists() {
     for (const PlaylistDefinition &definition : definitions) {
       addPlaylistTab(definition.name, definition.playlistId);
     }
-    ui->tabWidget->setCurrentIndex(0);
+    QSettings settings;
+    const int lastOpenedPlaylistId =
+        settings.value("playlist/last_opened_id", -1).toInt();
+    int restoredIndex = 0;
+    for (int i = 0; i < ui->tabWidget->count(); ++i) {
+      if (playlistIdForTabIndex(i) == lastOpenedPlaylistId) {
+        restoredIndex = i;
+        break;
+      }
+    }
+    ui->tabWidget->setCurrentIndex(restoredIndex);
   }
-  onTabChanged(0);
+  onTabChanged(ui->tabWidget->currentIndex());
   persistPlaylistTabOrder();
 }
 

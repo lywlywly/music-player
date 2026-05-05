@@ -120,6 +120,7 @@ private slots:
   void createNewPlaylistTabFromSongIds_createsTabAndCopiesSongs();
   void createNewPlaylistTabFromSongIds_emptyNoop();
   void startupRestore_loadsAllPlaylistsInSavedOrder();
+  void startupRestore_restoresLastOpenedPlaylistTab();
   void startupRestore_recoversCorruptedTabOrder();
   void removeTab_deletesNonDefaultPlaylist();
   void removeTab_rejectsWhenSingleTab();
@@ -325,6 +326,26 @@ void TestPlaylistTabs::startupRestore_loadsAllPlaylistsInSavedOrder() {
   QCOMPARE(tabs_->tabWidget()->tabBar()->tabData(0).toInt(), 1);
   QCOMPARE(tabs_->tabWidget()->tabBar()->tabData(1).toInt(), playlistB);
   QCOMPARE(tabs_->tabWidget()->tabBar()->tabData(2).toInt(), playlistA);
+}
+
+void TestPlaylistTabs::startupRestore_restoresLastOpenedPlaylistTab() {
+  const int playlistA = insertPlaylistRow(databaseManager_->db(), "A", 1);
+  const int playlistB = insertPlaylistRow(databaseManager_->db(), "B", 2);
+  QVERIFY(playlistA > 0);
+  QVERIFY(playlistB > 0);
+  QVERIFY(updatePlaylistTabOrder(databaseManager_->db(),
+                                 {1, playlistA, playlistB}));
+
+  QSettings settings;
+  settings.setValue("playlist/last_opened_id", playlistB);
+
+  delete tabs_;
+  tabs_ = new PlaylistTabs();
+  tabs_->init(library_, queue_, manager_, playbackOrderGroup_, registry_,
+              layout_, databaseManager_);
+
+  QCOMPARE(tabs_->tabWidget()->currentIndex(), 2);
+  QCOMPARE(tabs_->tabWidget()->tabBar()->tabData(2).toInt(), playlistB);
 }
 
 void TestPlaylistTabs::startupRestore_recoversCorruptedTabOrder() {

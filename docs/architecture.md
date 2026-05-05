@@ -106,6 +106,7 @@ of `README.md`.
 
 * Playlist identity is `playlist_id`.
 * Playlist order is persisted by `tab_order`.
+* Last opened playlist tab is persisted in `QSettings` (`playlist/last_opened_id`).
 * Per-playlist resume pointer is persisted by `last_played`.
 * Playlist membership is persisted in `playlist_items(position)`.
 * Playlist tab name edits are done inline on the tab bar and persisted to
