@@ -94,11 +94,22 @@ public:
   }
 
   void resize(int new_size) {
-    if (new_size < capacity_) {
-      throw std::runtime_error(
-          "new_size should be greater than or equal to original capacity. ");
+    if (new_size < 0) {
+      new_size = 0;
     }
-    capacity_ = new_size;
+    capacity_ = static_cast<size_t>(new_size);
+
+    while (queue_.size() > capacity_) {
+      const T old = queue_.front();
+      queue_.pop_front();
+      set_.erase(old);
+    }
+
+    if (queue_.empty()) {
+      cursor_index_ = -1;
+    } else if (cursor_index_ >= static_cast<int>(queue_.size())) {
+      cursor_index_ = static_cast<int>(queue_.size()) - 1;
+    }
   }
 
   bool has_prev() const { return cursor_index_ > 0; }

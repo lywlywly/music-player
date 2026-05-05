@@ -45,6 +45,7 @@ private slots:
   void next_prefersQueuedSongsThenFallsBackToPolicy();
   void prev_wrapsToLastInSequentialPolicy();
   void playPauseStop_updatesPlaybackQueueState();
+  void clearPlaylist_inShufflePolicy_doesNotCrash();
 
 private:
   ColumnRegistry *registry_ = nullptr;
@@ -174,6 +175,19 @@ void TestPlaybackManager::playPauseStop_updatesPlaybackQueueState() {
   QCOMPARE(queue_->getStatus(), PlaybackQueue::PlaybackStatus::None);
   QCOMPARE(queue_->getCurrentPk().first, -1);
   QCOMPARE(queue_->getCurrentPk().second, nullptr);
+}
+
+void TestPlaybackManager::clearPlaylist_inShufflePolicy_doesNotCrash() {
+  SongStore store(*library_, *databaseManager_, -1);
+  store.addSong(makeSong("S1", "Artist", "/tmp/pm-clear-1.mp3", "1"));
+  store.addSong(makeSong("S2", "Artist", "/tmp/pm-clear-2.mp3", "2"));
+  Playlist playlist(std::move(store), *queue_, 1, *layout_);
+
+  manager_->setView(playlist);
+  manager_->setPolicy(Shuffle);
+
+  playlist.clear();
+  QCOMPARE(playlist.songCount(), 0);
 }
 
 QTEST_MAIN(TestPlaybackManager)
