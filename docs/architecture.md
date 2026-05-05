@@ -34,6 +34,7 @@ of `README.md`.
   * Maintains identity-based play stats using normalized `title|artist|album`.
 * `SongParser`
   * Parses file tags into built-in + dynamic fields and remaining raw tag fields.
+  * Multi-value tag fields are displayed as comma-separated text (`,`).
   * Writes updated/removed tags back to audio files (`writeTags`).
 
 ### Playlist domain
@@ -56,6 +57,7 @@ of `README.md`.
   * Buffers edits in-memory and writes once on `Save`.
   * If there are no pending changes, `Save` just closes the dialog.
   * Supports edit/add/remove for writable tag rows.
+  * Tag value editing support multi-value input using `;` as separator.
   * Computed fields are read-only and non-removable.
 * `FieldEditDialog`
   * Secondary editor for a row value (multiline text).
@@ -80,6 +82,7 @@ of `README.md`.
 * `libraryexpression_*` modules
   * Tokenization, parsing, AST, static type inference, and operator evaluation.
   * Supports boolean expressions, comparisons, lists/ranges, and `IF ... THEN ... ELSE ...`.
+  * `HAS` supports multi-value text split by comma separators.
 * `LibrarySearchDialog` + `LibrarySearchResultsModel`
   * Parse/evaluate query via `SongLibrary`, then present matching rows.
 

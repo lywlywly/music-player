@@ -132,8 +132,9 @@ void TestParser::writeTags_updatesOnlySpecifiedFields_roundTrip() {
 
   const std::unordered_map<std::string, std::string> updates = {
       {"title", "Edited Title"},
+      {"genre", "rock; pop; jazz"},
       {"lyrics", "[00:01.00]edited-line"},
-      {"custom_note", "hello-note"},
+      {"custom_note", "hello-note; second-note"},
   };
   QVERIFY(
       SongParser::writeTags(editedPath.toStdString(), updates, columnRegistry));
@@ -144,11 +145,14 @@ void TestParser::writeTags_updatesOnlySpecifiedFields_roundTrip() {
 
   QVERIFY(after.contains("title"));
   QCOMPARE(after.at("title").text, std::string("Edited Title"));
+  QVERIFY(after.contains("genre"));
+  QCOMPARE(after.at("genre").text, std::string("rock, pop, jazz"));
   QCOMPARE(after.at("artist").text, before.at("artist").text);
   QVERIFY(afterRemaining.contains("lyrics"));
   QCOMPARE(afterRemaining.at("lyrics"), std::string("[00:01.00]edited-line"));
   QVERIFY(afterRemaining.contains("custom_note"));
-  QCOMPARE(afterRemaining.at("custom_note"), std::string("hello-note"));
+  QCOMPARE(afterRemaining.at("custom_note"),
+           std::string("hello-note, second-note"));
 }
 
 void TestParser::parseLyricsText_parsesLrcLines() {

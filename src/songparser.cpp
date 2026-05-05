@@ -4,8 +4,8 @@
 #include <cctype>
 #include <string>
 #include <taglib/fileref.h>
-#include <taglib/tag.h>
 #include <taglib/tpropertymap.h>
+#include <vector>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -39,6 +39,41 @@ std::string normalizeCurrentPart(std::string value) {
     return trimAscii(value);
   }
   return trimAscii(value.substr(0, slashPos));
+}
+
+std::string joinTagValuesForDisplay(const TagLib::StringList &values) {
+  std::string joined;
+  bool first = true;
+  for (const TagLib::String &value : values) {
+    const std::string part = value.to8Bit(true);
+    if (part.empty()) {
+      continue;
+    }
+    if (!first) {
+      joined += ", ";
+    }
+    joined += part;
+    first = false;
+  }
+  return joined;
+}
+
+std::vector<std::string> splitTagValues(const std::string &value) {
+  std::vector<std::string> values;
+  size_t start = 0;
+  while (start <= value.size()) {
+    const size_t pos = value.find(';', start);
+    const size_t end = (pos == std::string::npos) ? value.size() : pos;
+    std::string part = trimAscii(value.substr(start, end - start));
+    if (!part.empty()) {
+      values.push_back(std::move(part));
+    }
+    if (pos == std::string::npos) {
+      break;
+    }
+    start = pos + 1;
+  }
+  return values;
 }
 } // namespace
 
@@ -87,7 +122,13 @@ bool SongParser::writeTags(
     }
 
     TagLib::StringList list;
-    list.append(TagLib::String(value.c_str(), TagLib::String::UTF8));
+    for (const std::string &part : splitTagValues(value)) {
+      list.append(TagLib::String(part.c_str(), TagLib::String::UTF8));
+    }
+    if (list.isEmpty()) {
+      properties.erase(propertyKey);
+      continue;
+    }
     properties.replace(propertyKey, list);
   }
 
@@ -127,8 +168,10 @@ MSong SongParser::parse(
       if (key.empty()) {
         continue;
       }
-      const std::string value =
-          TagLib::Tag::joinTagValues(it->second).to8Bit(true);
+      const std::string value = joinTagValuesForDisplay(it->second);
+      if (value.empty()) {
+        continue;
+      }
 
       if (isBuiltInTagKey(key, columnRegistry)) {
         const ColumnDefinition *definition =

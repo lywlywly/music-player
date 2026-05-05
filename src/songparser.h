@@ -9,8 +9,6 @@ namespace SongParser {
 MSong parse(
     const std::string &, const ColumnRegistry &,
     std::unordered_map<std::string, std::string> *remainingFields = nullptr);
-// TODO: Extend writeTags to accept multi-value fields from Properties editing
-// (not just a single string value per key).
 bool writeTags(
     const std::string &filepath,
     const std::unordered_map<std::string, std::string> &updatedFields,

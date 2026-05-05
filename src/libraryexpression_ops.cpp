@@ -7,9 +7,14 @@ namespace {
 int compareFieldValue(const FieldValue &fieldValue, std::string_view exprValue);
 FieldValue fieldValueFromRuntime(const ExprRuntimeValue &runtimeValue);
 
+QStringList splitMultiValueText(const std::string &text) {
+  QString normalized = QString::fromStdString(text);
+  normalized.replace(QStringLiteral(" / "), QStringLiteral(","));
+  return normalized.split(QStringLiteral(","), Qt::SkipEmptyParts);
+}
+
 bool fieldHasValue(const std::string &fieldText, const std::string &exprValue) {
-  const QStringList parts =
-      QString::fromStdString(fieldText).split(QStringLiteral(" / "));
+  const QStringList parts = splitMultiValueText(fieldText);
   const QString normalizedExpression =
       util::normalizedText(QString::fromStdString(exprValue));
   for (const QString &part : parts) {
@@ -26,8 +31,7 @@ bool fieldHasTypedValue(const FieldValue &fieldValue,
     return false;
   }
 
-  const QStringList parts =
-      QString::fromStdString(fieldValue.text).split(QStringLiteral(" / "));
+  const QStringList parts = splitMultiValueText(fieldValue.text);
   for (const QString &part : parts) {
     const std::string partText = part.trimmed().toStdString();
     if (partText.empty()) {

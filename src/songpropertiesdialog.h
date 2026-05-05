@@ -34,8 +34,6 @@ private:
   struct RowData {
     std::string rawKey;
     QString displayField;
-    // TODO: Support multi-value tag edit/add in Properties (split/join with a
-    // configured separator) instead of a single value string.
     QString valueText;
     QString originalValueText;
     ColumnValueType valueType = ColumnValueType::Text;

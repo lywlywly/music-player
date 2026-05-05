@@ -8,7 +8,7 @@ A cross-platform desktop music player focused on local-library playback, lyrics,
 
 * Multi-playlist local playback with persistent tab order
 * Expression-based library search/filter
-* Song Properties dialog for viewing and editing tags (buffered Save, computed fields read-only)
+* Song Properties dialog for viewing and editing tags
 * ReplayGain (GStreamer backend)
 * Lyrics display (embedded tag lyrics on play, with `.lrc` fallback)
 * System media integration
@@ -51,7 +51,7 @@ Rules:
 * `HAS` expects a scalar value.
 * `IN` supports lists for all field types and ranges for numeric/datetime fields.
 * Text matching is normalized (case-insensitive style matching).
-* `HAS` splits TagLib-style multi-value text on ` / `.
+* Multi-value tag text is displayed as comma-separated (`a, b, c`); `HAS` matching uses comma-separated values.
 * Typed fields (number/datetime/boolean) use typed comparison; invalid conversions fail parsing.
 
 Examples:

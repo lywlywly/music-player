@@ -9,6 +9,8 @@ FieldEditDialog::FieldEditDialog(const QString &fieldLabel,
   ui->field_label_value->setText(fieldLabel);
   ui->type_label_value->setText(typeLabel);
   ui->value_edit->setPlainText(valueText);
+  ui->value_edit->setPlaceholderText(
+      QStringLiteral("Use ';' to separate multiple values"));
 }
 
 FieldEditDialog::~FieldEditDialog() { delete ui; }
