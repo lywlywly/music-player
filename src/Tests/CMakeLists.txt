@@ -1,4 +1,4 @@
-target_compile_definitions(MYLib PRIVATE MYPLAYER_TESTING)
+target_compile_definitions(MYLib PUBLIC MYPLAYER_TESTING)
 
 function(SETUP_TESTS)
     foreach(_testname ${ARGN})
