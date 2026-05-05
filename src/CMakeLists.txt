@@ -115,6 +115,9 @@ set(PROJECT_SOURCES
   settingsdialog.cpp
   songlibrary.h
   songlibrary.cpp
+  songpropertiesdialog.ui
+  songpropertiesdialog.h
+  songpropertiesdialog.cpp
   songparser.h
   songparser.cpp
   songstore.h

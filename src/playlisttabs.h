@@ -39,6 +39,7 @@ public:
   bool removePlaylistTabByIndex(int index);
   QAction *playNextAction() const;
   QAction *playEndAction() const;
+  QAction *propertiesAction() const;
   QTabWidget *tabWidget() const;
   Playlist *currentPlaylist() const;
   void createNewPlaylistTabFromSongIds(const QList<int> &songIds);
@@ -91,6 +92,7 @@ private:
   void persistVisibleOrder(QTableView *tbv);
   void showHeaderColumnsMenu(QTableView *tbv, const QPoint &pos);
   void refreshPlaylistMetadata(Playlist *playlist);
+  void openPropertiesForCurrentContextRow();
   bool eventFilter(QObject *obj, QEvent *event) override;
   Ui::PlaylistTabs *ui;
   QTableView *currentTableView;
@@ -98,6 +100,7 @@ private:
   QAction *playNextAction_;
   QAction *playEndAction_;
   QAction *clearPlaylistAction_ = nullptr;
+  QAction *propertiesAction_ = nullptr;
   SongLibrary *songLibrary;
   DatabaseManager *databaseManager_ = nullptr;
   PlaybackQueue *playbackQueue_;

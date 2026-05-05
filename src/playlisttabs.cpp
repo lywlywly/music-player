@@ -1,5 +1,6 @@
 #include "playlisttabs.h"
 #include "databasemanager.h"
+#include "songpropertiesdialog.h"
 #include "ui_playlisttabs.h"
 #include <QActionGroup>
 #include <QApplication>
@@ -44,6 +45,8 @@ void PlaylistTabs::setUpPlaylist() {
   playEndAction_ = playlistContextMenu.addAction("Add to Playback Queue");
   playlistContextMenu.addSeparator();
   clearPlaylistAction_ = playlistContextMenu.addAction("Clear Playlist");
+  playlistContextMenu.addSeparator();
+  propertiesAction_ = playlistContextMenu.addAction("Properties");
   // tabs
   QTabBar *tabBar = ui->tabWidget->tabBar();
   tabBar->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -123,6 +126,8 @@ void PlaylistTabs::setUpPlaybackManager() {
   });
   connect(clearPlaylistAction_, &QAction::triggered, this,
           [this]() { currentPlaylist_->clear(); });
+  connect(propertiesAction_, &QAction::triggered, this,
+          &PlaylistTabs::openPropertiesForCurrentContextRow);
 }
 
 void PlaylistTabs::onCustomContextMenuRequested(const QPoint &pos) {
@@ -130,9 +135,11 @@ void PlaylistTabs::onCustomContextMenuRequested(const QPoint &pos) {
   const bool hasRow = index.isValid();
   playNextAction_->setEnabled(hasRow);
   playEndAction_->setEnabled(hasRow);
+  propertiesAction_->setEnabled(hasRow);
   if (hasRow) {
     playNextAction_->setData(QVariant::fromValue(index));
     playEndAction_->setData(QVariant::fromValue(index));
+    propertiesAction_->setData(QVariant::fromValue(index));
   }
 
   playlistContextMenu.exec(currentTableView->viewport()->mapToGlobal(pos));
@@ -456,7 +463,38 @@ QAction *PlaylistTabs::playNextAction() const { return playNextAction_; }
 
 QAction *PlaylistTabs::playEndAction() const { return playEndAction_; }
 
+QAction *PlaylistTabs::propertiesAction() const { return propertiesAction_; }
+
 QTabWidget *PlaylistTabs::tabWidget() const { return ui->tabWidget; }
+
+void PlaylistTabs::openPropertiesForCurrentContextRow() {
+  Q_ASSERT(currentPlaylist_ != nullptr);
+  Q_ASSERT(songLibrary != nullptr);
+  Q_ASSERT(columnRegistry_ != nullptr);
+  const QModelIndex index = propertiesAction_->data().value<QModelIndex>();
+  if (!index.isValid()) {
+    return;
+  }
+  const int row = index.row();
+  if (row < 0 || row >= currentPlaylist_->songCount()) {
+    return;
+  }
+  const MSong &song = currentPlaylist_->getSongByIndex(row);
+  auto filepathIt = song.find("filepath");
+  if (filepathIt == song.end() || filepathIt->second.text.empty()) {
+    return;
+  }
+
+  std::unordered_map<std::string, std::string> remainingFields;
+  const MSong &refreshedSong = songLibrary->refreshSongFromFile(
+      filepathIt->second.text, &remainingFields);
+
+  auto *dialog = new SongPropertiesDialog(refreshedSong, remainingFields,
+                                          *columnRegistry_, this);
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  dialog->setModal(true);
+  dialog->show();
+}
 
 Playlist *PlaylistTabs::playlistForTabIndex(int index) {
   const int playlistId = playlistIdForTabIndex(index);

@@ -2,6 +2,7 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QGuiApplication>
+#include <QMenu>
 #include <QObject>
 #include <QSettings>
 #include <QSignalSpy>
@@ -11,6 +12,7 @@
 #include <QTest>
 #include <QTimer>
 #include <QUuid>
+#include <unordered_map>
 
 #include "../columnregistry.h"
 #include "../databasemanager.h"
@@ -19,6 +21,7 @@
 #include "../playbackqueue.h"
 #include "../playlisttabs.h"
 #include "../songlibrary.h"
+#include "../songpropertiesdialog.h"
 #include "../utils.h"
 
 namespace {
@@ -117,6 +120,7 @@ private slots:
   void navigateIndex_selectsTargetRow();
   void notifySongDataChangedInAllPlaylists_notifiesMatchingRows();
   void customContextMenu_bindsRowIntoQueueActions();
+  void propertiesDialog_showsRefreshedAndRemainingFields();
   void createNewPlaylistTabFromSongIds_createsTabAndCopiesSongs();
   void createNewPlaylistTabFromSongIds_emptyNoop();
   void startupRestore_loadsAllPlaylistsInSavedOrder();
@@ -153,7 +157,18 @@ void TestPlaylistTabs::init() {
   registry_ = new ColumnRegistry();
   databaseManager_ =
       new DatabaseManager(*registry_, ":memory:", connectionName_);
-  library_ = new SongLibrary(*registry_, *databaseManager_);
+  library_ = new SongLibrary(
+      *registry_, *databaseManager_,
+      [](const std::string &path, const ColumnRegistry &,
+         std::unordered_map<std::string, std::string> *remainingFields)
+          -> MSong {
+        if (remainingFields != nullptr) {
+          (*remainingFields)["remaining_zeta"] = "z-value";
+          (*remainingFields)["remaining_alpha"] = "a-value";
+        }
+        return makeSong("ParsedTitle", "ParsedArtist",
+                        QString::fromStdString(path), "1");
+      });
   layout_ = new GlobalColumnLayoutManager(*registry_);
   queue_ = new PlaybackQueue();
   manager_ = new PlaybackManager(*queue_);
@@ -267,8 +282,20 @@ void TestPlaylistTabs::customContextMenu_bindsRowIntoQueueActions() {
   tabs_->onCustomContextMenuRequested(validPos);
   QVERIFY(tabs_->playNextAction()->isEnabled());
   QVERIFY(tabs_->playEndAction()->isEnabled());
+  QVERIFY(tabs_->propertiesAction()->isEnabled());
   QCOMPARE(tabs_->playNextAction()->data().value<QModelIndex>().row(), 0);
   QCOMPARE(tabs_->playEndAction()->data().value<QModelIndex>().row(), 0);
+  QCOMPARE(tabs_->propertiesAction()->data().value<QModelIndex>().row(), 0);
+
+  QMenu *contextMenu = nullptr;
+  for (QObject *object : tabs_->propertiesAction()->associatedObjects()) {
+    contextMenu = qobject_cast<QMenu *>(object);
+    if (contextMenu != nullptr) {
+      break;
+    }
+  }
+  QVERIFY(contextMenu != nullptr);
+  QCOMPARE(contextMenu->actions().last(), tabs_->propertiesAction());
 
   QTimer::singleShot(0, []() {
     if (QWidget *popup = QApplication::activePopupWidget()) {
@@ -278,6 +305,96 @@ void TestPlaylistTabs::customContextMenu_bindsRowIntoQueueActions() {
   tabs_->onCustomContextMenuRequested(QPoint(-100, -100));
   QVERIFY(!tabs_->playNextAction()->isEnabled());
   QVERIFY(!tabs_->playEndAction()->isEnabled());
+  QVERIFY(!tabs_->propertiesAction()->isEnabled());
+}
+
+void TestPlaylistTabs::propertiesDialog_showsRefreshedAndRemainingFields() {
+  registry_->addOrUpdateDynamicColumn(
+      {"era", "Era", ColumnSource::Computed, ColumnValueType::Text,
+       "IF artist IS ParsedArtist THEN classic ELSE modern", true, true, 140});
+
+  Playlist *pl = tabs_->currentPlaylist();
+  QVERIFY(pl != nullptr);
+  pl->addSong(makeSong("OldTitle", "OldArtist", "/tmp/pt-props.mp3", "1"));
+
+  QTableView *table =
+      tabs_->tabWidget()->currentWidget()->findChild<QTableView *>();
+  QVERIFY(table != nullptr);
+  const QModelIndex row0 = table->model()->index(0, 0);
+  QVERIFY(row0.isValid());
+  const QPoint validPos = table->visualRect(row0).center();
+
+  QTimer::singleShot(0, []() {
+    if (QWidget *popup = QApplication::activePopupWidget()) {
+      popup->close();
+    }
+  });
+  tabs_->onCustomContextMenuRequested(validPos);
+  QVERIFY(tabs_->propertiesAction()->isEnabled());
+  tabs_->propertiesAction()->trigger();
+  QTest::qWait(0);
+
+  SongPropertiesDialog *dialog = nullptr;
+  for (QWidget *widget : QApplication::topLevelWidgets()) {
+    dialog = qobject_cast<SongPropertiesDialog *>(widget);
+    if (dialog != nullptr) {
+      break;
+    }
+  }
+  QVERIFY(dialog != nullptr);
+  QVERIFY(dialog->isModal());
+
+  QTableView *propertiesTable =
+      dialog->findChild<QTableView *>("properties_table");
+  QVERIFY(propertiesTable != nullptr);
+  QAbstractItemModel *model = propertiesTable->model();
+  QVERIFY(model != nullptr);
+
+  QCOMPARE(model->headerData(0, Qt::Horizontal, Qt::DisplayRole).toString(),
+           QString("Field"));
+  QCOMPARE(model->headerData(1, Qt::Horizontal, Qt::DisplayRole).toString(),
+           QString("Value"));
+  QCOMPARE(model->headerData(2, Qt::Horizontal, Qt::DisplayRole).toString(),
+           QString("Type"));
+
+  int computedRow = -1;
+  int remainingAlphaRow = -1;
+  int remainingZetaRow = -1;
+  for (int row = 0; row < model->rowCount(); ++row) {
+    const QString fieldText =
+        model->data(model->index(row, 0), Qt::DisplayRole).toString();
+    if (fieldText.contains("(era)")) {
+      computedRow = row;
+    } else if (fieldText == "remaining_alpha") {
+      remainingAlphaRow = row;
+    } else if (fieldText == "remaining_zeta") {
+      remainingZetaRow = row;
+    }
+  }
+
+  QVERIFY(computedRow >= 0);
+  QVERIFY(remainingAlphaRow >= 0);
+  QVERIFY(remainingZetaRow >= 0);
+  QVERIFY(remainingAlphaRow > computedRow);
+  QVERIFY(remainingZetaRow > computedRow);
+  QVERIFY(remainingAlphaRow < remainingZetaRow);
+
+  QCOMPARE(dialog->rowSourceAt(computedRow),
+           SongPropertiesDialog::RowSource::ComputedField);
+  QCOMPARE(dialog->rowSourceAt(remainingAlphaRow),
+           SongPropertiesDialog::RowSource::RemainingField);
+  QCOMPARE(dialog->rowSourceAt(remainingZetaRow),
+           SongPropertiesDialog::RowSource::RemainingField);
+
+  QCOMPARE(model->data(model->index(remainingAlphaRow, 2), Qt::DisplayRole)
+               .toString(),
+           QString("Text"));
+  QCOMPARE(model->data(model->index(remainingZetaRow, 1), Qt::DisplayRole)
+               .toString(),
+           QString("z-value"));
+
+  dialog->close();
+  delete dialog;
 }
 
 void TestPlaylistTabs::
