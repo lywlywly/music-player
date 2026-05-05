@@ -34,6 +34,11 @@ std::tuple<const MSong &, int, Playlist *> PlaybackManager::next() {
     pk = policy->nextPk();
   }
 
+  if (pk < 0) {
+    queue.setCurrentId(-1, nullptr);
+    return {{}, -1, pl};
+  }
+
   int row = pk < 0 ? -1 : pl->getIndexByPk(pk);
   queue.setCurrentId(pk, pl);
   playlist->setLastPlayed(pk);
