@@ -40,8 +40,8 @@ void LyricsPanel::scrollToIndexCenter(int index) {
 
   QRectF rect =
       ui->textEdit->document()->documentLayout()->blockBoundingRect(block);
-  int centerY =
-      static_cast<int>(rect.top() - ui->textEdit->viewport()->height() / 2);
+  int centerY = static_cast<int>(rect.center().y() -
+                                 ui->textEdit->viewport()->height() / 2);
   QScrollBar *vbar = ui->textEdit->verticalScrollBar();
   int target = std::clamp(centerY, vbar->minimum(), vbar->maximum());
   smoothScrollTo(target);
@@ -50,7 +50,9 @@ void LyricsPanel::scrollToIndexCenter(int index) {
 
 void LyricsPanel::colorLineText(const QTextBlock &block) {
   QTextCursor cursor(block);
-  cursor.select(QTextCursor::LineUnderCursor);
+  cursor.setPosition(block.position());
+  cursor.setPosition(block.position() + block.length() - 1,
+                     QTextCursor::KeepAnchor);
 
   QTextEdit::ExtraSelection sel;
   sel.cursor = cursor;
