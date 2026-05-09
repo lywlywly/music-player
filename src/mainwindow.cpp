@@ -22,7 +22,6 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QDateTime>
-#include <QDebug>
 #include <QEvent>
 #include <QFileDialog>
 #include <QProgressDialog>
@@ -207,6 +206,10 @@ void MainWindow::initSettings() {
                 cloudPlayStatsSyncCoordinator_.triggerManualRebase();
               }
             });
+    connect(dialog, &SettingsDialog::lyricsFontChanged, this,
+            [this](const QString &fontFamily, int pointSize) {
+              setLyricsPanelFont(fontFamily, pointSize);
+            });
     dialog->show();
   });
 }
@@ -241,10 +244,39 @@ void MainWindow::setUpPlaybackActions() {
 }
 
 void MainWindow::setUpLyricsPanel() {
+  applyLyricsFontFromSettings();
   connect(backendManager->player(), &AudioPlayer::positionChanged,
           &lyricsManager, &LyricsManager::onPlayerProgressChange);
   connect(&lyricsManager, &LyricsManager::newLyricsLineIndex, ui->lyricsPanel,
           &LyricsPanel::updateLyricsPanel);
+}
+
+void MainWindow::setLyricsPanelFont(const QString &fontFamily, int pointSize) {
+  if (fontFamily.isEmpty()) {
+    QFont font = QApplication::font();
+    font.setPointSize(pointSize);
+    ui->lyricsPanel->setLyricsTextFont(font);
+    return;
+  }
+  QFont font(fontFamily, pointSize);
+  ui->lyricsPanel->setLyricsTextFont(font);
+}
+
+void MainWindow::applyLyricsFontFromSettings() {
+  QSettings settings;
+  const QString fontFamily =
+      settings.value("lyrics/font_family", QString()).toString();
+  const bool useSystemDefaultFont =
+      settings.value("lyrics/use_system_default_font", fontFamily.isEmpty())
+          .toBool();
+  const int defaultLyricsFontSize = QApplication::font().pointSize();
+  const int fontSize =
+      settings.value("lyrics/font_size", defaultLyricsFontSize).toInt();
+  if (useSystemDefaultFont || fontFamily.isEmpty()) {
+    setLyricsPanelFont(QString(), fontSize);
+    return;
+  }
+  setLyricsPanelFont(fontFamily, fontSize);
 }
 
 void MainWindow::setUpSplitter() {

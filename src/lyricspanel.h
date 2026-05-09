@@ -17,6 +17,7 @@ public:
   ~LyricsPanel();
   void updateLyricsPanel(int index);
   void setLyricsPanel(const std::map<int, std::string> &map);
+  void setLyricsTextFont(const QFont &font);
 
 private:
   void smoothScrollTo(int targetY, int durationMs = 300);

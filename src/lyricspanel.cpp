@@ -18,9 +18,14 @@ void LyricsPanel::updateLyricsPanel(int index) { scrollToIndexCenter(index); }
 
 void LyricsPanel::setLyricsPanel(const std::map<int, std::string> &map) {
   ui->textEdit->clear();
+  ui->textEdit->setAlignment(Qt::AlignHCenter);
   for (const auto &[key, value] : map) {
     ui->textEdit->append(QString::fromUtf8(value));
   }
+}
+
+void LyricsPanel::setLyricsTextFont(const QFont &font) {
+  ui->textEdit->setFont(font);
 }
 
 void LyricsPanel::smoothScrollTo(int targetY, int durationMs) {

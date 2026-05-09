@@ -6,8 +6,11 @@
 #include "databasemanager.h"
 #include "libraryexpression.h"
 #include "playbackbackendmanager.h"
+#include <QCheckBox>
 #include <QDialog>
+#include <QFontComboBox>
 #include <QSet>
+#include <QSpinBox>
 
 namespace Ui {
 class SettingsDialog;
@@ -26,6 +29,7 @@ signals:
   void backendChanged(PlaybackBackendManager::Backend backend);
   void customFieldsChanged();
   void cloudUuidChanged(const QString &uuid);
+  void lyricsFontChanged(const QString &fontFamily, int pointSize);
 
 private:
   void refreshCustomFieldsList();
@@ -51,6 +55,9 @@ private:
   bool initialCloudDisabledByUser_ = false;
   QString pendingCloudUuid_;
   bool pendingCloudDisabledByUser_ = false;
+  QFontComboBox *lyricsFontFamilyCombo_ = nullptr;
+  QSpinBox *lyricsFontSizeSpin_ = nullptr;
+  QCheckBox *lyricsUseDefaultFontCheck_ = nullptr;
 };
 
 #endif // SETTINGSDIALOG_H

@@ -105,6 +105,17 @@ of `README.md`.
   * Lyrics fetch + timed line updates from playback position.
   * On play, `MainWindow` refreshes song metadata once and prefers embedded
     lyrics from parsed tag fields; file-based `.lrc` loading is fallback.
+* Lyrics font settings (`SettingsDialog` + `MainWindow`)
+  * Uses three settings keys: `lyrics/use_system_default_font`,
+    `lyrics/font_family`, `lyrics/font_size`.
+  * `font_family` is always persisted, even when system default is enabled.
+  * On dialog load, it tries stored `font_family`; if not selectable, falls
+    back to combo index `0`.
+  * When system default is enabled, the combo is disabled but still shows the
+    stored custom family.
+  * Apply behavior:
+    * `use_system_default_font=true`: system UI family + stored size
+    * `use_system_default_font=false`: stored family + stored size
 
 ## Core Feature Implementation Notes
 

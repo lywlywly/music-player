@@ -1,11 +1,15 @@
 #include "settingsdialog.h"
 #include "ui_settingsdialog.h"
 #include "utils.h"
-#include <QDebug>
+#include <QApplication>
+#include <QFormLayout>
 #include <QInputDialog>
+#include <QLabel>
 #include <QMessageBox>
 #include <QSettings>
 #include <QUuid>
+#include <QVBoxLayout>
+#include <QWidget>
 
 SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
                                DatabaseManager &databaseManager,
@@ -23,6 +27,55 @@ SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
           .toInt();
 
   ui->backend_combo_box->setCurrentIndex(backendIndex);
+  const int defaultLyricsFontSize = QApplication::font().pointSize();
+  const QString initialLyricsFontFamily =
+      settings.value("lyrics/font_family", QString()).toString();
+  const bool useSystemDefaultFont =
+      settings
+          .value("lyrics/use_system_default_font",
+                 initialLyricsFontFamily.isEmpty())
+          .toBool();
+  const int initialLyricsFontSize =
+      settings.value("lyrics/font_size", defaultLyricsFontSize).toInt();
+
+  QWidget *lyricsTab = new QWidget(this);
+  QVBoxLayout *lyricsLayout = new QVBoxLayout(lyricsTab);
+  QLabel *lyricsNote =
+      new QLabel("Change lyrics panel font family and size.", lyricsTab);
+  lyricsNote->setWordWrap(true);
+  lyricsLayout->addWidget(lyricsNote);
+  QFormLayout *lyricsForm = new QFormLayout();
+  lyricsFontFamilyCombo_ = new QFontComboBox(lyricsTab);
+  lyricsFontSizeSpin_ = new QSpinBox(lyricsTab);
+  lyricsUseDefaultFontCheck_ =
+      new QCheckBox("Use system default font", lyricsTab);
+  lyricsFontSizeSpin_->setRange(8, 48);
+  lyricsFontSizeSpin_->setValue(initialLyricsFontSize);
+
+  const QString initialDisplayedFamily = initialLyricsFontFamily.trimmed();
+  if (!initialDisplayedFamily.isEmpty()) {
+    lyricsFontFamilyCombo_->setCurrentFont(QFont(initialDisplayedFamily));
+  }
+  if (lyricsFontFamilyCombo_->currentIndex() < 0 &&
+      lyricsFontFamilyCombo_->count() > 0) {
+    lyricsFontFamilyCombo_->setCurrentIndex(0);
+  }
+  lyricsUseDefaultFontCheck_->setChecked(useSystemDefaultFont);
+  lyricsFontFamilyCombo_->setEnabled(!useSystemDefaultFont);
+  connect(lyricsUseDefaultFontCheck_, &QCheckBox::toggled, this,
+          [this](bool checked) {
+            lyricsFontFamilyCombo_->setEnabled(!checked);
+            if (!checked && lyricsFontFamilyCombo_->currentIndex() < 0 &&
+                lyricsFontFamilyCombo_->count() > 0) {
+              lyricsFontFamilyCombo_->setCurrentIndex(0);
+            }
+          });
+  lyricsForm->addRow("Font:", lyricsFontFamilyCombo_);
+  lyricsForm->addRow("", lyricsUseDefaultFontCheck_);
+  lyricsForm->addRow("Size:", lyricsFontSizeSpin_);
+  lyricsLayout->addLayout(lyricsForm);
+  lyricsLayout->addStretch();
+  ui->settings_tab_widget->addTab(lyricsTab, "Lyrics");
   QString cloudUuid =
       settings.value("cloud_sync/user_uuid").toString().trimmed();
   const bool disabledByUser =
@@ -392,6 +445,23 @@ void SettingsDialog::applySettings() {
 
   QSettings settings;
   settings.setValue("playback/backend", selected);
+
+  const bool useSystemDefaultFont = lyricsUseDefaultFontCheck_->isChecked();
+  if (lyricsFontFamilyCombo_->currentIndex() < 0 &&
+      lyricsFontFamilyCombo_->count() > 0) {
+    lyricsFontFamilyCombo_->setCurrentIndex(0);
+  }
+  QString resolvedFamily = lyricsFontFamilyCombo_->currentText().trimmed();
+  if (resolvedFamily.isEmpty() && lyricsFontFamilyCombo_->count() > 0) {
+    lyricsFontFamilyCombo_->setCurrentIndex(0);
+    resolvedFamily = lyricsFontFamilyCombo_->currentText().trimmed();
+  }
+  settings.setValue("lyrics/use_system_default_font", useSystemDefaultFont);
+  settings.setValue("lyrics/font_family", resolvedFamily);
+  settings.setValue("lyrics/font_size", lyricsFontSizeSpin_->value());
+  const QString emittedFamily =
+      useSystemDefaultFont ? QString() : resolvedFamily;
+  emit lyricsFontChanged(emittedFamily, lyricsFontSizeSpin_->value());
   const QString cloudUuid = pendingCloudUuid_.trimmed();
   if (!cloudUuid.isEmpty() && QUuid(cloudUuid).isNull()) {
     QMessageBox::warning(this, "Settings", "Cloud UUID format is invalid.");

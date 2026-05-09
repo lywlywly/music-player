@@ -57,6 +57,8 @@ private:
   void navigateIndex(int row, Playlist *);
   void setUpSplitter();
   void setUpLyricsPanel();
+  void applyLyricsFontFromSettings();
+  void setLyricsPanelFont(const QString &fontFamily, int pointSize);
   void setupSystemMediaInterface();
   void initSettings();
   void initPlaybackBackend();
