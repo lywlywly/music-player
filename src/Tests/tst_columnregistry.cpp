@@ -27,12 +27,37 @@ void TestColumnRegistry::builtInDefinitions_areAvailable() {
   QVERIFY(registry.hasColumn("title"));
   QVERIFY(registry.hasColumn("date"));
   QVERIFY(registry.hasColumn("genre"));
+  QVERIFY(registry.hasColumn("codec"));
+  QVERIFY(registry.hasColumn("bitrate"));
+  QVERIFY(registry.hasColumn("sample_rate"));
   QVERIFY(registry.hasColumn("filepath"));
+  QVERIFY(registry.hasColumn("channels"));
 
   const ColumnDefinition *status = registry.findColumn("status");
   QVERIFY(status != nullptr);
   QCOMPARE(status->source, ColumnSource::Computed);
   QVERIFY(!status->sortable);
+
+  const ColumnDefinition *codec = registry.findColumn("codec");
+  QVERIFY(codec != nullptr);
+  QCOMPARE(codec->source, ColumnSource::SongAttribute);
+  QCOMPARE(codec->valueType, ColumnValueType::Text);
+  QVERIFY(!codec->visibleByDefault);
+
+  const ColumnDefinition *bitrate = registry.findColumn("bitrate");
+  QVERIFY(bitrate != nullptr);
+  QCOMPARE(bitrate->valueType, ColumnValueType::Number);
+  QVERIFY(!bitrate->visibleByDefault);
+
+  const ColumnDefinition *sampleRate = registry.findColumn("sample_rate");
+  QVERIFY(sampleRate != nullptr);
+  QCOMPARE(sampleRate->valueType, ColumnValueType::Number);
+  QVERIFY(!sampleRate->visibleByDefault);
+
+  const ColumnDefinition *channels = registry.findColumn("channels");
+  QVERIFY(sampleRate != nullptr);
+  QCOMPARE(sampleRate->valueType, ColumnValueType::Number);
+  QVERIFY(!sampleRate->visibleByDefault);
 }
 
 void TestColumnRegistry::builtInSongAttributeKey_onlyTrueForBuiltIns() {

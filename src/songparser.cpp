@@ -3,8 +3,25 @@
 #include <QDebug>
 #include <cctype>
 #include <string>
+#include <taglib/aifffile.h>
+#include <taglib/apefile.h>
+#include <taglib/asffile.h>
+#include <taglib/dsdifffile.h>
+#include <taglib/dsffile.h>
 #include <taglib/fileref.h>
+#include <taglib/flacfile.h>
+#include <taglib/mp4file.h>
+#include <taglib/mp4properties.h>
+#include <taglib/mpcfile.h>
+#include <taglib/mpegfile.h>
+#include <taglib/oggflacfile.h>
+#include <taglib/opusfile.h>
+#include <taglib/speexfile.h>
 #include <taglib/tpropertymap.h>
+#include <taglib/trueaudiofile.h>
+#include <taglib/vorbisfile.h>
+#include <taglib/wavfile.h>
+#include <taglib/wavpackfile.h>
 #include <vector>
 #ifdef _WIN32
 #include <windows.h>
@@ -74,6 +91,69 @@ std::vector<std::string> splitTagValues(const std::string &value) {
     start = pos + 1;
   }
   return values;
+}
+
+std::string codecFromFileClass(const TagLib::File *file,
+                               const TagLib::AudioProperties *properties) {
+  if (dynamic_cast<const TagLib::Ogg::Opus::File *>(file)) {
+    return "opus";
+  }
+  if (dynamic_cast<const TagLib::Vorbis::File *>(file)) {
+    return "vorbis";
+  }
+  if (dynamic_cast<const TagLib::Ogg::FLAC::File *>(file) ||
+      dynamic_cast<const TagLib::FLAC::File *>(file)) {
+    return "flac";
+  }
+  if (dynamic_cast<const TagLib::MPEG::File *>(file)) {
+    return "mp3";
+  }
+  if (dynamic_cast<const TagLib::MP4::File *>(file)) {
+    if (const auto *mp4Props =
+            dynamic_cast<const TagLib::MP4::Properties *>(properties)) {
+      switch (mp4Props->codec()) {
+      case TagLib::MP4::Properties::AAC:
+        return "aac";
+      case TagLib::MP4::Properties::ALAC:
+        return "alac";
+      case TagLib::MP4::Properties::Unknown:
+      default:
+        break;
+      }
+    }
+    return "mp4";
+  }
+  if (dynamic_cast<const TagLib::RIFF::WAV::File *>(file)) {
+    return "wav";
+  }
+  if (dynamic_cast<const TagLib::RIFF::AIFF::File *>(file)) {
+    return "aiff";
+  }
+  if (dynamic_cast<const TagLib::ASF::File *>(file)) {
+    return "asf";
+  }
+  if (dynamic_cast<const TagLib::WavPack::File *>(file)) {
+    return "wavpack";
+  }
+  if (dynamic_cast<const TagLib::MPC::File *>(file)) {
+    return "mpc";
+  }
+  if (dynamic_cast<const TagLib::TrueAudio::File *>(file)) {
+    return "tta";
+  }
+  if (dynamic_cast<const TagLib::APE::File *>(file)) {
+    return "ape";
+  }
+  if (dynamic_cast<const TagLib::Ogg::Speex::File *>(file)) {
+    return "speex";
+  }
+  if (dynamic_cast<const TagLib::DSF::File *>(file)) {
+    return "dsf";
+  }
+  if (dynamic_cast<const TagLib::DSDIFF::File *>(file)) {
+    return "dsdiff";
+  }
+  return {};
 }
 } // namespace
 
@@ -157,8 +237,8 @@ MSong SongParser::parse(
   }
 
   if (!file.isNull() && file.file()) {
-    const TagLib::PropertyMap properties = file.file()->properties();
-    for (auto it = properties.begin(); it != properties.end(); ++it) {
+    const TagLib::PropertyMap propertyMap = file.file()->properties();
+    for (auto it = propertyMap.begin(); it != propertyMap.end(); ++it) {
       if (it->second.isEmpty()) {
         continue;
       }
@@ -190,6 +270,29 @@ MSong SongParser::parse(
         } else if (remainingFields) {
           (*remainingFields)[key] = value;
         }
+      }
+    }
+
+    const TagLib::AudioProperties *audioProperties = file.audioProperties();
+    const std::string codec = codecFromFileClass(file.file(), audioProperties);
+    if (!codec.empty()) {
+      tags["codec"] = FieldValue(codec, ColumnValueType::Text);
+    }
+    if (audioProperties) {
+      const int bitrate = audioProperties->bitrate();
+      if (bitrate > 0) {
+        tags["bitrate"] =
+            FieldValue(std::to_string(bitrate), ColumnValueType::Number);
+      }
+      const int sampleRate = audioProperties->sampleRate();
+      if (sampleRate > 0) {
+        tags["sample_rate"] =
+            FieldValue(std::to_string(sampleRate), ColumnValueType::Number);
+      }
+      const int channels = audioProperties->channels();
+      if (channels > 0) {
+        tags["channels"] =
+            FieldValue(std::to_string(channels), ColumnValueType::Number);
       }
     }
   }
