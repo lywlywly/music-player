@@ -7,8 +7,10 @@
 #include "libraryexpression.h"
 #include "playbackbackendmanager.h"
 #include <QCheckBox>
+#include <QColor>
 #include <QDialog>
 #include <QFontComboBox>
+#include <QPushButton>
 #include <QSet>
 #include <QSpinBox>
 
@@ -30,6 +32,7 @@ signals:
   void customFieldsChanged();
   void cloudUuidChanged(const QString &uuid);
   void lyricsFontChanged(const QString &fontFamily, int pointSize);
+  void lyricsHighlightColorChanged(const QColor &color);
 
 private:
   void refreshCustomFieldsList();
@@ -39,6 +42,7 @@ private:
   void removeSelectedCustomField();
   void removeSelectedComputedField();
   void updateCloudUuidStatus();
+  void updateLyricsHighlightColorButton();
   void applySettings();
   ColumnDefinition buildCustomFieldDefinitionFromForm() const;
   ColumnDefinition buildComputedFieldDefinitionFromForm() const;
@@ -58,6 +62,8 @@ private:
   QFontComboBox *lyricsFontFamilyCombo_ = nullptr;
   QSpinBox *lyricsFontSizeSpin_ = nullptr;
   QCheckBox *lyricsUseDefaultFontCheck_ = nullptr;
+  QPushButton *lyricsHighlightColorButton_ = nullptr;
+  QColor lyricsHighlightColor_ = QColor(0, 100, 255);
 };
 
 #endif // SETTINGSDIALOG_H

@@ -105,14 +105,17 @@ of `README.md`.
   * Lyrics fetch + timed line updates from playback position.
   * On play, `MainWindow` refreshes song metadata once and prefers embedded
     lyrics from parsed tag fields; file-based `.lrc` loading is fallback.
-* Lyrics font settings (`SettingsDialog` + `MainWindow`)
+* Lyrics panel style settings (`SettingsDialog` + `MainWindow`)
   * Uses three settings keys: `lyrics/use_system_default_font`,
-    `lyrics/font_family`, `lyrics/font_size`.
+    `lyrics/font_family`, `lyrics/font_size`, and
+    `lyrics/highlight_color`.
   * `font_family` is always persisted, even when system default is enabled.
   * On dialog load, it tries stored `font_family`; if not selectable, falls
     back to combo index `0`.
   * When system default is enabled, the combo is disabled but still shows the
     stored custom family.
+  * `highlight_color` is selected via color picker and applied to highlighted
+    lyric lines.
   * Apply behavior:
     * `use_system_default_font=true`: system UI family + stored size
     * `use_system_default_font=false`: stored family + stored size

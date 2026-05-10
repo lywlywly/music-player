@@ -14,6 +14,7 @@
 #include "playlist.h"
 #include "playlisttabs.h"
 #include "songlibrary.h"
+#include <QColor>
 #include <QMainWindow>
 #include <unordered_map>
 
@@ -58,7 +59,9 @@ private:
   void setUpSplitter();
   void setUpLyricsPanel();
   void applyLyricsFontFromSettings();
+  void applyLyricsHighlightColorFromSettings();
   void setLyricsPanelFont(const QString &fontFamily, int pointSize);
+  void setLyricsPanelHighlightColor(const QColor &color);
   void setupSystemMediaInterface();
   void initSettings();
   void initPlaybackBackend();

@@ -28,6 +28,14 @@ void LyricsPanel::setLyricsTextFont(const QFont &font) {
   ui->textEdit->setFont(font);
 }
 
+void LyricsPanel::setHighlightTextColor(const QColor &color) {
+  highlightTextColor_ = color;
+  if (!currentSelection_.cursor.isNull()) {
+    currentSelection_.format.setForeground(highlightTextColor_);
+    ui->textEdit->setExtraSelections({currentSelection_});
+  }
+}
+
 void LyricsPanel::smoothScrollTo(int targetY, int durationMs) {
   QScrollBar *vbar = ui->textEdit->verticalScrollBar();
   anim_ = new QPropertyAnimation(vbar, "value", this);
@@ -61,7 +69,7 @@ void LyricsPanel::colorLineText(const QTextBlock &block) {
 
   QTextEdit::ExtraSelection sel;
   sel.cursor = cursor;
-  sel.format.setForeground(QColor(0, 100, 255));
+  sel.format.setForeground(highlightTextColor_);
   sel.format.setProperty(QTextFormat::FullWidthSelection, true);
 
   currentSelection_ = sel;

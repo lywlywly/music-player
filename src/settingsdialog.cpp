@@ -2,10 +2,12 @@
 #include "ui_settingsdialog.h"
 #include "utils.h"
 #include <QApplication>
+#include <QColorDialog>
 #include <QFormLayout>
 #include <QInputDialog>
 #include <QLabel>
 #include <QMessageBox>
+#include <QPainter>
 #include <QSettings>
 #include <QUuid>
 #include <QVBoxLayout>
@@ -37,6 +39,11 @@ SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
           .toBool();
   const int initialLyricsFontSize =
       settings.value("lyrics/font_size", defaultLyricsFontSize).toInt();
+  lyricsHighlightColor_ = QColor(
+      settings.value("lyrics/highlight_color", QString("#0064ff")).toString());
+  if (!lyricsHighlightColor_.isValid()) {
+    lyricsHighlightColor_ = QColor(0, 100, 255);
+  }
 
   QWidget *lyricsTab = new QWidget(this);
   QVBoxLayout *lyricsLayout = new QVBoxLayout(lyricsTab);
@@ -49,6 +56,7 @@ SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
   lyricsFontSizeSpin_ = new QSpinBox(lyricsTab);
   lyricsUseDefaultFontCheck_ =
       new QCheckBox("Use system default font", lyricsTab);
+  lyricsHighlightColorButton_ = new QPushButton(lyricsTab);
   lyricsFontSizeSpin_->setRange(8, 48);
   lyricsFontSizeSpin_->setValue(initialLyricsFontSize);
 
@@ -70,9 +78,20 @@ SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
               lyricsFontFamilyCombo_->setCurrentIndex(0);
             }
           });
+  updateLyricsHighlightColorButton();
+  connect(lyricsHighlightColorButton_, &QPushButton::clicked, this, [this]() {
+    const QColor selected = QColorDialog::getColor(
+        lyricsHighlightColor_, this, "Select lyrics highlight color");
+    if (!selected.isValid()) {
+      return;
+    }
+    lyricsHighlightColor_ = selected;
+    updateLyricsHighlightColorButton();
+  });
   lyricsForm->addRow("Font:", lyricsFontFamilyCombo_);
   lyricsForm->addRow("", lyricsUseDefaultFontCheck_);
   lyricsForm->addRow("Size:", lyricsFontSizeSpin_);
+  lyricsForm->addRow("Highlight color:", lyricsHighlightColorButton_);
   lyricsLayout->addLayout(lyricsForm);
   lyricsLayout->addStretch();
   ui->settings_tab_widget->addTab(lyricsTab, "Lyrics");
@@ -437,6 +456,22 @@ void SettingsDialog::updateCloudUuidStatus() {
   ui->disable_cloud_sync_button->setVisible(true);
 }
 
+void SettingsDialog::updateLyricsHighlightColorButton() {
+  const QString colorHex = lyricsHighlightColor_.name(QColor::HexRgb);
+  lyricsHighlightColorButton_->setText(colorHex);
+
+  QPixmap swatch(20, 12);
+  swatch.fill(Qt::transparent);
+  QPainter painter(&swatch);
+  painter.setPen(Qt::black);
+  painter.setBrush(lyricsHighlightColor_);
+  painter.drawRect(0, 0, swatch.width() - 1, swatch.height() - 1);
+  painter.end();
+
+  lyricsHighlightColorButton_->setIcon(QIcon(swatch));
+  lyricsHighlightColorButton_->setIconSize(swatch.size());
+}
+
 void SettingsDialog::applySettings() {
   int selected = ui->backend_combo_box->currentIndex();
   auto selectedBackend = static_cast<PlaybackBackendManager::Backend>(selected);
@@ -459,9 +494,12 @@ void SettingsDialog::applySettings() {
   settings.setValue("lyrics/use_system_default_font", useSystemDefaultFont);
   settings.setValue("lyrics/font_family", resolvedFamily);
   settings.setValue("lyrics/font_size", lyricsFontSizeSpin_->value());
+  settings.setValue("lyrics/highlight_color",
+                    lyricsHighlightColor_.name(QColor::HexRgb));
   const QString emittedFamily =
       useSystemDefaultFont ? QString() : resolvedFamily;
   emit lyricsFontChanged(emittedFamily, lyricsFontSizeSpin_->value());
+  emit lyricsHighlightColorChanged(lyricsHighlightColor_);
   const QString cloudUuid = pendingCloudUuid_.trimmed();
   if (!cloudUuid.isEmpty() && QUuid(cloudUuid).isNull()) {
     QMessageBox::warning(this, "Settings", "Cloud UUID format is invalid.");

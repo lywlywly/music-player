@@ -210,6 +210,9 @@ void MainWindow::initSettings() {
             [this](const QString &fontFamily, int pointSize) {
               setLyricsPanelFont(fontFamily, pointSize);
             });
+    connect(
+        dialog, &SettingsDialog::lyricsHighlightColorChanged, this,
+        [this](const QColor &color) { setLyricsPanelHighlightColor(color); });
     dialog->show();
   });
 }
@@ -245,6 +248,7 @@ void MainWindow::setUpPlaybackActions() {
 
 void MainWindow::setUpLyricsPanel() {
   applyLyricsFontFromSettings();
+  applyLyricsHighlightColorFromSettings();
   connect(backendManager->player(), &AudioPlayer::positionChanged,
           &lyricsManager, &LyricsManager::onPlayerProgressChange);
   connect(&lyricsManager, &LyricsManager::newLyricsLineIndex, ui->lyricsPanel,
@@ -262,6 +266,10 @@ void MainWindow::setLyricsPanelFont(const QString &fontFamily, int pointSize) {
   ui->lyricsPanel->setLyricsTextFont(font);
 }
 
+void MainWindow::setLyricsPanelHighlightColor(const QColor &color) {
+  ui->lyricsPanel->setHighlightTextColor(color);
+}
+
 void MainWindow::applyLyricsFontFromSettings() {
   QSettings settings;
   const QString fontFamily =
@@ -277,6 +285,16 @@ void MainWindow::applyLyricsFontFromSettings() {
     return;
   }
   setLyricsPanelFont(fontFamily, fontSize);
+}
+
+void MainWindow::applyLyricsHighlightColorFromSettings() {
+  QSettings settings;
+  QColor color(
+      settings.value("lyrics/highlight_color", QString("#0064ff")).toString());
+  if (!color.isValid()) {
+    color = QColor(0, 100, 255);
+  }
+  setLyricsPanelHighlightColor(color);
 }
 
 void MainWindow::setUpSplitter() {
