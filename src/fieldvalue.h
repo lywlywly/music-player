@@ -2,6 +2,7 @@
 #define FIELDVALUE_H
 
 #include "columndefinition.h"
+#include <QString>
 #include <cstdint>
 #include <string>
 
@@ -37,6 +38,7 @@ struct FieldValue {
                                    const std::string &textValue);
   static bool canConvert(const std::string &textValue,
                          ColumnValueType valueType);
+  QString display(const ColumnDefinition *definition) const;
   bool operator==(const FieldValue &other) const;
   operator const std::string &() const { return text; }
 };

@@ -53,7 +53,13 @@ QVariant Playlist::data(const QModelIndex &index, int role) const {
 
   const MSong &song = getSongByIndex(index.row());
   const std::string field = columnId.toStdString();
-  return songFieldText(song, field);
+  auto it = song.find(field);
+  if (it == song.end()) {
+    return {};
+  }
+  const ColumnDefinition *definition =
+      columnLayoutManager_.registry().findColumn(columnId);
+  return it->second.display(definition);
 }
 
 QVariant Playlist::headerData(int section, Qt::Orientation orientation,

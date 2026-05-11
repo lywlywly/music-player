@@ -7,6 +7,8 @@ enum class ColumnSource { SongAttribute, Computed };
 
 enum class ColumnValueType { Text, Number, DateTime, Boolean };
 
+enum class ColumnDisplayKind { Raw, EpochSecondsDateTime, DurationSeconds };
+
 inline QString columnValueTypeToStorageString(ColumnValueType valueType) {
   switch (valueType) {
   case ColumnValueType::Number:
@@ -44,6 +46,7 @@ struct ColumnDefinition {
   bool sortable = true;
   bool visibleByDefault = true;
   int defaultWidth = 140;
+  ColumnDisplayKind displayKind = ColumnDisplayKind::Raw;
 };
 
 #endif // COLUMNDEFINITION_H

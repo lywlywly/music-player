@@ -46,7 +46,8 @@ ColumnRegistry::ColumnRegistry() {
   add({"bitrate", "Bitrate", ColumnSource::SongAttribute,
        ColumnValueType::Number, "", true, false, 100});
   add({"duration", "Duration", ColumnSource::SongAttribute,
-       ColumnValueType::Number, "", true, false, 100});
+       ColumnValueType::Number, "", true, false, 100,
+       ColumnDisplayKind::DurationSeconds});
   add({"sample_rate", "Sample rate", ColumnSource::SongAttribute,
        ColumnValueType::Number, "", true, false, 120});
   add({"channels", "Channels", ColumnSource::SongAttribute,
@@ -54,7 +55,8 @@ ColumnRegistry::ColumnRegistry() {
   add({"play_count", "Play Count", ColumnSource::SongAttribute,
        ColumnValueType::Number, "", true, true, 120});
   add({"last_played_timestamp", "Last Played", ColumnSource::SongAttribute,
-       ColumnValueType::DateTime, "", true, false, 180});
+       ColumnValueType::DateTime, "", true, false, 180,
+       ColumnDisplayKind::EpochSecondsDateTime});
   add({"filepath", "File path", ColumnSource::SongAttribute,
        ColumnValueType::Text, "", true, false, 360});
 }

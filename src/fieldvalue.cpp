@@ -173,6 +173,48 @@ bool FieldValue::canConvert(const std::string &textValue,
   }
 }
 
+QString FieldValue::display(const ColumnDefinition *definition) const {
+  const QString raw = QString::fromStdString(text);
+  if (!definition) {
+    return raw;
+  }
+
+  switch (definition->displayKind) {
+  case ColumnDisplayKind::EpochSecondsDateTime: {
+    bool ok = false;
+    const qint64 epochSeconds = raw.toLongLong(&ok);
+    if (!ok || epochSeconds <= 0) {
+      return raw;
+    }
+    return QDateTime::fromSecsSinceEpoch(epochSeconds)
+        .toLocalTime()
+        .toString(QStringLiteral("yyyy-MM-dd HH:mm:ss"));
+  }
+  case ColumnDisplayKind::DurationSeconds: {
+    bool ok = false;
+    const qint64 totalSeconds = raw.toLongLong(&ok);
+    if (!ok || totalSeconds <= 0) {
+      return raw;
+    }
+    const qint64 hours = totalSeconds / 3600;
+    const qint64 minutes = (totalSeconds % 3600) / 60;
+    const qint64 seconds = totalSeconds % 60;
+    if (hours > 0) {
+      return QStringLiteral("%1:%2:%3")
+          .arg(hours)
+          .arg(minutes, 2, 10, QChar('0'))
+          .arg(seconds, 2, 10, QChar('0'));
+    }
+    return QStringLiteral("%1:%2")
+        .arg(minutes, 2, 10, QChar('0'))
+        .arg(seconds, 2, 10, QChar('0'));
+  }
+  case ColumnDisplayKind::Raw:
+  default:
+    return raw;
+  }
+}
+
 bool FieldValue::operator==(const FieldValue &other) const {
   if (type != other.type || text != other.text) {
     return false;

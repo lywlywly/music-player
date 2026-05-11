@@ -32,7 +32,13 @@ QVariant LibrarySearchResultsModel::data(const QModelIndex &index,
   }
 
   const MSong &song = songLibrary_.getSongByPK(songIds_[index.row()]);
-  return songFieldText(song, columnId.toStdString());
+  auto it = song.find(columnId.toStdString());
+  if (it == song.end()) {
+    return {};
+  }
+  const ColumnDefinition *definition =
+      columnLayoutManager_.registry().findColumn(columnId);
+  return it->second.display(definition);
 }
 
 QVariant LibrarySearchResultsModel::headerData(int section,

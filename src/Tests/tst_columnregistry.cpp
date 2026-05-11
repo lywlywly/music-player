@@ -54,16 +54,22 @@ void TestColumnRegistry::builtInDefinitions_areAvailable() {
   QVERIFY(duration != nullptr);
   QCOMPARE(duration->valueType, ColumnValueType::Number);
   QVERIFY(!duration->visibleByDefault);
+  QCOMPARE(duration->displayKind, ColumnDisplayKind::DurationSeconds);
 
   const ColumnDefinition *sampleRate = registry.findColumn("sample_rate");
   QVERIFY(sampleRate != nullptr);
   QCOMPARE(sampleRate->valueType, ColumnValueType::Number);
   QVERIFY(!sampleRate->visibleByDefault);
 
+  const ColumnDefinition *lastPlayed =
+      registry.findColumn("last_played_timestamp");
+  QVERIFY(lastPlayed != nullptr);
+  QCOMPARE(lastPlayed->displayKind, ColumnDisplayKind::EpochSecondsDateTime);
+
   const ColumnDefinition *channels = registry.findColumn("channels");
-  QVERIFY(sampleRate != nullptr);
-  QCOMPARE(sampleRate->valueType, ColumnValueType::Number);
-  QVERIFY(!sampleRate->visibleByDefault);
+  QVERIFY(channels != nullptr);
+  QCOMPARE(channels->valueType, ColumnValueType::Number);
+  QVERIFY(!channels->visibleByDefault);
 }
 
 void TestColumnRegistry::builtInSongAttributeKey_onlyTrueForBuiltIns() {
