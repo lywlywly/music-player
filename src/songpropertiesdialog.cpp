@@ -37,7 +37,7 @@ SongPropertiesDialog::SongPropertiesDialog(
 SongPropertiesDialog::~SongPropertiesDialog() { delete ui; }
 
 bool SongPropertiesDialog::isNonTagInternalField(const std::string &key) {
-  return key == "filepath" || key == "status" || key == "song_identity_key" ||
+  return key == "filepath" || key == "song_identity_key" ||
          key == "song_identity_id" || key == "play_count" ||
          key == "last_played_timestamp" || key == "date_added";
 }

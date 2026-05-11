@@ -4,6 +4,7 @@
 
 #include "../columnregistry.h"
 #include "../libraryexpression.h"
+#include "../libraryexpression_parser.h"
 #include "../libraryexpression_tokenizer.h"
 
 namespace {
@@ -90,6 +91,17 @@ ExprPtr makeIf(ExprPtr condition, ExprPtr thenExpr, ExprPtr elseExpr) {
                                   std::move(elseExpr));
 }
 
+ExprPtr makeFieldRefExpr(std::string exprFieldName,
+                         std::string resolvedColumnId,
+                         ColumnValueType valueType = ColumnValueType::Text) {
+  return std::make_unique<FieldRefExpr>(ExprFieldRef{
+      std::move(exprFieldName), std::move(resolvedColumnId), valueType});
+}
+
+ExprPtr makeInterpolatedExpr(std::vector<InterpolatedStringPart> parts) {
+  return std::make_unique<InterpolatedStringExpr>(std::move(parts));
+}
+
 ExprPtr makeExprComparison(ExprPtr left, std::string valueText,
                            ExprOperatorPtr op = makeIsOperator()) {
   ExprValue value;
@@ -99,7 +111,7 @@ ExprPtr makeExprComparison(ExprPtr left, std::string valueText,
                                           std::move(value));
 }
 
-ExprToken makeToken(ExprTokenKind kind, std::string text, int start, int end) {
+ExprToken makeToken(ExprTokenKind kind, QString text, int start, int end) {
   return ExprToken{kind, std::move(text), start, end};
 }
 
@@ -142,9 +154,11 @@ private slots:
   void parse_ifThenElse();
   void parse_ifThenElseBooleanBranch();
   void parse_ifThenElseNumericBranch();
+  void parse_interpolatedStringLiteral();
   void evaluate_ifThenElse();
   void evaluate_ifThenElseBooleanBranch();
   void evaluate_ifThenElseNumericBranch();
+  void evaluate_interpolatedStringLiteral();
   void evaluate_ifExprUsedByAnd();
   void evaluate_ifExprUsedByOr();
   void evaluate_ifExprUsedByNot();
@@ -171,6 +185,7 @@ private slots:
   void reject_orWithNonBooleanOperand();
   void reject_notWithNonBooleanOperand();
   void reject_unterminatedQuotedValue();
+  void reject_unterminatedInterpolationPlaceholder();
   void reject_unsupportedComparisonForms();
   void reject_invalidTypedValue();
 };
@@ -504,6 +519,25 @@ void TestLibraryExpression::parse_ifThenElseNumericBranch() {
   QVERIFY(*result.expr == *expected);
 }
 
+void TestLibraryExpression::parse_interpolatedStringLiteral() {
+  ColumnRegistry registry;
+
+  ExprParseResult result = parseLibraryExpression(
+      QStringLiteral("\"${codec} | ${bitrate} kbps\""), registry);
+
+  QVERIFY(result.ok());
+  std::vector<InterpolatedStringPart> parts;
+  parts.push_back(InterpolatedStringPart{
+      .text = std::string{}, .expr = makeFieldRefExpr("codec", "codec")});
+  parts.push_back(InterpolatedStringPart{.text = " | ", .expr = nullptr});
+  parts.push_back(InterpolatedStringPart{
+      .text = std::string{},
+      .expr = makeFieldRefExpr("bitrate", "bitrate", ColumnValueType::Number)});
+  parts.push_back(InterpolatedStringPart{.text = " kbps", .expr = nullptr});
+  ExprPtr expected = makeInterpolatedExpr(std::move(parts));
+  QVERIFY(*result.expr == *expected);
+}
+
 void TestLibraryExpression::evaluate_ifThenElse() {
   ColumnRegistry registry;
 
@@ -565,6 +599,23 @@ void TestLibraryExpression::evaluate_ifThenElseNumericBranch() {
   ExprRuntimeValue falseValue = result.expr->evaluateValue(context);
   QVERIFY(falseValue.isNumber());
   QCOMPARE(falseValue.numberValue(), 2.0);
+}
+
+void TestLibraryExpression::evaluate_interpolatedStringLiteral() {
+  ColumnRegistry registry;
+
+  ExprParseResult result = parseLibraryExpression(
+      QStringLiteral("\"${codec} | ${bitrate} kbps\""), registry);
+  QVERIFY(result.ok());
+
+  TestEvalContext context;
+  context.values.emplace("codec", FieldValue("mp3", ColumnValueType::Text));
+  context.values.emplace("bitrate", FieldValue("320", ColumnValueType::Number));
+
+  ExprRuntimeValue value = result.expr->evaluateValue(context);
+  QVERIFY(value.isText());
+  QCOMPARE(QString::fromStdString(value.textValue()),
+           QStringLiteral("mp3 | 320 kbps"));
 }
 
 void TestLibraryExpression::evaluate_ifExprUsedByAnd() {
@@ -990,6 +1041,16 @@ void TestLibraryExpression::reject_unterminatedQuotedValue() {
 
   QVERIFY(!result.ok());
   QVERIFY(result.error.message.contains("Unterminated quoted string"));
+}
+
+void TestLibraryExpression::reject_unterminatedInterpolationPlaceholder() {
+  ColumnRegistry registry;
+
+  ExprParseResult result =
+      parseLibraryExpression(QStringLiteral("\"${codec\""), registry);
+
+  QVERIFY(!result.ok());
+  QVERIFY(result.error.message.contains("Unterminated interpolation"));
 }
 
 void TestLibraryExpression::reject_unsupportedComparisonForms() {

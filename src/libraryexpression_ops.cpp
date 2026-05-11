@@ -6,6 +6,7 @@
 namespace {
 int compareFieldValue(const FieldValue &fieldValue, std::string_view exprValue);
 FieldValue fieldValueFromRuntime(const ExprRuntimeValue &runtimeValue);
+std::string runtimeValueToText(const ExprRuntimeValue &runtimeValue);
 
 QStringList splitMultiValueText(const std::string &text) {
   QString normalized = QString::fromStdString(text);
@@ -104,6 +105,16 @@ FieldValue fieldValueFromRuntime(const ExprRuntimeValue &runtimeValue) {
   }
   return FieldValue(std::get<std::string>(runtimeValue.value),
                     ColumnValueType::Text);
+}
+
+std::string runtimeValueToText(const ExprRuntimeValue &runtimeValue) {
+  if (runtimeValue.isText()) {
+    return runtimeValue.textValue();
+  }
+  if (runtimeValue.isNumber()) {
+    return QString::number(runtimeValue.numberValue(), 'g', 17).toStdString();
+  }
+  return runtimeValue.boolValueOrFalse() ? "true" : "false";
 }
 } // namespace
 
@@ -395,6 +406,73 @@ bool IfExpr::equals(const Expr &other) const {
          elseExpr->equals(*ifExpr->elseExpr);
 }
 
+FieldRefExpr::FieldRefExpr(ExprFieldRef fieldRef)
+    : field(std::move(fieldRef)) {}
+
+ExprRuntimeValue
+FieldRefExpr::evaluateValue(const LibraryExprEvalContext &context) const {
+  const FieldValue *fieldValue = context.fieldValue(field.resolvedColumnId);
+  if (!fieldValue || fieldValue->text.empty()) {
+    return ExprRuntimeValue::fromText({});
+  }
+  if (fieldValue->type == ColumnValueType::Number) {
+    return ExprRuntimeValue::fromNumber(fieldValue->typed.number);
+  }
+  if (fieldValue->type == ColumnValueType::Boolean) {
+    return ExprRuntimeValue::fromBool(fieldValue->typed.boolean);
+  }
+  return ExprRuntimeValue::fromText(fieldValue->text);
+}
+
+bool FieldRefExpr::equals(const Expr &other) const {
+  const auto *fieldExpr = dynamic_cast<const FieldRefExpr *>(&other);
+  if (!fieldExpr) {
+    return false;
+  }
+  return field.exprFieldName == fieldExpr->field.exprFieldName &&
+         field.resolvedColumnId == fieldExpr->field.resolvedColumnId &&
+         field.valueType == fieldExpr->field.valueType;
+}
+
+InterpolatedStringExpr::InterpolatedStringExpr(
+    std::vector<InterpolatedStringPart> exprParts)
+    : parts(std::move(exprParts)) {}
+
+ExprRuntimeValue InterpolatedStringExpr::evaluateValue(
+    const LibraryExprEvalContext &context) const {
+  std::string out;
+  for (const InterpolatedStringPart &part : parts) {
+    if (part.expr) {
+      out += runtimeValueToText(part.expr->evaluateValue(context));
+    } else {
+      out += part.text;
+    }
+  }
+  return ExprRuntimeValue::fromText(std::move(out));
+}
+
+bool InterpolatedStringExpr::equals(const Expr &other) const {
+  const auto *interpolated =
+      dynamic_cast<const InterpolatedStringExpr *>(&other);
+  if (!interpolated || parts.size() != interpolated->parts.size()) {
+    return false;
+  }
+  for (size_t i = 0; i < parts.size(); ++i) {
+    const InterpolatedStringPart &left = parts[i];
+    const InterpolatedStringPart &right = interpolated->parts[i];
+    if (left.text != right.text) {
+      return false;
+    }
+    if (static_cast<bool>(left.expr) != static_cast<bool>(right.expr)) {
+      return false;
+    }
+    if (left.expr && !left.expr->equals(*right.expr)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 ExprStaticType inferExprStaticType(const Expr &expr) {
   if (dynamic_cast<const ComparisonExpr *>(&expr) ||
       dynamic_cast<const AndExpr *>(&expr) ||
@@ -428,6 +506,20 @@ ExprStaticType inferExprStaticType(const Expr &expr) {
       return ExprStaticType::Invalid;
     }
     return thenType;
+  }
+
+  if (const auto *fieldExpr = dynamic_cast<const FieldRefExpr *>(&expr)) {
+    if (fieldExpr->field.valueType == ColumnValueType::Boolean) {
+      return ExprStaticType::Bool;
+    }
+    if (fieldExpr->field.valueType == ColumnValueType::Number) {
+      return ExprStaticType::Number;
+    }
+    return ExprStaticType::Text;
+  }
+
+  if (dynamic_cast<const InterpolatedStringExpr *>(&expr)) {
+    return ExprStaticType::Text;
   }
 
   return ExprStaticType::Invalid;

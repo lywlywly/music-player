@@ -2,7 +2,6 @@
 #define LIBRARYEXPRESSION_TOKENIZER_H
 
 #include <QString>
-#include <string>
 #include <vector>
 
 enum class ExprTokenKind {
@@ -33,7 +32,9 @@ enum class ExprTokenKind {
 
 struct ExprToken {
   ExprTokenKind kind = ExprTokenKind::End;
-  std::string text;
+  QString text;
+  // Offsets are positions in the original QString (UTF-16 code units).
+  // They are Unicode-aware string indices, not UTF-8 byte offsets.
   int start = -1;
   int end = -1;
 

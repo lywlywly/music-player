@@ -29,50 +29,51 @@ tokenizeLibraryExpression(const QString &expressionText) {
         ++i;
       }
       if (i >= length) {
-        tokens.push_back({ExprTokenKind::Invalid,
-                          expressionText.mid(start).toStdString(), start,
-                          length});
+        tokens.push_back(
+            {ExprTokenKind::Invalid, expressionText.mid(start), start, length});
         break;
       }
-      tokens.push_back(
-          {ExprTokenKind::StringLiteral,
-           expressionText.mid(contentStart, i - contentStart).toStdString(),
-           start, i + 1});
+      tokens.push_back({ExprTokenKind::StringLiteral,
+                        expressionText.mid(contentStart, i - contentStart),
+                        start, i + 1});
       ++i;
       continue;
     }
     if (expressionText.at(i) == '(') {
       ++i;
-      tokens.push_back({ExprTokenKind::LParen, "(", start, i});
+      tokens.push_back({ExprTokenKind::LParen, QStringLiteral("("), start, i});
       continue;
     }
     if (expressionText.at(i) == '[') {
       ++i;
-      tokens.push_back({ExprTokenKind::LBracket, "[", start, i});
+      tokens.push_back(
+          {ExprTokenKind::LBracket, QStringLiteral("["), start, i});
       continue;
     }
     if (expressionText.at(i) == ']') {
       ++i;
-      tokens.push_back({ExprTokenKind::RBracket, "]", start, i});
+      tokens.push_back(
+          {ExprTokenKind::RBracket, QStringLiteral("]"), start, i});
       continue;
     }
     if (expressionText.at(i) == ',') {
       ++i;
-      tokens.push_back({ExprTokenKind::Comma, ",", start, i});
+      tokens.push_back({ExprTokenKind::Comma, QStringLiteral(","), start, i});
       continue;
     }
     if (expressionText.at(i) == ')') {
       ++i;
-      tokens.push_back({ExprTokenKind::RParen, ")", start, i});
+      tokens.push_back({ExprTokenKind::RParen, QStringLiteral(")"), start, i});
       continue;
     }
     if (expressionText.at(i) == '<') {
       ++i;
       if (i < length && expressionText.at(i) == '=') {
         ++i;
-        tokens.push_back({ExprTokenKind::OpLte, "<=", start, i});
+        tokens.push_back(
+            {ExprTokenKind::OpLte, QStringLiteral("<="), start, i});
       } else {
-        tokens.push_back({ExprTokenKind::OpLt, "<", start, i});
+        tokens.push_back({ExprTokenKind::OpLt, QStringLiteral("<"), start, i});
       }
       continue;
     }
@@ -80,15 +81,16 @@ tokenizeLibraryExpression(const QString &expressionText) {
       ++i;
       if (i < length && expressionText.at(i) == '=') {
         ++i;
-        tokens.push_back({ExprTokenKind::OpGte, ">=", start, i});
+        tokens.push_back(
+            {ExprTokenKind::OpGte, QStringLiteral(">="), start, i});
       } else {
-        tokens.push_back({ExprTokenKind::OpGt, ">", start, i});
+        tokens.push_back({ExprTokenKind::OpGt, QStringLiteral(">"), start, i});
       }
       continue;
     }
     if (expressionText.at(i) == '=') {
       ++i;
-      tokens.push_back({ExprTokenKind::OpEq, "=", start, i});
+      tokens.push_back({ExprTokenKind::OpEq, QStringLiteral("="), start, i});
       continue;
     }
 
@@ -98,7 +100,6 @@ tokenizeLibraryExpression(const QString &expressionText) {
     }
 
     const QString tokenText = expressionText.mid(start, i - start);
-    const std::string text = tokenText.toStdString();
     const QString upper = tokenText.toUpper();
     ExprTokenKind kind = ExprTokenKind::Identifier;
     if (upper == QStringLiteral("IS")) {
@@ -120,9 +121,9 @@ tokenizeLibraryExpression(const QString &expressionText) {
     } else if (upper == QStringLiteral("ELSE")) {
       kind = ExprTokenKind::KeywordElse;
     }
-    tokens.push_back({kind, text, start, i});
+    tokens.push_back({kind, tokenText, start, i});
   }
 
-  tokens.push_back({ExprTokenKind::End, "", length, length});
+  tokens.push_back({ExprTokenKind::End, QString(), length, length});
   return tokens;
 }

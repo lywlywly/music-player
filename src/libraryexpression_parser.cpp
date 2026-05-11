@@ -1,30 +1,46 @@
 #include "libraryexpression_parser.h"
 
+#include "columnregistry.h"
 #include "libraryexpression_ops.h"
 #include "libraryexpression_tokenizer.h"
 #include "utils.h"
 
+#include <cctype>
 #include <functional>
 #include <tuple>
 #include <utility>
 
 namespace {
+std::string_view trimAsciiWhitespace(std::string_view text) {
+  std::size_t begin = 0;
+  while (begin < text.size() &&
+         std::isspace(static_cast<unsigned char>(text[begin])) != 0) {
+    ++begin;
+  }
+  std::size_t end = text.size();
+  while (end > begin &&
+         std::isspace(static_cast<unsigned char>(text[end - 1])) != 0) {
+    --end;
+  }
+  return text.substr(begin, end - begin);
+}
+
 bool splitRangeBoundaries(std::string_view raw, std::string &start,
                           std::string &end) {
-  const QString qRaw = QString::fromStdString(std::string(raw));
-  const int sep = qRaw.indexOf(QStringLiteral(".."));
-  if (sep < 0 || sep != qRaw.lastIndexOf(QStringLiteral(".."))) {
+  const std::size_t sep = raw.find("..");
+  if (sep == std::string_view::npos ||
+      raw.find("..", sep + 2) != std::string_view::npos) {
     return false;
   }
 
-  const QString left = qRaw.left(sep).trimmed();
-  const QString right = qRaw.mid(sep + 2).trimmed();
-  if (left.isEmpty() || right.isEmpty()) {
+  const std::string_view left = trimAsciiWhitespace(raw.substr(0, sep));
+  const std::string_view right = trimAsciiWhitespace(raw.substr(sep + 2));
+  if (left.empty() || right.empty()) {
     return false;
   }
 
-  start = left.toStdString();
-  end = right.toStdString();
+  start.assign(left);
+  end.assign(right);
   return true;
 }
 
@@ -161,10 +177,15 @@ ParseStep<ExprPtr> parseComparisonExpr(const ParseContext &context, int index);
 ParseStep<ExprPtr> parseExprValueComparisonSuffix(const ParseContext &context,
                                                   ParseStep<ExprPtr> left);
 ParseStep<ExprFieldRef> parseFieldRef(const ParseContext &context, int index);
+ParseStep<ExprFieldRef> resolveFieldRefTokenText(const ParseContext &context,
+                                                 const QString &fieldText,
+                                                 int position);
 ParseStep<ExprOperatorPtr> parseComparisonOperator(const ParseContext &context,
                                                    int index);
 ParseStep<ExprValue> parseValue(const ParseContext &context, int index);
 ParseStep<ExprValue> parseListValue(const ParseContext &context, int index);
+ParseStep<ExprPtr> parseInterpolatedStringLiteral(const ParseContext &context,
+                                                  int index);
 
 ExprRuntimeValue parseLiteralRuntimeValue(const QString &rawText) {
   if (rawText.compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0) {
@@ -339,9 +360,7 @@ ParseStep<ExprPtr> parseIfExpr(const ParseContext &context, int index) {
 ParseStep<ExprPtr> parseLiteralExpr(const ParseContext &context, int index) {
   const ExprToken &token = peek(context.tokens, index);
   if (token.kind == ExprTokenKind::StringLiteral) {
-    return ParseStep<ExprPtr>{.value = std::make_unique<LiteralExpr>(
-                                  ExprRuntimeValue::fromText(token.text)),
-                              .nextIndex = index + 1};
+    return parseInterpolatedStringLiteral(context, index);
   }
   if (token.kind != ExprTokenKind::Identifier) {
     return makeErrorStep<ExprPtr>(
@@ -356,12 +375,93 @@ ParseStep<ExprPtr> parseLiteralExpr(const ParseContext &context, int index) {
     index += 1;
   }
 
-  const std::string text =
-      context.expressionText.mid(start, end - start).trimmed().toStdString();
+  const QString text = context.expressionText.mid(start, end - start).trimmed();
   return ParseStep<ExprPtr>{
-      .value = std::make_unique<LiteralExpr>(
-          parseLiteralRuntimeValue(QString::fromStdString(text))),
+      .value = std::make_unique<LiteralExpr>(parseLiteralRuntimeValue(text)),
       .nextIndex = index};
+}
+
+ParseStep<ExprPtr> parseInterpolatedStringLiteral(const ParseContext &context,
+                                                  int index) {
+  const ExprToken &token = peek(context.tokens, index);
+  const QString content = token.text;
+  if (!content.contains(QStringLiteral("${"))) {
+    return ParseStep<ExprPtr>{
+        .value = std::make_unique<LiteralExpr>(
+            ExprRuntimeValue::fromText(token.text.toStdString())),
+        .nextIndex = index + 1};
+  }
+  std::vector<InterpolatedStringPart> parts;
+  const auto absolutePos = [&](int contentOffset) {
+    return token.start + 1 + contentOffset;
+  };
+  const auto appendTextPart = [&](const QString &text) {
+    if (text.isEmpty()) {
+      return;
+    }
+    parts.push_back(
+        InterpolatedStringPart{.text = text.toStdString(), .expr = nullptr});
+  };
+  int cursor = 0;
+
+  while (cursor < content.size()) {
+    const int marker = content.indexOf(QStringLiteral("${"), cursor);
+    if (marker < 0) {
+      appendTextPart(content.mid(cursor));
+      break;
+    }
+
+    if (marker > cursor) {
+      appendTextPart(content.mid(cursor, marker - cursor));
+    }
+
+    const int exprStart = marker + 2;
+    const int exprEnd = content.indexOf(QChar('}'), exprStart);
+    if (exprEnd < 0) {
+      return makeErrorStep<ExprPtr>(
+          QStringLiteral("Unterminated interpolation `${...}`"),
+          absolutePos(marker));
+    }
+
+    const QString innerExprText = content.mid(exprStart, exprEnd - exprStart);
+    if (innerExprText.trimmed().isEmpty()) {
+      return makeErrorStep<ExprPtr>(QStringLiteral("Empty interpolation `${}`"),
+                                    absolutePos(exprStart));
+    }
+
+    ExprPtr innerExpr;
+    const std::vector<ExprToken> innerTokens =
+        tokenizeLibraryExpression(innerExprText);
+    if (innerTokens.size() == 2 &&
+        innerTokens.front().kind == ExprTokenKind::Identifier &&
+        innerTokens.back().kind == ExprTokenKind::End) {
+      auto resolved = resolveFieldRefTokenText(
+          context, innerTokens.front().text, absolutePos(exprStart));
+      if (resolved.ok()) {
+        innerExpr = std::make_unique<FieldRefExpr>(std::move(resolved.value));
+      }
+    }
+
+    if (!innerExpr) {
+      ExprParseResult embedded =
+          parseLibraryExpression(innerExprText, context.registry);
+      if (!embedded.ok()) {
+        const int relativeErrorPos =
+            embedded.error.position < 0 ? 0 : embedded.error.position;
+        return makeErrorStep<ExprPtr>(
+            embedded.error.message, absolutePos(exprStart + relativeErrorPos));
+      }
+      innerExpr = std::move(embedded.expr);
+    }
+
+    parts.push_back(InterpolatedStringPart{.text = std::string{},
+                                           .expr = std::move(innerExpr)});
+    cursor = exprEnd + 1;
+  }
+
+  return ParseStep<ExprPtr>{
+      .value = std::make_unique<InterpolatedStringExpr>(std::move(parts)),
+      .nextIndex = index + 1};
 }
 
 ParseStep<ExprPtr> parseExprValueComparisonSuffix(const ParseContext &context,
@@ -484,43 +584,50 @@ ParseStep<ExprFieldRef> parseFieldRef(const ParseContext &context, int index) {
                                        fieldToken.start);
   }
 
-  const std::string normalizedField = util::normalizedText(fieldToken.text);
+  auto resolved =
+      resolveFieldRefTokenText(context, fieldToken.text, fieldToken.start);
+  if (!resolved.ok()) {
+    return resolved;
+  }
+  resolved.nextIndex = index + 1;
+  return resolved;
+}
+
+ParseStep<ExprFieldRef> resolveFieldRefTokenText(const ParseContext &context,
+                                                 const QString &fieldText,
+                                                 int position) {
+  const QString normalizedFieldQ = util::normalizedText(fieldText);
+  const std::string normalizedField = normalizedFieldQ.toStdString();
 
   const ColumnDefinition *direct =
-      context.registry.findColumn(QString::fromStdString(normalizedField));
+      context.registry.findColumn(normalizedFieldQ);
   if (direct) {
     const bool searchableDirect =
         direct->source == ColumnSource::SongAttribute ||
         (direct->source == ColumnSource::Computed &&
          !direct->expression.trimmed().isEmpty());
-    if (searchableDirect) {
-      return ParseStep<ExprFieldRef>{
-          .value =
-              ExprFieldRef{normalizedField, normalizedField, direct->valueType},
-          .nextIndex = index + 1};
+    if (!searchableDirect) {
+      return makeErrorStep<ExprFieldRef>(
+          QStringLiteral("Field `%1` is not searchable").arg(fieldText),
+          position);
     }
 
-    if (direct->id == QStringLiteral("status")) {
-      return makeErrorStep<ExprFieldRef>(
-          QStringLiteral("Field `%1` is not searchable")
-              .arg(QString::fromStdString(fieldToken.text)),
-          fieldToken.start);
-    }
+    return ParseStep<ExprFieldRef>{
+        .value =
+            ExprFieldRef{normalizedField, normalizedField, direct->valueType}};
   }
 
-  const std::string customColumnId = std::string("attr:") + normalizedField;
-  const ColumnDefinition *custom =
-      context.registry.findColumn(QString::fromStdString(customColumnId));
+  const QString customColumnIdQ = QStringLiteral("attr:") + normalizedFieldQ;
+  const std::string customColumnId = customColumnIdQ.toStdString();
+  const ColumnDefinition *custom = context.registry.findColumn(customColumnIdQ);
   if (!custom || custom->source != ColumnSource::SongAttribute) {
     return makeErrorStep<ExprFieldRef>(
-        QStringLiteral("Unknown field `%1`")
-            .arg(QString::fromStdString(fieldToken.text)),
-        fieldToken.start);
+        QStringLiteral("Unknown field `%1`").arg(fieldText), position);
   }
 
   return ParseStep<ExprFieldRef>{
-      .value = ExprFieldRef{normalizedField, customColumnId, custom->valueType},
-      .nextIndex = index + 1};
+      .value =
+          ExprFieldRef{normalizedField, customColumnId, custom->valueType}};
 }
 
 ParseStep<ExprOperatorPtr> parseComparisonOperator(const ParseContext &context,
@@ -577,14 +684,14 @@ ParseStep<ExprValue> parseValue(const ParseContext &context, int index) {
       token.kind != ExprTokenKind::StringLiteral) {
     return makeErrorStep<ExprValue>(
         QStringLiteral("Unexpected token `%1` while expecting a value")
-            .arg(QString::fromStdString(token.text)),
+            .arg(token.text),
         token.start);
   }
 
   if (token.kind == ExprTokenKind::StringLiteral) {
     return ParseStep<ExprValue>{
-        .value =
-            ExprValue{.kind = ExprValue::Kind::Scalar, .values = {token.text}},
+        .value = ExprValue{.kind = ExprValue::Kind::Scalar,
+                           .values = {token.text.toStdString()}},
         .nextIndex = index + 1};
   }
 
@@ -652,7 +759,7 @@ ParseStep<ExprValue> parseListValue(const ParseContext &context, int index) {
 
     if (token.kind == ExprTokenKind::StringLiteral) {
       sawQuotedItem = true;
-      value.values.push_back(token.text);
+      value.values.push_back(token.text.toStdString());
       index += 1;
     } else {
       const int start = token.start;
@@ -707,8 +814,8 @@ ExprParseResult parseLibraryExpression(const QString &expressionText,
   if (nextToken.kind != ExprTokenKind::End) {
     return ExprParseResult{
         .error = ExprParseError{
-            .message = QStringLiteral("Unexpected token `%1`")
-                           .arg(QString::fromStdString(nextToken.text)),
+            .message =
+                QStringLiteral("Unexpected token `%1`").arg(nextToken.text),
             .position = nextToken.start}};
   }
 

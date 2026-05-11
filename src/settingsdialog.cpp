@@ -1,4 +1,5 @@
 #include "settingsdialog.h"
+#include "libraryexpression_parser.h"
 #include "ui_settingsdialog.h"
 #include "utils.h"
 #include <QApplication>

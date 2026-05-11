@@ -81,7 +81,7 @@ QVariant Playlist::headerData(int section, Qt::Orientation orientation,
 void Playlist::sortByColumnId(const QString &columnId, int order) {
   const ColumnDefinition *definition =
       columnLayoutManager_.registry().findColumn(columnId);
-  if (!definition || !definition->sortable || columnId == "status") {
+  if (!definition || !definition->sortable) {
     return;
   }
 

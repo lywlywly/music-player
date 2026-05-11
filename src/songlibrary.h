@@ -3,7 +3,7 @@
 
 #include "columnregistry.h"
 #include "fieldvalue.h"
-#include "libraryexpression.h"
+#include "libraryexpression_parser.h"
 #include <QSqlDatabase>
 #include <QString>
 #include <functional>

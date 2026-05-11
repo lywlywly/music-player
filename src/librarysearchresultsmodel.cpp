@@ -78,7 +78,14 @@ QList<QString> LibrarySearchResultsModel::visibleSongColumnIds() const {
   for (const QString &id : columnLayoutManager_.visibleColumnIds()) {
     const ColumnDefinition *definition =
         columnLayoutManager_.registry().findColumn(id);
-    if (!definition || id == "status") {
+    if (!definition) {
+      continue;
+    }
+    const bool isSongColumn =
+        definition->source == ColumnSource::SongAttribute ||
+        (definition->source == ColumnSource::Computed &&
+         !definition->expression.trimmed().isEmpty());
+    if (!isSongColumn) {
       continue;
     }
     ids.push_back(id);

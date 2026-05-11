@@ -2,9 +2,7 @@
 #define LIBRARYEXPRESSION_H
 
 #include "columndefinition.h"
-#include "columnregistry.h"
 #include "fieldvalue.h"
-#include <QString>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -222,22 +220,31 @@ struct IfExpr final : Expr {
   bool equals(const Expr &other) const override;
 };
 
-struct ExprParseError {
-  QString message;
-  int position = -1;
+struct FieldRefExpr final : Expr {
+  ExprFieldRef field;
+
+  explicit FieldRefExpr(ExprFieldRef fieldRef);
+  ExprRuntimeValue
+  evaluateValue(const LibraryExprEvalContext &context) const override;
+  bool equals(const Expr &other) const override;
 };
 
-struct ExprParseResult {
+struct InterpolatedStringPart {
+  std::string text;
   ExprPtr expr;
-  ExprParseError error;
+};
 
-  bool ok() const { return expr != nullptr; }
+struct InterpolatedStringExpr final : Expr {
+  std::vector<InterpolatedStringPart> parts;
+
+  explicit InterpolatedStringExpr(
+      std::vector<InterpolatedStringPart> exprParts);
+  ExprRuntimeValue
+  evaluateValue(const LibraryExprEvalContext &context) const override;
+  bool equals(const Expr &other) const override;
 };
 
 enum class ExprStaticType { Invalid, Bool, Text, Number };
 ExprStaticType inferExprStaticType(const Expr &expr);
-
-ExprParseResult parseLibraryExpression(const QString &expressionText,
-                                       const ColumnRegistry &registry);
 
 #endif // LIBRARYEXPRESSION_H
