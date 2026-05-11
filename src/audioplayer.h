@@ -18,6 +18,7 @@ public:
 signals:
   void durationChanged(qint64 duration);
   void positionChanged(qint64 milliseconds);
+  void bitrateChanged(qint64 bitsPerSecond);
   void mediaStatusChanged(QMediaPlayer::MediaStatus status);
 };
 

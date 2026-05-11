@@ -13,6 +13,7 @@ bool writeTags(
     const std::string &filepath,
     const std::unordered_map<std::string, std::string> &updatedFields,
     const ColumnRegistry &columnRegistry);
+bool isLikelyCbrAudioFile(const std::string &filepath);
 std::pair<std::vector<uint8_t>, size_t> extractCoverImage(const std::string &);
 } // namespace SongParser
 

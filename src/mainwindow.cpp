@@ -17,6 +17,7 @@
 #endif
 #include "databasemanager.h"
 #include "librarysearchdialog.h"
+#include "lyricsloader.h"
 #include "settingsdialog.h"
 #include "songparser.h"
 #include <QActionGroup>
@@ -311,6 +312,8 @@ void MainWindow::setUpPlaybackBackend() {
           &MainWindow::durationChanged);
   connect(backendManager->player(), &AudioPlayer::positionChanged, this,
           &MainWindow::positionChanged);
+  connect(backendManager->player(), &AudioPlayer::bitrateChanged, this,
+          &MainWindow::bitrateChanged);
 }
 
 void MainWindow::playSong(const MSong &song, int row, Playlist *pl) {
@@ -322,6 +325,17 @@ void MainWindow::playSong(const MSong &song, int row, Playlist *pl) {
   std::unordered_map<std::string, std::string> remainingFields;
   const MSong &activeSong =
       songLibrary.refreshSongFromFile(filepath, &remainingFields);
+  currentBitrateBps_ = 0;
+  currentTagBitrateBps_ = 0;
+  useTagBitrateForCurrentTrack_ = false;
+  if (const auto bitrateIt = activeSong.find("bitrate");
+      bitrateIt != activeSong.end()) {
+    currentTagBitrateBps_ = static_cast<qint64>(bitrateIt->second.typed.number *
+                                                static_cast<double>(1000));
+  }
+  if (currentTagBitrateBps_ > 0) {
+    useTagBitrateForCurrentTrack_ = SongParser::isLikelyCbrAudioFile(filepath);
+  }
   resetPlayStatsSession(songPk);
   songLibrary.markSongPlayedAtStart(songPk, unixNowSeconds());
   playlistTabs->notifySongDataChangedInAllPlaylists(songPk);
@@ -389,6 +403,9 @@ void MainWindow::toggle() {
 void MainWindow::stop() {
   backendManager->player()->stop();
   control.stop();
+  currentBitrateBps_ = 0;
+  currentTagBitrateBps_ = 0;
+  useTagBitrateForCurrentTrack_ = false;
   updatePlaybackTimeStatus();
   sysMedia->setPlaybackState(ISystemMediaInterface::PlaybackState::Stopped);
 }
@@ -499,14 +516,32 @@ void MainWindow::positionChanged(qint64 progress) {
   sysMedia->updateCurrentPosition(progress);
 }
 
+void MainWindow::bitrateChanged(qint64 bitsPerSecond) {
+  if (useTagBitrateForCurrentTrack_ && currentTagBitrateBps_ > 0) {
+    return;
+  }
+  currentBitrateBps_ = std::max<qint64>(0, bitsPerSecond);
+  updatePlaybackTimeStatus();
+}
+
 void MainWindow::updatePlaybackTimeStatus() {
   if (control.getStatus() == PlaybackQueue::PlaybackStatus::None) {
     statusBar()->clearMessage();
     return;
   }
-  statusBar()->showMessage(
+  QString message =
       QStringLiteral("%1 / %2").arg(formatPlaybackTime(currentPositionMs_),
-                                    formatPlaybackTime(currentDurationMs_)));
+                                    formatPlaybackTime(currentDurationMs_));
+  const qint64 bitrateBps =
+      useTagBitrateForCurrentTrack_ && currentTagBitrateBps_ > 0
+          ? currentTagBitrateBps_
+          : (currentBitrateBps_ > 0 ? currentBitrateBps_
+                                    : currentTagBitrateBps_);
+  if (bitrateBps > 0) {
+    message += QStringLiteral("  |  %1 kbps")
+                   .arg(bitrateBps / static_cast<qint64>(1000));
+  }
+  statusBar()->showMessage(message);
 }
 
 void MainWindow::seek(int mseconds) {

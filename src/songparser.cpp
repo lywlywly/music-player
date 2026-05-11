@@ -216,6 +216,22 @@ bool SongParser::writeTags(
   return file.file()->save();
 }
 
+bool SongParser::isLikelyCbrAudioFile(const std::string &filepath) {
+#ifdef _WIN32
+  int wlen = MultiByteToWideChar(CP_UTF8, 0, filepath.c_str(), -1, nullptr, 0);
+  std::wstring wpath(wlen, L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, filepath.c_str(), -1, wpath.data(), wlen);
+  TagLib::FileRef file(wpath.c_str(), false);
+#else
+  TagLib::FileRef file(filepath.c_str(), false);
+#endif
+  if (file.isNull()) {
+    return false;
+  }
+  return dynamic_cast<const TagLib::MPEG::File *>(file.file()) != nullptr ||
+         dynamic_cast<const TagLib::RIFF::WAV::File *>(file.file()) != nullptr;
+}
+
 MSong SongParser::parse(
     const std::string &filepath, const ColumnRegistry &columnRegistry,
     std::unordered_map<std::string, std::string> *remainingFields) {
@@ -236,7 +252,7 @@ MSong SongParser::parse(
     remainingFields->clear();
   }
 
-  if (!file.isNull() && file.file()) {
+  if (!file.isNull()) {
     const TagLib::PropertyMap propertyMap = file.file()->properties();
     for (auto it = propertyMap.begin(); it != propertyMap.end(); ++it) {
       if (it->second.isEmpty()) {

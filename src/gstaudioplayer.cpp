@@ -1,6 +1,7 @@
 #include "gstaudioplayer.h"
 #include <QAudioDevice>
 #include <QtGlobal>
+#include <cstring>
 #include <qdebug.h>
 
 #if defined(Q_OS_MACOS)
@@ -129,6 +130,7 @@ void GstAudioPlayer::stop() {
   currentSource_ = QUrl{};
   trackedPositionMs_ = 0;
   playbackState_ = QMediaPlayer::StoppedState;
+  clearBitrateState();
   gst_element_set_state(playbin_, GST_STATE_NULL);
   emit positionChanged(0);
   g_object_set(playbin_, "uri", NULL, NULL);
@@ -137,12 +139,15 @@ void GstAudioPlayer::stop() {
 void GstAudioPlayer::setSource(const QUrl &source) {
   currentSource_ = source;
   trackedPositionMs_ = 0;
+  detachBitrateProbe();
+  clearBitrateState();
   gst_element_set_state(playbin_, GST_STATE_READY);
   applyTrackedSource();
 }
 
 void GstAudioPlayer::setPosition(qint64 milliseconds) {
   trackedPositionMs_ = milliseconds;
+  clearBitrateState();
   gint64 position_ns = static_cast<gint64>(milliseconds) * GST_MSECOND;
 
   gst_element_seek_simple(
@@ -167,12 +172,48 @@ void GstAudioPlayer::updatePosition() {
     return;
   }
   gint64 position_ns = 0;
-  if (gst_element_query_position(playbin_, GST_FORMAT_TIME, &position_ns)) {
-    trackedPositionMs_ = position_ns / GST_MSECOND;
-    if (playbackState_ == QMediaPlayer::PlayingState) {
-      emit positionChanged(trackedPositionMs_);
+  if (!gst_element_query_position(playbin_, GST_FORMAT_TIME, &position_ns)) {
+    return;
+  }
+
+  trackedPositionMs_ = position_ns / GST_MSECOND;
+  if (playbackState_ != QMediaPlayer::PlayingState) {
+    return;
+  }
+
+  if (lastBitrateSamplePositionMs_ < 0) {
+    bitrateWindowBytes_.store(0);
+    lastBitrateSamplePositionMs_ = trackedPositionMs_;
+  } else {
+    const qint64 deltaMs = trackedPositionMs_ - lastBitrateSamplePositionMs_;
+    if (deltaMs >= 1000) {
+      const guint64 bytes = bitrateWindowBytes_.exchange(0);
+      const qint64 bitrateBps =
+          bytes > 0 ? static_cast<qint64>(bytes * 8 * 1000 / deltaMs) : 0;
+      emit bitrateChanged(bitrateBps);
+      lastBitrateSamplePositionMs_ = trackedPositionMs_;
     }
   }
+  emit positionChanged(trackedPositionMs_);
+}
+
+void GstAudioPlayer::onElementSetup(GstElement *, GstElement *element,
+                                    gpointer user_data) {
+  auto *self = static_cast<GstAudioPlayer *>(user_data);
+  self->attachBitrateProbeOnDecoder(element);
+}
+
+GstPadProbeReturn GstAudioPlayer::onBitrateProbe(GstPad *,
+                                                 GstPadProbeInfo *info,
+                                                 gpointer user_data) {
+  auto *self = static_cast<GstAudioPlayer *>(user_data);
+  GstBuffer *buffer = gst_pad_probe_info_get_buffer(info);
+  if (!buffer) {
+    return GST_PAD_PROBE_OK;
+  }
+  self->bitrateWindowBytes_.fetch_add(
+      static_cast<guint64>(gst_buffer_get_size(buffer)));
+  return GST_PAD_PROBE_OK;
 }
 
 void GstAudioPlayer::onBusMessage(GstBus *, GstMessage *msg,
@@ -246,9 +287,12 @@ void GstAudioPlayer::initializePipeline() {
   g_signal_connect(bus, "message", G_CALLBACK(&GstAudioPlayer::onBusMessage),
                    this);
   gst_object_unref(bus);
+  g_signal_connect(playbin_, "element-setup",
+                   G_CALLBACK(&GstAudioPlayer::onElementSetup), this);
 }
 
 void GstAudioPlayer::teardownPipeline() {
+  detachBitrateProbe();
   if (playbin_) {
     GstBus *bus = gst_element_get_bus(playbin_);
     if (bus) {
@@ -269,6 +313,54 @@ void GstAudioPlayer::teardownPipeline() {
   if (rgvolume_) {
     gst_object_unref(rgvolume_);
     rgvolume_ = nullptr;
+  }
+}
+
+void GstAudioPlayer::clearBitrateState() {
+  lastBitrateSamplePositionMs_ = -1;
+  bitrateWindowBytes_.store(0);
+  emit bitrateChanged(0);
+}
+
+void GstAudioPlayer::attachBitrateProbeOnDecoder(GstElement *element) {
+  // One decoder probe is enough for bitrate estimation in the current pipeline.
+  if (bitrateProbeId_ != 0) {
+    return;
+  }
+  if (!element) {
+    return;
+  }
+  GstElementFactory *factory = gst_element_get_factory(element);
+  if (!factory) {
+    return;
+  }
+  const gchar *klass =
+      gst_element_factory_get_metadata(factory, GST_ELEMENT_METADATA_KLASS);
+  if (!klass || !std::strstr(klass, "Decoder/Audio")) {
+    return;
+  }
+
+  GstPad *sinkPad = gst_element_get_static_pad(element, "sink");
+  if (!sinkPad) {
+    return;
+  }
+
+  bitrateProbeId_ =
+      gst_pad_add_probe(sinkPad, GST_PAD_PROBE_TYPE_BUFFER,
+                        &GstAudioPlayer::onBitrateProbe, this, nullptr);
+  bitrateProbePad_ = sinkPad;
+  lastBitrateSamplePositionMs_ = -1;
+  bitrateWindowBytes_.store(0);
+}
+
+void GstAudioPlayer::detachBitrateProbe() {
+  if (bitrateProbeId_ != 0) {
+    gst_pad_remove_probe(bitrateProbePad_, bitrateProbeId_);
+  }
+  bitrateProbeId_ = 0;
+  if (bitrateProbePad_) {
+    gst_object_unref(bitrateProbePad_);
+    bitrateProbePad_ = nullptr;
   }
 }
 

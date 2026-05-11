@@ -76,6 +76,7 @@ of `README.md`.
   * Manages GLib loop thread for GStreamer on macOS/Windows.
 * `AudioPlayer` (+ concrete backends)
   * Transport + media events consumed by `MainWindow`.
+  * Exposes `bitrateChanged(bitsPerSecond)` for playback-time bitrate updates.
 
 ### Search expression domain
 
@@ -139,6 +140,19 @@ of `README.md`.
 * `last_played_timestamp` is set at playback start.
 * `play_count` increments once per play session with near-end + listened-duration gating.
 * Stats are stored by song identity, so multiple files with the same normalized identity share counters.
+
+### Bitrate display behavior
+
+* `MainWindow` status bar shows `time / duration`, and appends bitrate when available.
+* `GstAudioPlayer` provides playback-time bitrate:
+  * hooks `playbin` `element-setup`,
+  * attaches one pad probe to the first `Decoder/Audio` sink pad,
+  * accumulates buffer bytes in an atomic counter,
+  * emits `bitrateChanged` about once per second from `updatePosition()`.
+* For tracks treated as CBR (`mp3` and `wav`, detected via TagLib file type),
+  status display prefers parsed tag bitrate from song metadata.
+* `QTAudioPlayer` does not currently emit runtime bitrate updates, so UI falls
+  back to tag bitrate when present.
 
 ### Playlist persistence
 

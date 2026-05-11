@@ -7,6 +7,7 @@
 #include <QObject>
 #include <QTimer>
 #include <QUrl>
+#include <atomic>
 #include <gst/gst.h>
 
 // GStreamer-backed player with ReplayGain support. Runtime output-device
@@ -34,6 +35,9 @@ public:
 private:
   void initializePipeline();
   void teardownPipeline();
+  void clearBitrateState();
+  void attachBitrateProbeOnDecoder(GstElement *element);
+  void detachBitrateProbe();
   // QMediaDevices::audioOutputsChanged can fire for transient hardware
   // power-state changes (for example, USB DAC sleep/wake) even when the
   // effective default output device is unchanged. This noisy behavior is
@@ -43,6 +47,10 @@ private:
   void updatePosition();
   void emitDurationIfAvailable();
   void applyTrackedSource();
+  static void onElementSetup(GstElement *, GstElement *element,
+                             gpointer user_data);
+  static GstPadProbeReturn onBitrateProbe(GstPad *, GstPadProbeInfo *info,
+                                          gpointer user_data);
   static void onBusMessage(GstBus *, GstMessage *msg, gpointer user_data);
   GstElement *playbin_;
   GstElement *audioSink_ = nullptr;
@@ -56,6 +64,10 @@ private:
   qint64 trackedPositionMs_ = 0;
   QMediaPlayer::PlaybackState playbackState_ = QMediaPlayer::StoppedState;
   QTimer *positionTimer_;
+  GstPad *bitrateProbePad_ = nullptr;
+  gulong bitrateProbeId_ = 0;
+  std::atomic<guint64> bitrateWindowBytes_{0};
+  qint64 lastBitrateSamplePositionMs_ = -1;
 };
 
 #endif // GSTAUDIOPLAYER_H

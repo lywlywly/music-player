@@ -7,7 +7,6 @@
 #include "databasemanager.h"
 #include "globalcolumnlayoutmanager.h"
 #include "isystemmediainterface.h"
-#include "lyricsloader.h"
 #include "lyricsmanager.h"
 #include "playbackbackendmanager.h"
 #include "playbackmanager.h"
@@ -38,6 +37,7 @@ protected:
 private:
   void positionChanged(qint64 progress);
   void durationChanged(qint64 duration);
+  void bitrateChanged(qint64 bitsPerSecond);
   void statusChanged(QMediaPlayer::MediaStatus status);
   void updatePlaybackTimeStatus();
   void updateImageSize();
@@ -94,6 +94,9 @@ private:
   ISystemMediaInterface *sysMedia;
   qint64 currentDurationMs_ = 0;
   qint64 currentPositionMs_ = 0;
+  qint64 currentBitrateBps_ = 0;
+  qint64 currentTagBitrateBps_ = 0;
+  bool useTagBitrateForCurrentTrack_ = false;
   int currentTrackPk_ = -1;
   qint64 sessionDurationMs_ = 0;
   qint64 sessionMaxPositionMs_ = 0;
