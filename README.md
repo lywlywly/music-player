@@ -106,6 +106,15 @@ cd src
 ctest --test-dir build-tests --output-on-failure
 ```
 
+### TagLib source in this repo
+
+By default, this project builds TagLib from the bundled submodule at
+`third_party/taglib` (`MYPLAYER_USE_BUNDLED_TAGLIB=ON` in CMake).
+
+This repo uses a [TagLib fork](https://github.com/lywlywly/taglib) submodule and currently prefers
+ALAC bitrate computed from MP4 `mdat` payload bytes and duration (average bitrate)
+instead of nominal header bitrate.
+
 ### macOS (Qt Creator troubleshooting)
 
 Qt Creator may set `DYLD_LIBRARY_PATH` in the Run Environment. On macOS, this can cause system image decode paths used by Media Center artwork/now-playing integration to load Homebrew codec libraries (for example `/opt/homebrew/Cellar/libpng/...`) and lead to runtime crashes.

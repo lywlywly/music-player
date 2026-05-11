@@ -36,6 +36,11 @@ of `README.md`.
   * Parses file tags into built-in + dynamic fields and remaining raw tag fields.
   * Multi-value tag fields are displayed as comma-separated text (`,`).
   * Writes updated/removed tags back to audio files (`writeTags`).
+  * Uses TagLib built from the bundled fork submodule
+    ([`third_party/taglib`](https://github.com/lywlywly/taglib)) by default, so TagLib source edits
+    in that submodule are applied after rebuild.
+  * ALAC bitrate prefers average bitrate derived from MP4 `mdat` payload bytes
+    and duration.
 
 ### Playlist domain
 

@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.16)
 project(my_player LANGUAGES CXX)
 
 option(BUILD_TESTING "Build tests" OFF)
+option(MYPLAYER_USE_BUNDLED_TAGLIB
+  "Build TagLib from third_party/taglib submodule" ON)
 
 if(APPLE)
   enable_language(OBJCXX)
@@ -14,9 +16,12 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Sql Test Multimedia Network Concurrent)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Sql Multimedia Network Concurrent)
 if(LINUX)
   find_package(Qt6 REQUIRED COMPONENTS DBus)
+endif()
+if(BUILD_TESTING)
+  find_package(Qt6 REQUIRED COMPONENTS Test)
 endif()
 
 find_package(PkgConfig REQUIRED)
@@ -26,7 +31,22 @@ if(APPLE)
   set(ICU_ROOT "/opt/homebrew/opt/icu4c")
 endif()
 find_package(ICU REQUIRED COMPONENTS i18n uc data)
-find_package(TagLib CONFIG REQUIRED)
+if(MYPLAYER_USE_BUNDLED_TAGLIB)
+  set(MYPLAYER_BUILD_TESTING_SAVED "${BUILD_TESTING}")
+  set(BUILD_TESTING OFF CACHE BOOL "Build tests" FORCE)
+  set(BUILD_BINDINGS OFF CACHE BOOL "" FORCE)
+  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../third_party/taglib"
+    "${CMAKE_CURRENT_BINARY_DIR}/third_party/taglib")
+  set(BUILD_TESTING "${MYPLAYER_BUILD_TESTING_SAVED}" CACHE BOOL "Build tests" FORCE)
+  if(TARGET TagLib::tag)
+    set(MYPLAYER_TAGLIB_TARGET TagLib::tag)
+  else()
+    set(MYPLAYER_TAGLIB_TARGET tag)
+  endif()
+else()
+  find_package(TagLib CONFIG REQUIRED)
+  set(MYPLAYER_TAGLIB_TARGET TagLib::tag)
+endif()
 pkg_check_modules(GST IMPORTED_TARGET REQUIRED gstreamer-1.0)
 
 if(WIN32)
@@ -174,7 +194,7 @@ target_link_libraries(
   Qt6::Network
   Qt6::Concurrent
   ${ICU_LIBRARIES}
-  TagLib::tag
+  ${MYPLAYER_TAGLIB_TARGET}
   PkgConfig::GST
 )
 
