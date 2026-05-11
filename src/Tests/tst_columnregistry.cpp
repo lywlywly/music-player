@@ -29,6 +29,7 @@ void TestColumnRegistry::builtInDefinitions_areAvailable() {
   QVERIFY(registry.hasColumn("genre"));
   QVERIFY(registry.hasColumn("codec"));
   QVERIFY(registry.hasColumn("bitrate"));
+  QVERIFY(registry.hasColumn("duration"));
   QVERIFY(registry.hasColumn("sample_rate"));
   QVERIFY(registry.hasColumn("filepath"));
   QVERIFY(registry.hasColumn("channels"));
@@ -48,6 +49,11 @@ void TestColumnRegistry::builtInDefinitions_areAvailable() {
   QVERIFY(bitrate != nullptr);
   QCOMPARE(bitrate->valueType, ColumnValueType::Number);
   QVERIFY(!bitrate->visibleByDefault);
+
+  const ColumnDefinition *duration = registry.findColumn("duration");
+  QVERIFY(duration != nullptr);
+  QCOMPARE(duration->valueType, ColumnValueType::Number);
+  QVERIFY(!duration->visibleByDefault);
 
   const ColumnDefinition *sampleRate = registry.findColumn("sample_rate");
   QVERIFY(sampleRate != nullptr);

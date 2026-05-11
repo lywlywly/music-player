@@ -300,6 +300,11 @@ MSong SongParser::parse(
         tags["bitrate"] =
             FieldValue(std::to_string(bitrate), ColumnValueType::Number);
       }
+      const int duration = audioProperties->lengthInSeconds();
+      if (duration > 0) {
+        tags["duration"] =
+            FieldValue(std::to_string(duration), ColumnValueType::Number);
+      }
       const int sampleRate = audioProperties->sampleRate();
       if (sampleRate > 0) {
         tags["sample_rate"] =

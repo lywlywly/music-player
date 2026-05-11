@@ -45,6 +45,8 @@ ColumnRegistry::ColumnRegistry() {
        true, false, 120});
   add({"bitrate", "Bitrate", ColumnSource::SongAttribute,
        ColumnValueType::Number, "", true, false, 100});
+  add({"duration", "Duration", ColumnSource::SongAttribute,
+       ColumnValueType::Number, "", true, false, 100});
   add({"sample_rate", "Sample rate", ColumnSource::SongAttribute,
        ColumnValueType::Number, "", true, false, 120});
   add({"channels", "Channels", ColumnSource::SongAttribute,
