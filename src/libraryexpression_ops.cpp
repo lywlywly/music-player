@@ -1,11 +1,12 @@
 #include "libraryexpression_ops.h"
+#include "fieldformatter.h"
 #include "utils.h"
 
 #include <QStringList>
 
 namespace {
-int compareFieldValue(const FieldValue &fieldValue, std::string_view exprValue);
-FieldValue fieldValueFromRuntime(const ExprRuntimeValue &runtimeValue);
+int compareFieldValue(std::string_view fieldText, ValueType valueType,
+                      std::string_view exprValue);
 std::string runtimeValueToText(const ExprRuntimeValue &runtimeValue);
 
 QStringList splitMultiValueText(const std::string &text) {
@@ -26,100 +27,81 @@ bool fieldHasValue(const std::string &fieldText, const std::string &exprValue) {
   return false;
 }
 
-bool fieldHasTypedValue(const FieldValue &fieldValue,
+bool fieldHasTypedValue(std::string_view fieldText, ValueType valueType,
                         const std::string &exprValue) {
-  if (fieldValue.text.empty()) {
+  if (fieldText.empty()) {
     return false;
   }
 
-  const QStringList parts = splitMultiValueText(fieldValue.text);
+  const QStringList parts = splitMultiValueText(std::string(fieldText));
   for (const QString &part : parts) {
     const std::string partText = part.trimmed().toStdString();
     if (partText.empty()) {
       continue;
     }
-    if (!FieldValue::canConvert(partText, fieldValue.type)) {
-      continue;
-    }
-    const FieldValue partValue(partText, fieldValue.type);
-    if (compareFieldValue(partValue, exprValue) == 0) {
+    bool ok = false;
+    const int cmp = compareFieldText(partText, exprValue, valueType, ok);
+    if (ok && cmp == 0) {
       return true;
     }
   }
   return false;
 }
 
-int compareFieldValue(const FieldValue &fieldValue,
+int compareFieldValue(std::string_view fieldText, ValueType valueType,
                       std::string_view exprValue) {
-  const std::string expressionText(exprValue);
-  const FieldValue converted(expressionText, fieldValue.type);
+  bool ok = false;
+  const int result = compareFieldText(std::string(fieldText),
+                                      std::string(exprValue), valueType, ok);
+  if (ok) {
+    return result;
+  }
 
-  switch (fieldValue.type) {
-  case ColumnValueType::Number:
-    if (fieldValue.typed.number < converted.typed.number) {
-      return -1;
-    }
-    if (fieldValue.typed.number > converted.typed.number) {
-      return 1;
-    }
-    return 0;
-  case ColumnValueType::DateTime:
-    if (fieldValue.typed.epochMs < converted.typed.epochMs) {
-      return -1;
-    }
-    if (fieldValue.typed.epochMs > converted.typed.epochMs) {
-      return 1;
-    }
-    return 0;
-  case ColumnValueType::Boolean:
-    if (fieldValue.typed.boolean == converted.typed.boolean) {
-      return 0;
-    }
-    return fieldValue.typed.boolean ? 1 : -1;
-  case ColumnValueType::Text:
-  default: {
-    const std::string normalizedField = util::normalizedText(fieldValue.text);
-    const std::string normalizedExpression =
-        util::normalizedText(expressionText);
-    if (normalizedField < normalizedExpression) {
-      return -1;
-    }
-    if (normalizedField > normalizedExpression) {
-      return 1;
-    }
-    return 0;
+  const std::string normalizedField =
+      util::normalizedText(std::string(fieldText));
+  const std::string normalizedExpression =
+      util::normalizedText(std::string(exprValue));
+  if (normalizedField < normalizedExpression) {
+    return -1;
   }
+  if (normalizedField > normalizedExpression) {
+    return 1;
   }
+  return 0;
 }
 
-FieldValue fieldValueFromRuntime(const ExprRuntimeValue &runtimeValue) {
+ValueType runtimeValueType(const ExprRuntimeValue &runtimeValue) {
   if (runtimeValue.isBool()) {
-    return FieldValue(std::get<bool>(runtimeValue.value) ? "true" : "false",
-                      ColumnValueType::Boolean);
+    return ValueType::Boolean;
   }
   if (runtimeValue.isNumber()) {
-    return FieldValue(
-        QString::number(std::get<double>(runtimeValue.value), 'g', 17)
-            .toStdString(),
-        ColumnValueType::Number);
+    return ValueType::Number;
   }
-  return FieldValue(std::get<std::string>(runtimeValue.value),
-                    ColumnValueType::Text);
+  return ValueType::Text;
 }
 
 std::string runtimeValueToText(const ExprRuntimeValue &runtimeValue) {
-  if (runtimeValue.isText()) {
-    return runtimeValue.textValue();
-  }
-  if (runtimeValue.isNumber()) {
-    return QString::number(runtimeValue.numberValue(), 'g', 17).toStdString();
-  }
-  return runtimeValue.boolValueOrFalse() ? "true" : "false";
+  return runtimeValueToQString(runtimeValue).toStdString();
 }
 } // namespace
 
-bool exprValueMatchesFieldType(const ExprValue &value,
-                               ColumnValueType valueType) {
+QString runtimeValueToQString(const ExprRuntimeValue &runtimeValue) {
+  if (runtimeValue.isText()) {
+    return QString::fromStdString(runtimeValue.textValue());
+  }
+  if (runtimeValue.isNumber()) {
+    return QString::number(runtimeValue.numberValue(), 'g', 17);
+  }
+  return runtimeValue.boolValueOrFalse() ? QStringLiteral("true")
+                                         : QStringLiteral("false");
+}
+
+std::string
+Expr::evaluateDisplayText(const LibraryExprEvalContext &context) const {
+  return runtimeValueToText(evaluateValue(context));
+}
+
+bool exprValueMatchesFieldType(const ExprValue &value, ValueType valueType) {
   for (const std::string &item : value.values) {
     if (!FieldValue::canConvert(item, valueType)) {
       return false;
@@ -128,26 +110,24 @@ bool exprValueMatchesFieldType(const ExprValue &value,
   return true;
 }
 
-bool supportsRangeValueType(ColumnValueType valueType) {
-  return valueType == ColumnValueType::Number ||
-         valueType == ColumnValueType::DateTime;
+bool supportsRangeValueType(ValueType valueType) {
+  return valueType == ValueType::Number || valueType == ValueType::DateTime;
 }
 
-bool isRangeBoundaryOrderValid(const ExprValue &value,
-                               ColumnValueType valueType) {
+bool isRangeBoundaryOrderValid(const ExprValue &value, ValueType valueType) {
   if (!value.isRange()) {
     return true;
   }
-  const FieldValue lower(value.rangeStart(), valueType);
-  return compareFieldValue(lower, value.rangeEnd()) <= 0;
+  return compareFieldValue(value.rangeStart(), valueType, value.rangeEnd()) <=
+         0;
 }
 
-bool IsOperator::evaluate(const FieldValue &fieldValue,
+bool IsOperator::evaluate(std::string_view fieldText, ValueType valueType,
                           const ExprValue &exprValue) const {
-  if (fieldValue.type != ColumnValueType::Text && fieldValue.text.empty()) {
+  if (valueType != ValueType::Text && fieldText.empty()) {
     return false;
   }
-  return compareFieldValue(fieldValue, exprValue.scalarText()) == 0;
+  return compareFieldValue(fieldText, valueType, exprValue.scalarText()) == 0;
 }
 
 bool IsOperator::equals(const ExprOperator &other) const {
@@ -160,12 +140,12 @@ bool IsOperator::supportsValue(const ExprValue &exprValue) const {
 
 std::string IsOperator::displayName() const { return "IS"; }
 
-bool HasOperator::evaluate(const FieldValue &fieldValue,
+bool HasOperator::evaluate(std::string_view fieldText, ValueType valueType,
                            const ExprValue &exprValue) const {
-  if (fieldValue.type != ColumnValueType::Text) {
-    return fieldHasTypedValue(fieldValue, exprValue.scalarText());
+  if (valueType != ValueType::Text) {
+    return fieldHasTypedValue(fieldText, valueType, exprValue.scalarText());
   }
-  return fieldHasValue(fieldValue.text, exprValue.scalarText());
+  return fieldHasValue(std::string(fieldText), exprValue.scalarText());
 }
 
 bool HasOperator::equals(const ExprOperator &other) const {
@@ -178,17 +158,19 @@ bool HasOperator::supportsValue(const ExprValue &exprValue) const {
 
 std::string HasOperator::displayName() const { return "HAS"; }
 
-bool InOperator::evaluate(const FieldValue &fieldValue,
+bool InOperator::evaluate(std::string_view fieldText, ValueType valueType,
                           const ExprValue &exprValue) const {
   if (exprValue.isRange()) {
-    if (fieldValue.text.empty()) {
+    if (fieldText.empty()) {
       return false;
     }
-    return compareFieldValue(fieldValue, exprValue.rangeStart()) >= 0 &&
-           compareFieldValue(fieldValue, exprValue.rangeEnd()) <= 0;
+    return compareFieldValue(fieldText, valueType, exprValue.rangeStart()) >=
+               0 &&
+           compareFieldValue(fieldText, valueType, exprValue.rangeEnd()) <= 0;
   }
 
-  const std::string normalizedField = util::normalizedText(fieldValue.text);
+  const std::string normalizedField =
+      util::normalizedText(std::string(fieldText));
   for (const std::string &candidate : exprValue.values) {
     if (normalizedField == util::normalizedText(candidate)) {
       return true;
@@ -207,10 +189,10 @@ bool InOperator::supportsValue(const ExprValue &exprValue) const {
 
 std::string InOperator::displayName() const { return "IN"; }
 
-bool LtOperator::evaluate(const FieldValue &fieldValue,
+bool LtOperator::evaluate(std::string_view fieldText, ValueType valueType,
                           const ExprValue &exprValue) const {
-  return !fieldValue.text.empty() &&
-         compareFieldValue(fieldValue, exprValue.scalarText()) < 0;
+  return !fieldText.empty() &&
+         compareFieldValue(fieldText, valueType, exprValue.scalarText()) < 0;
 }
 
 bool LtOperator::equals(const ExprOperator &other) const {
@@ -223,10 +205,10 @@ bool LtOperator::supportsValue(const ExprValue &exprValue) const {
 
 std::string LtOperator::displayName() const { return "<"; }
 
-bool LteOperator::evaluate(const FieldValue &fieldValue,
+bool LteOperator::evaluate(std::string_view fieldText, ValueType valueType,
                            const ExprValue &exprValue) const {
-  return !fieldValue.text.empty() &&
-         compareFieldValue(fieldValue, exprValue.scalarText()) <= 0;
+  return !fieldText.empty() &&
+         compareFieldValue(fieldText, valueType, exprValue.scalarText()) <= 0;
 }
 
 bool LteOperator::equals(const ExprOperator &other) const {
@@ -239,10 +221,10 @@ bool LteOperator::supportsValue(const ExprValue &exprValue) const {
 
 std::string LteOperator::displayName() const { return "<="; }
 
-bool GtOperator::evaluate(const FieldValue &fieldValue,
+bool GtOperator::evaluate(std::string_view fieldText, ValueType valueType,
                           const ExprValue &exprValue) const {
-  return !fieldValue.text.empty() &&
-         compareFieldValue(fieldValue, exprValue.scalarText()) > 0;
+  return !fieldText.empty() &&
+         compareFieldValue(fieldText, valueType, exprValue.scalarText()) > 0;
 }
 
 bool GtOperator::equals(const ExprOperator &other) const {
@@ -255,10 +237,10 @@ bool GtOperator::supportsValue(const ExprValue &exprValue) const {
 
 std::string GtOperator::displayName() const { return ">"; }
 
-bool GteOperator::evaluate(const FieldValue &fieldValue,
+bool GteOperator::evaluate(std::string_view fieldText, ValueType valueType,
                            const ExprValue &exprValue) const {
-  return !fieldValue.text.empty() &&
-         compareFieldValue(fieldValue, exprValue.scalarText()) >= 0;
+  return !fieldText.empty() &&
+         compareFieldValue(fieldText, valueType, exprValue.scalarText()) >= 0;
 }
 
 bool GteOperator::equals(const ExprOperator &other) const {
@@ -271,29 +253,27 @@ bool GteOperator::supportsValue(const ExprValue &exprValue) const {
 
 std::string GteOperator::displayName() const { return ">="; }
 
-ComparisonExpr::ComparisonExpr(ExprFieldRef fieldRef, ExprOperatorPtr exprOp,
-                               ExprValue exprValue)
-    : field(std::move(fieldRef)), op(std::move(exprOp)),
-      value(std::move(exprValue)), hasFieldRef(true) {}
-
 ComparisonExpr::ComparisonExpr(ExprPtr leftExpression, ExprOperatorPtr exprOp,
-                               ExprValue exprValue)
-    : leftExpr(std::move(leftExpression)), op(std::move(exprOp)),
-      value(std::move(exprValue)), hasFieldRef(false) {}
+                               ExprPtr rightExpression, ValueType leftValueType)
+    : leftExpr(std::move(leftExpression)),
+      rightExpr(std::move(rightExpression)), op(std::move(exprOp)),
+      valueType(leftValueType) {}
 
 ExprRuntimeValue
 ComparisonExpr::evaluateValue(const LibraryExprEvalContext &context) const {
-  if (hasFieldRef) {
-    const FieldValue *fieldValue = context.fieldValue(field.resolvedColumnId);
-    if (!fieldValue) {
-      return ExprRuntimeValue::fromBool(false);
-    }
-    return ExprRuntimeValue::fromBool(op->evaluate(*fieldValue, value));
+  const ExprRuntimeValue leftValue = leftExpr->evaluateValue(context);
+  const auto *valueExpr = dynamic_cast<const ExprValueExpr *>(rightExpr.get());
+  if (valueExpr) {
+    return ExprRuntimeValue::fromBool(op->evaluate(
+        runtimeValueToText(leftValue), valueType, valueExpr->value));
   }
 
-  const ExprRuntimeValue leftValue = leftExpr->evaluateValue(context);
-  const FieldValue convertedLeft = fieldValueFromRuntime(leftValue);
-  return ExprRuntimeValue::fromBool(op->evaluate(convertedLeft, value));
+  const ExprRuntimeValue rightValue = rightExpr->evaluateValue(context);
+  ExprValue scalarValue;
+  scalarValue.kind = ExprValue::Kind::Scalar;
+  scalarValue.values = {runtimeValueToText(rightValue)};
+  return ExprRuntimeValue::fromBool(
+      op->evaluate(runtimeValueToText(leftValue), valueType, scalarValue));
 }
 
 bool ComparisonExpr::equals(const Expr &other) const {
@@ -301,22 +281,12 @@ bool ComparisonExpr::equals(const Expr &other) const {
   if (!comparison) {
     return false;
   }
-  if (hasFieldRef != comparison->hasFieldRef) {
+  if (valueType != comparison->valueType ||
+      !leftExpr->equals(*comparison->leftExpr) ||
+      !rightExpr->equals(*comparison->rightExpr)) {
     return false;
   }
-  if (hasFieldRef) {
-    if (field.exprFieldName != comparison->field.exprFieldName ||
-        field.resolvedColumnId != comparison->field.resolvedColumnId ||
-        field.valueType != comparison->field.valueType) {
-      return false;
-    }
-  } else {
-    if (!leftExpr->equals(*comparison->leftExpr)) {
-      return false;
-    }
-  }
-  return *op == *comparison->op && value.kind == comparison->value.kind &&
-         value.values == comparison->value.values;
+  return *op == *comparison->op;
 }
 
 AndExpr::AndExpr(ExprPtr leftExpr, ExprPtr rightExpr)
@@ -415,13 +385,22 @@ FieldRefExpr::evaluateValue(const LibraryExprEvalContext &context) const {
   if (!fieldValue || fieldValue->text.empty()) {
     return ExprRuntimeValue::fromText({});
   }
-  if (fieldValue->type == ColumnValueType::Number) {
-    return ExprRuntimeValue::fromNumber(fieldValue->typed.number);
+  if (field.valueType == ValueType::Number) {
+    return ExprRuntimeValue::fromNumber(fieldValue->typed.numberDouble);
   }
-  if (fieldValue->type == ColumnValueType::Boolean) {
+  if (field.valueType == ValueType::Boolean) {
     return ExprRuntimeValue::fromBool(fieldValue->typed.boolean);
   }
   return ExprRuntimeValue::fromText(fieldValue->text);
+}
+
+std::string
+FieldRefExpr::evaluateDisplayText(const LibraryExprEvalContext &context) const {
+  const FieldValue *fieldValue = context.fieldValue(field.resolvedColumnId);
+  if (!fieldValue) {
+    return {};
+  }
+  return fieldValue->display().toStdString();
 }
 
 bool FieldRefExpr::equals(const Expr &other) const {
@@ -434,19 +413,14 @@ bool FieldRefExpr::equals(const Expr &other) const {
          field.valueType == fieldExpr->field.valueType;
 }
 
-InterpolatedStringExpr::InterpolatedStringExpr(
-    std::vector<InterpolatedStringPart> exprParts)
+InterpolatedStringExpr::InterpolatedStringExpr(std::vector<ExprPtr> exprParts)
     : parts(std::move(exprParts)) {}
 
 ExprRuntimeValue InterpolatedStringExpr::evaluateValue(
     const LibraryExprEvalContext &context) const {
   std::string out;
-  for (const InterpolatedStringPart &part : parts) {
-    if (part.expr) {
-      out += runtimeValueToText(part.expr->evaluateValue(context));
-    } else {
-      out += part.text;
-    }
+  for (const ExprPtr &part : parts) {
+    out += part->evaluateDisplayText(context);
   }
   return ExprRuntimeValue::fromText(std::move(out));
 }
@@ -458,19 +432,40 @@ bool InterpolatedStringExpr::equals(const Expr &other) const {
     return false;
   }
   for (size_t i = 0; i < parts.size(); ++i) {
-    const InterpolatedStringPart &left = parts[i];
-    const InterpolatedStringPart &right = interpolated->parts[i];
-    if (left.text != right.text) {
+    const ExprPtr &left = parts[i];
+    const ExprPtr &right = interpolated->parts[i];
+    if (static_cast<bool>(left) != static_cast<bool>(right)) {
       return false;
     }
-    if (static_cast<bool>(left.expr) != static_cast<bool>(right.expr)) {
-      return false;
-    }
-    if (left.expr && !left.expr->equals(*right.expr)) {
+    if (left && !left->equals(*right)) {
       return false;
     }
   }
   return true;
+}
+
+ExprValueExpr::ExprValueExpr(ExprValue exprValue)
+    : value(std::move(exprValue)) {}
+
+ExprRuntimeValue
+ExprValueExpr::evaluateValue(const LibraryExprEvalContext &) const {
+  if (value.kind == ExprValue::Kind::Scalar && !value.values.empty()) {
+    return ExprRuntimeValue::fromText(value.values.front());
+  }
+  if (value.kind == ExprValue::Kind::Range && value.values.size() == 2) {
+    return ExprRuntimeValue::fromText(value.values.front() + ".." +
+                                      value.values.back());
+  }
+  return ExprRuntimeValue::fromText({});
+}
+
+bool ExprValueExpr::equals(const Expr &other) const {
+  const auto *valueExpr = dynamic_cast<const ExprValueExpr *>(&other);
+  if (!valueExpr) {
+    return false;
+  }
+  return value.kind == valueExpr->value.kind &&
+         value.values == valueExpr->value.values;
 }
 
 ExprStaticType inferExprStaticType(const Expr &expr) {
@@ -509,10 +504,10 @@ ExprStaticType inferExprStaticType(const Expr &expr) {
   }
 
   if (const auto *fieldExpr = dynamic_cast<const FieldRefExpr *>(&expr)) {
-    if (fieldExpr->field.valueType == ColumnValueType::Boolean) {
+    if (fieldExpr->field.valueType == ValueType::Boolean) {
       return ExprStaticType::Bool;
     }
-    if (fieldExpr->field.valueType == ColumnValueType::Number) {
+    if (fieldExpr->field.valueType == ValueType::Number) {
       return ExprStaticType::Number;
     }
     return ExprStaticType::Text;

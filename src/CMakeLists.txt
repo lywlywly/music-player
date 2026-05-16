@@ -82,6 +82,11 @@ set(PROJECT_SOURCES
   columnregistry.cpp
   databasemanager.h
   databasemanager.cpp
+  exprsymbolinfo.h
+  fieldformatter.h
+  fieldformatter.cpp
+  fieldtypepool.h
+  fieldtypepool.cpp
   fieldvalue.h
   fieldvalue.cpp
   fieldeditdialog.ui
@@ -146,6 +151,8 @@ set(PROJECT_SOURCES
   songpropertiesdialog.cpp
   songparser.h
   songparser.cpp
+  statusruntimesymboltable.h
+  statusruntimesymboltable.cpp
   songstore.h
   songstore.cpp
   utils.h
@@ -173,6 +180,8 @@ endif()
 
 if(APPLE)
   list(APPEND PROJECT_SOURCES
+    macosappearance.h
+    macosappearance.mm
     macosmediacenter.h
     macosmediacenter.mm
   )

@@ -185,9 +185,9 @@ bool SongParser::writeTags(
       continue;
     }
 
-    const ColumnDefinition *definition =
-        columnRegistry.findColumn(QString::fromStdString(appKey));
-    if (definition != nullptr && definition->source == ColumnSource::Computed) {
+    const FieldDefinition *field =
+        columnRegistry.findField(QString::fromStdString(appKey));
+    if (field != nullptr && field->source == ColumnSource::Computed) {
       continue;
     }
     std::string tagKey = util::canonicalizeTagKey(appKey);
@@ -270,19 +270,13 @@ MSong SongParser::parse(
       }
 
       if (isBuiltInTagKey(key, columnRegistry)) {
-        const ColumnDefinition *definition =
-            columnRegistry.findColumn(QString::fromStdString(key));
-        tags[key] = FieldValue(value, definition ? definition->valueType
-                                                 : ColumnValueType::Text);
+        tags.insert_or_assign(key, FieldValue(value, key));
       } else {
         const QString columnId =
             QString::fromStdString(std::string{"attr:"} + key);
         if (columnRegistry.hasColumn(columnId)) {
-          const ColumnDefinition *definition =
-              columnRegistry.findColumn(columnId);
-          tags[columnId.toStdString()] =
-              FieldValue(value, definition ? definition->valueType
-                                           : ColumnValueType::Text);
+          const std::string fieldId = columnId.toStdString();
+          tags.insert_or_assign(fieldId, FieldValue(value, fieldId));
         } else if (remainingFields) {
           (*remainingFields)[key] = value;
         }
@@ -292,44 +286,45 @@ MSong SongParser::parse(
     const TagLib::AudioProperties *audioProperties = file.audioProperties();
     const std::string codec = codecFromFileClass(file.file(), audioProperties);
     if (!codec.empty()) {
-      tags["codec"] = FieldValue(codec, ColumnValueType::Text);
+      tags.insert_or_assign("codec", FieldValue(codec, "codec"));
     }
     if (audioProperties) {
       const int bitrate = audioProperties->bitrate();
       if (bitrate > 0) {
-        tags["bitrate"] =
-            FieldValue(std::to_string(bitrate), ColumnValueType::Number);
+        tags.insert_or_assign("bitrate",
+                              FieldValue(std::to_string(bitrate), "bitrate"));
       }
       const int duration = audioProperties->lengthInSeconds();
       if (duration > 0) {
-        tags["duration"] =
-            FieldValue(std::to_string(duration), ColumnValueType::Number);
+        tags.insert_or_assign("duration",
+                              FieldValue(std::to_string(duration), "duration"));
       }
       const int sampleRate = audioProperties->sampleRate();
       if (sampleRate > 0) {
-        tags["sample_rate"] =
-            FieldValue(std::to_string(sampleRate), ColumnValueType::Number);
+        tags.insert_or_assign(
+            "sample_rate",
+            FieldValue(std::to_string(sampleRate), "sample_rate"));
       }
       const int channels = audioProperties->channels();
       if (channels > 0) {
-        tags["channels"] =
-            FieldValue(std::to_string(channels), ColumnValueType::Number);
+        tags.insert_or_assign("channels",
+                              FieldValue(std::to_string(channels), "channels"));
       }
     }
   }
 
   auto discIt = tags.find("discnumber");
   if (discIt != tags.end()) {
-    discIt->second = FieldValue(normalizeCurrentPart(discIt->second.text),
-                                ColumnValueType::Number);
+    discIt->second =
+        FieldValue(normalizeCurrentPart(discIt->second.text), "discnumber");
   }
   auto trackIt = tags.find("tracknumber");
   if (trackIt != tags.end()) {
-    trackIt->second = FieldValue(normalizeCurrentPart(trackIt->second.text),
-                                 ColumnValueType::Number);
+    trackIt->second =
+        FieldValue(normalizeCurrentPart(trackIt->second.text), "tracknumber");
   }
 
-  tags["filepath"] = FieldValue(filepath, ColumnValueType::Text);
+  tags.insert_or_assign("filepath", FieldValue(filepath, "filepath"));
 
   return tags;
 }

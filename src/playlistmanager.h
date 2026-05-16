@@ -1,11 +1,9 @@
 #ifndef PLAYLISTMANAGER_H
 #define PLAYLISTMANAGER_H
 
-
-class PlaylistManager
-{
+class PlaylistManager {
 public:
-    PlaylistManager();
+  PlaylistManager();
 };
 
 #endif // PLAYLISTMANAGER_H

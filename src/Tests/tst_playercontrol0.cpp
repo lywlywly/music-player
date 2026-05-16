@@ -7,22 +7,21 @@
 
 class TestPlayerControl : public QObject {
   Q_OBJECT
- public:
+public:
   explicit TestPlayerControl(QObject *parent = nullptr);
   SongTableModel *model = new SongTableModel{this};
   MyProxyModel *proxy = new MyProxyModel{this};
   PlayerControlModel *control = new PlayerControlModel{proxy};
- signals:
- private slots:
+signals:
+private slots:
   void test1();
   void test2();
 };
 
 TestPlayerControl::TestPlayerControl(QObject *parent) : QObject{parent} {
   proxy->setSourceModel(model);
-  model->appendSong(
-      QUrl{"/home/luyao/Music/ACAね、Rin音、Yaffle - "
-           "Character - 00 - Character.mp3"});
+  model->appendSong(QUrl{"/home/luyao/Music/ACAね、Rin音、Yaffle - "
+                         "Character - 00 - Character.mp3"});
   model->appendSong(
       QUrl{"/home/luyao/Music/Adele - Easy On Me - 02 - Easy On Me.flac"});
 }

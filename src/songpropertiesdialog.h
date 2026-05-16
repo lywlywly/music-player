@@ -36,14 +36,14 @@ private:
     QString displayField;
     QString valueText;
     QString originalValueText;
-    ColumnValueType valueType = ColumnValueType::Text;
+    ValueType valueType = ValueType::Text;
     RowSource source = RowSource::SongField;
     bool editable = false;
     bool dirty = false;
   };
   static bool isNonTagInternalField(const std::string &key);
   static bool isBuiltInFieldKey(const std::string &key);
-  static QString valueTypeToDisplayText(ColumnValueType valueType);
+  static QString valueTypeToDisplayText(ValueType valueType);
   static std::string toWritableTagKey(const RowData &row);
   static void showInfoPopup(QWidget *parent, const QString &title,
                             const QString &message);

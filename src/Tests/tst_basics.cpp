@@ -3,11 +3,11 @@
 
 class TestQString : public QObject {
   Q_OBJECT
- public:
+public:
   explicit TestQString(QObject *parent = nullptr);
 
- signals:
- private slots:
+signals:
+private slots:
   void toUpper();
 };
 

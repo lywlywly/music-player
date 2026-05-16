@@ -1,8 +1,10 @@
 #include <QCheckBox>
 #include <QComboBox>
+#include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QObject>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
 #include <QSignalSpy>
@@ -26,6 +28,9 @@ private slots:
   void addCustomField_persistsDefinitionAndEmitsSignal();
   void removeCustomField_deletesDefinitionAndValues();
   void addComputedField_persistsDefinitionAndEmitsSignal();
+  void displayExpressions_persistAndEmitSignals();
+  void displayExpressionPreview_tracksActiveEditor();
+  void displayThemeMode_persistsAndEmitsSignal();
 
 private:
   ColumnRegistry *registry_ = nullptr;
@@ -58,9 +63,18 @@ void TestSettingsDialogUi::cleanup() {
 void TestSettingsDialogUi::showsExistingCustomFields() {
   QVERIFY(registry_->upsertCustomTagDefinition(
       databaseManager_->db(),
-      {"attr:musicbrainz_trackid", "MusicBrainz Track ID",
-       ColumnSource::SongAttribute, ColumnValueType::Text, "", true, true,
-       140}));
+      {.id = "attr:musicbrainz_trackid",
+       .title = "MusicBrainz Track ID",
+       .sortable = true,
+       .visibleByDefault = true,
+       .defaultWidth = 140},
+      {.id = "attr:musicbrainz_trackid",
+       .source = ColumnSource::SongAttribute,
+       .valueType = ValueType::Text,
+       .displayKind = DisplayKind::Raw,
+       .expression = "",
+       .searchable = true,
+       .writable = true}));
   QVERIFY(registry_->loadDynamicColumns(databaseManager_->db()));
 
   SettingsDialog dialog(*registry_, *databaseManager_);
@@ -122,9 +136,18 @@ void TestSettingsDialogUi::addCustomField_persistsDefinitionAndEmitsSignal() {
 void TestSettingsDialogUi::removeCustomField_deletesDefinitionAndValues() {
   QVERIFY(registry_->upsertCustomTagDefinition(
       databaseManager_->db(),
-      {"attr:musicbrainz_trackid", "MusicBrainz Track ID",
-       ColumnSource::SongAttribute, ColumnValueType::Text, "", true, true,
-       140}));
+      {.id = "attr:musicbrainz_trackid",
+       .title = "MusicBrainz Track ID",
+       .sortable = true,
+       .visibleByDefault = true,
+       .defaultWidth = 140},
+      {.id = "attr:musicbrainz_trackid",
+       .source = ColumnSource::SongAttribute,
+       .valueType = ValueType::Text,
+       .displayKind = DisplayKind::Raw,
+       .expression = "",
+       .searchable = true,
+       .writable = true}));
   QVERIFY(registry_->loadDynamicColumns(databaseManager_->db()));
 
   QSqlQuery seedValues(databaseManager_->db());
@@ -219,6 +242,77 @@ void TestSettingsDialogUi::addComputedField_persistsDefinitionAndEmitsSignal() {
   QCOMPARE(q.value(2).toString(),
            QString("IF date < 2000 THEN classic ELSE new"));
   QCOMPARE(q.value(3).toInt(), 1);
+}
+
+void TestSettingsDialogUi::displayExpressions_persistAndEmitSignals() {
+  SettingsDialog dialog(*registry_, *databaseManager_);
+  QSignalSpy statusExprSpy(&dialog,
+                           &SettingsDialog::statusBarExpressionChanged);
+  QSignalSpy titleExprSpy(&dialog,
+                          &SettingsDialog::windowTitleExpressionChanged);
+
+  QPlainTextEdit *statusEdit =
+      dialog.findChild<QPlainTextEdit *>("status_expression_edit");
+  QPlainTextEdit *titleEdit =
+      dialog.findChild<QPlainTextEdit *>("window_title_expression_edit");
+  QVERIFY(statusEdit != nullptr);
+  QVERIFY(titleEdit != nullptr);
+
+  const QString statusExpr = "`${artist} | ${title}`";
+  const QString titleExpr = "`${artist} - ${title}`";
+  statusEdit->setPlainText(statusExpr);
+  titleEdit->setPlainText(titleExpr);
+
+  dialog.accept();
+
+  QCOMPARE(statusExprSpy.count(), 1);
+  QCOMPARE(titleExprSpy.count(), 1);
+  QCOMPARE(statusExprSpy.at(0).at(0).toString(), statusExpr);
+  QCOMPARE(titleExprSpy.at(0).at(0).toString(), titleExpr);
+
+  QSettings settings;
+  QCOMPARE(settings.value("status_bar/expression").toString(), statusExpr);
+  QCOMPARE(settings.value("window_title/expression").toString(), titleExpr);
+}
+
+void TestSettingsDialogUi::displayExpressionPreview_tracksActiveEditor() {
+  SettingsDialog dialog(*registry_, *databaseManager_);
+  QPlainTextEdit *statusEdit =
+      dialog.findChild<QPlainTextEdit *>("status_expression_edit");
+  QPlainTextEdit *titleEdit =
+      dialog.findChild<QPlainTextEdit *>("window_title_expression_edit");
+  QLabel *preview =
+      dialog.findChild<QLabel *>("display_expression_preview_value_label");
+  QVERIFY(statusEdit != nullptr);
+  QVERIFY(titleEdit != nullptr);
+  QVERIFY(preview != nullptr);
+
+  statusEdit->setPlainText("`${artist} - ${title}`");
+  QTRY_COMPARE(preview->text(), QString("Artist - Title"));
+
+  titleEdit->setFocus();
+  QCoreApplication::processEvents();
+  titleEdit->setPlainText("`${playback_time} / ${duration}`");
+  QTRY_COMPARE(preview->text(), QString("01:05 / 02:05"));
+}
+
+void TestSettingsDialogUi::displayThemeMode_persistsAndEmitsSignal() {
+  SettingsDialog dialog(*registry_, *databaseManager_);
+  QSignalSpy themeSpy(&dialog, &SettingsDialog::displayThemeModeChanged);
+
+  QComboBox *themeCombo =
+      dialog.findChild<QComboBox *>("display_theme_mode_combo");
+  QVERIFY(themeCombo != nullptr);
+  const int darkIndex = themeCombo->findData("dark");
+  QVERIFY(darkIndex >= 0);
+  themeCombo->setCurrentIndex(darkIndex);
+
+  dialog.accept();
+
+  QCOMPARE(themeSpy.count(), 1);
+  QCOMPARE(themeSpy.at(0).at(0).toString(), QString("dark"));
+  QSettings settings;
+  QCOMPARE(settings.value("display/theme_mode").toString(), QString("dark"));
 }
 
 QTEST_MAIN(TestSettingsDialogUi)

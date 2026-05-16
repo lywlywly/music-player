@@ -1,5 +1,4 @@
 #include "playlist.h"
-
 Playlist::Playlist(SongStore &&st, PlaybackQueue &queue, int initialLastPlayed,
                    GlobalColumnLayoutManager &columnLayoutManager,
                    QObject *parent)
@@ -57,9 +56,7 @@ QVariant Playlist::data(const QModelIndex &index, int role) const {
   if (it == song.end()) {
     return {};
   }
-  const ColumnDefinition *definition =
-      columnLayoutManager_.registry().findColumn(columnId);
-  return it->second.display(definition);
+  return it->second.display();
 }
 
 QVariant Playlist::headerData(int section, Qt::Orientation orientation,

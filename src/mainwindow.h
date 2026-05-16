@@ -13,8 +13,10 @@
 #include "playlist.h"
 #include "playlisttabs.h"
 #include "songlibrary.h"
+#include "statusruntimesymboltable.h"
 #include <QColor>
 #include <QMainWindow>
+#include <QString>
 #include <unordered_map>
 
 QT_BEGIN_NAMESPACE
@@ -28,6 +30,8 @@ class MainWindow : public QMainWindow {
 
 public:
   MainWindow(QWidget *parent = nullptr);
+  MainWindow(QString databaseName, QString connectionName,
+             QWidget *parent = nullptr);
   ~MainWindow();
 
 protected:
@@ -39,6 +43,13 @@ private:
   void durationChanged(qint64 duration);
   void bitrateChanged(qint64 bitsPerSecond);
   void statusChanged(QMediaPlayer::MediaStatus status);
+  void initStatusBarExpression();
+  void initWindowTitleExpression();
+  void updateStatusRuntimeSymbols();
+  qint64 effectiveBitrateKbps() const;
+  QString evaluateStatusBarExpression() const;
+  QString evaluateWindowTitleExpression() const;
+  void updateOpenSettingsDisplayPreviewContext();
   void updatePlaybackTimeStatus();
   void updateImageSize();
   void setUpImageAndLyrics(
@@ -62,6 +73,8 @@ private:
   void applyLyricsHighlightColorFromSettings();
   void setLyricsPanelFont(const QString &fontFamily, int pointSize);
   void setLyricsPanelHighlightColor(const QColor &color);
+  void applyDisplayThemeFromSettings();
+  void applyDisplayThemeMode(const QString &mode);
   void setupSystemMediaInterface();
   void initSettings();
   void initPlaybackBackend();
@@ -97,6 +110,10 @@ private:
   qint64 currentBitrateBps_ = 0;
   qint64 currentTagBitrateBps_ = 0;
   bool useTagBitrateForCurrentTrack_ = false;
+  StatusRuntimeSymbolTable statusRuntimeSymbols_;
+  ExprPtr statusBarExpr_;
+  ExprPtr windowTitleExpr_;
+  QString defaultWindowTitle_;
   int currentTrackPk_ = -1;
   qint64 sessionDurationMs_ = 0;
   qint64 sessionMaxPositionMs_ = 0;

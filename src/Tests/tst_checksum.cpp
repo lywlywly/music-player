@@ -9,12 +9,12 @@ namespace fs = std::filesystem;
 
 class TestChecksum : public QObject {
   Q_OBJECT
- public:
-  explicit TestChecksum(QObject* parent = nullptr);
+public:
+  explicit TestChecksum(QObject *parent = nullptr);
   ChecksumCalculator checksumCalc;
 
- signals:
- private slots:
+signals:
+private slots:
   void toUpper();
   void testTextFile();
   void testTextPart();
@@ -24,7 +24,7 @@ class TestChecksum : public QObject {
   void testPerformance();
 };
 
-TestChecksum::TestChecksum(QObject* parent) : QObject{parent} {}
+TestChecksum::TestChecksum(QObject *parent) : QObject{parent} {}
 void TestChecksum::toUpper() {
   QString str = "Hello";
   QVERIFY(str.toUpper() == "HELLO");
@@ -99,13 +99,13 @@ void TestChecksum::testSongHeader() {
 void TestChecksum::testPerformance() {
   std::string directoryPath = "/Users/wangluyao/Music";
   std::vector<std::string> filenames;
-  for (const auto& entry : fs::directory_iterator(directoryPath)) {
+  for (const auto &entry : fs::directory_iterator(directoryPath)) {
     if (entry.is_regular_file()) {
       filenames.push_back(entry.path().filename().string());
     }
   }
   auto startTime = std::chrono::high_resolution_clock::now();
-  for (const auto& filename : filenames) {
+  for (const auto &filename : filenames) {
     checksumCalc.calculateHeaderSHA1(directoryPath + filename, 1);
   }
   auto endTime = std::chrono::high_resolution_clock::now();

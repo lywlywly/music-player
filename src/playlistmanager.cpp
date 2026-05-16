@@ -1,7 +1,3 @@
 #include "playlistmanager.h"
 
-
-PlaylistManager::PlaylistManager()
-{
-
-}
+PlaylistManager::PlaylistManager() {}

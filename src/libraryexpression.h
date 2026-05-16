@@ -26,7 +26,7 @@ struct ExprValue {
 struct ExprFieldRef {
   std::string exprFieldName;
   std::string resolvedColumnId;
-  ColumnValueType valueType = ColumnValueType::Text;
+  ValueType valueType = ValueType::Text;
 };
 
 struct LibraryExprEvalContext {
@@ -70,7 +70,7 @@ struct ExprRuntimeValue {
 
 struct ExprOperator {
   virtual ~ExprOperator() = default;
-  virtual bool evaluate(const FieldValue &fieldValue,
+  virtual bool evaluate(std::string_view fieldText, ValueType valueType,
                         const ExprValue &exprValue) const = 0;
   virtual bool equals(const ExprOperator &other) const = 0;
   virtual bool supportsValue(const ExprValue &exprValue) const = 0;
@@ -84,7 +84,7 @@ inline bool operator==(const ExprOperator &left, const ExprOperator &right) {
 using ExprOperatorPtr = std::unique_ptr<ExprOperator>;
 
 struct IsOperator final : ExprOperator {
-  bool evaluate(const FieldValue &fieldValue,
+  bool evaluate(std::string_view fieldText, ValueType valueType,
                 const ExprValue &exprValue) const override;
   bool equals(const ExprOperator &other) const override;
   bool supportsValue(const ExprValue &exprValue) const override;
@@ -92,7 +92,7 @@ struct IsOperator final : ExprOperator {
 };
 
 struct HasOperator final : ExprOperator {
-  bool evaluate(const FieldValue &fieldValue,
+  bool evaluate(std::string_view fieldText, ValueType valueType,
                 const ExprValue &exprValue) const override;
   bool equals(const ExprOperator &other) const override;
   bool supportsValue(const ExprValue &exprValue) const override;
@@ -100,7 +100,7 @@ struct HasOperator final : ExprOperator {
 };
 
 struct InOperator final : ExprOperator {
-  bool evaluate(const FieldValue &fieldValue,
+  bool evaluate(std::string_view fieldText, ValueType valueType,
                 const ExprValue &exprValue) const override;
   bool equals(const ExprOperator &other) const override;
   bool supportsValue(const ExprValue &exprValue) const override;
@@ -108,7 +108,7 @@ struct InOperator final : ExprOperator {
 };
 
 struct LtOperator final : ExprOperator {
-  bool evaluate(const FieldValue &fieldValue,
+  bool evaluate(std::string_view fieldText, ValueType valueType,
                 const ExprValue &exprValue) const override;
   bool equals(const ExprOperator &other) const override;
   bool supportsValue(const ExprValue &exprValue) const override;
@@ -116,7 +116,7 @@ struct LtOperator final : ExprOperator {
 };
 
 struct LteOperator final : ExprOperator {
-  bool evaluate(const FieldValue &fieldValue,
+  bool evaluate(std::string_view fieldText, ValueType valueType,
                 const ExprValue &exprValue) const override;
   bool equals(const ExprOperator &other) const override;
   bool supportsValue(const ExprValue &exprValue) const override;
@@ -124,7 +124,7 @@ struct LteOperator final : ExprOperator {
 };
 
 struct GtOperator final : ExprOperator {
-  bool evaluate(const FieldValue &fieldValue,
+  bool evaluate(std::string_view fieldText, ValueType valueType,
                 const ExprValue &exprValue) const override;
   bool equals(const ExprOperator &other) const override;
   bool supportsValue(const ExprValue &exprValue) const override;
@@ -132,7 +132,7 @@ struct GtOperator final : ExprOperator {
 };
 
 struct GteOperator final : ExprOperator {
-  bool evaluate(const FieldValue &fieldValue,
+  bool evaluate(std::string_view fieldText, ValueType valueType,
                 const ExprValue &exprValue) const override;
   bool equals(const ExprOperator &other) const override;
   bool supportsValue(const ExprValue &exprValue) const override;
@@ -143,6 +143,8 @@ struct Expr {
   virtual ~Expr() = default;
   virtual ExprRuntimeValue
   evaluateValue(const LibraryExprEvalContext &context) const = 0;
+  virtual std::string
+  evaluateDisplayText(const LibraryExprEvalContext &context) const;
   bool evaluate(const LibraryExprEvalContext &context) const {
     return evaluateValue(context).boolValueOrFalse();
   }
@@ -157,15 +159,12 @@ using ExprPtr = std::unique_ptr<Expr>;
 
 struct ComparisonExpr final : Expr {
   ExprPtr leftExpr;
-  ExprFieldRef field;
+  ExprPtr rightExpr;
   ExprOperatorPtr op;
-  ExprValue value;
-  bool hasFieldRef = false;
+  ValueType valueType = ValueType::Text;
 
-  ComparisonExpr(ExprFieldRef fieldRef, ExprOperatorPtr exprOp,
-                 ExprValue exprValue);
   ComparisonExpr(ExprPtr leftExpression, ExprOperatorPtr exprOp,
-                 ExprValue exprValue);
+                 ExprPtr rightExpression, ValueType leftValueType);
   ExprRuntimeValue
   evaluateValue(const LibraryExprEvalContext &context) const override;
   bool equals(const Expr &other) const override;
@@ -226,19 +225,24 @@ struct FieldRefExpr final : Expr {
   explicit FieldRefExpr(ExprFieldRef fieldRef);
   ExprRuntimeValue
   evaluateValue(const LibraryExprEvalContext &context) const override;
+  std::string
+  evaluateDisplayText(const LibraryExprEvalContext &context) const override;
   bool equals(const Expr &other) const override;
 };
 
-struct InterpolatedStringPart {
-  std::string text;
-  ExprPtr expr;
+struct InterpolatedStringExpr final : Expr {
+  std::vector<ExprPtr> parts;
+
+  explicit InterpolatedStringExpr(std::vector<ExprPtr> exprParts);
+  ExprRuntimeValue
+  evaluateValue(const LibraryExprEvalContext &context) const override;
+  bool equals(const Expr &other) const override;
 };
 
-struct InterpolatedStringExpr final : Expr {
-  std::vector<InterpolatedStringPart> parts;
+struct ExprValueExpr final : Expr {
+  ExprValue value;
 
-  explicit InterpolatedStringExpr(
-      std::vector<InterpolatedStringPart> exprParts);
+  explicit ExprValueExpr(ExprValue exprValue);
   ExprRuntimeValue
   evaluateValue(const LibraryExprEvalContext &context) const override;
   bool equals(const Expr &other) const override;

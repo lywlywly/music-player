@@ -61,9 +61,18 @@ void TestColumnLayout::
   ColumnRegistry registry;
   GlobalColumnLayoutManager manager(registry);
 
-  registry.addOrUpdateDynamicColumn(
-      {"attr:rating", "Rating", ColumnSource::SongAttribute,
-       ColumnValueType::Number, "", true, false, 120});
+  registry.addOrUpdateDynamicColumn({.id = "attr:rating",
+                                     .title = "Rating",
+                                     .sortable = true,
+                                     .visibleByDefault = false,
+                                     .defaultWidth = 120},
+                                    {.id = "attr:rating",
+                                     .source = ColumnSource::SongAttribute,
+                                     .valueType = ValueType::Number,
+                                     .displayKind = DisplayKind::Raw,
+                                     .expression = "",
+                                     .searchable = true,
+                                     .writable = true});
   manager.refreshFromRegistry();
 
   QVERIFY(manager.allOrderedColumnIds().contains("attr:rating"));

@@ -43,7 +43,8 @@ void TestPlaybackQueue::pop_updatesOrderAndReturnsFront() {
 void TestPlaybackQueue::setCurrentIdAndStatus_notifiesCallbacks() {
   PlaybackQueue queue;
   std::vector<int> notified;
-  queue.setStatusUpdateCallback([&](int pk, Playlist *) { notified.push_back(pk); });
+  queue.setStatusUpdateCallback(
+      [&](int pk, Playlist *) { notified.push_back(pk); });
 
   queue.setCurrentId(4, nullptr);
   queue.setPlaybackStatus(PlaybackQueue::PlaybackStatus::Playing);

@@ -1,5 +1,6 @@
 #include "songstore.h"
 #include "databasemanager.h"
+#include "fieldformatter.h"
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QUuid>
@@ -32,35 +33,15 @@ bool compareText(const std::string &a, const std::string &b, bool ascending) {
 }
 
 std::optional<bool> compareTyped(const SortValue &a, const SortValue &b,
-                                 bool ascending) {
-  if (a.field.type != b.field.type) {
-    return std::nullopt;
-  }
-
-  if (a.field.type == ColumnValueType::Number) {
-    if (a.field.typed.number == b.field.typed.number) {
+                                 ValueType valueType, bool ascending) {
+  bool ok = false;
+  const int cmp = compareFieldValues(a.field, b.field, valueType, ok);
+  if (ok) {
+    if (cmp == 0) {
       return false;
     }
-    return ascending ? (a.field.typed.number < b.field.typed.number)
-                     : (a.field.typed.number > b.field.typed.number);
+    return ascending ? (cmp < 0) : (cmp > 0);
   }
-
-  if (a.field.type == ColumnValueType::DateTime) {
-    if (a.field.typed.epochMs == b.field.typed.epochMs) {
-      return false;
-    }
-    return ascending ? (a.field.typed.epochMs < b.field.typed.epochMs)
-                     : (a.field.typed.epochMs > b.field.typed.epochMs);
-  }
-
-  if (a.field.type == ColumnValueType::Boolean) {
-    if (a.field.typed.boolean == b.field.typed.boolean) {
-      return false;
-    }
-    return ascending ? (a.field.typed.boolean < b.field.typed.boolean)
-                     : (a.field.typed.boolean > b.field.typed.boolean);
-  }
-
   return std::nullopt;
 }
 
@@ -69,7 +50,7 @@ SortValue resolveSortValue(const SongLibrary &library, int songPk,
   const MSong &song = library.getSongByPK(songPk);
   auto it = song.find(columnId);
   if (it == song.end()) {
-    return {true, FieldValue{}};
+    return {true, FieldValue("", columnId)};
   }
 
   return {false, it->second};
@@ -155,8 +136,10 @@ void SongStore::sortByField(std::string f, int order) {
       return false;
     }
 
+    const ValueType valueType = valueA.field.valueType();
+    Q_ASSERT(valueType == valueB.field.valueType());
     if (const std::optional<bool> typed =
-            compareTyped(valueA, valueB, ascending);
+            compareTyped(valueA, valueB, valueType, ascending);
         typed.has_value()) {
       return typed.value();
     }

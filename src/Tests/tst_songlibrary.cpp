@@ -1,3 +1,4 @@
+#include <QDateTime>
 #include <QObject>
 #include <QSqlDatabase>
 #include <QSqlQuery>
@@ -14,27 +15,28 @@ MSong makeSong(const QString &title, const QString &artist, const QString &path,
                const QString &album = {}, const QString &tracknumber = {},
                const QString &date = {}, const QString &genre = {}) {
   MSong song;
-  song["title"] = title.toStdString();
-  song["artist"] = artist.toStdString();
+  song.insert_or_assign("title", FieldValue(title.toStdString(), "title"));
+  song.insert_or_assign("artist", FieldValue(artist.toStdString(), "artist"));
   if (!album.isEmpty()) {
-    song["album"] = album.toStdString();
+    song.insert_or_assign("album", FieldValue(album.toStdString(), "album"));
   }
-  song["discnumber"] = FieldValue("1", ColumnValueType::Number);
+  song.insert_or_assign("discnumber", FieldValue("1", "discnumber"));
   if (!tracknumber.isEmpty()) {
-    song["tracknumber"] =
-        FieldValue(tracknumber.toStdString(), ColumnValueType::Number);
+    song.insert_or_assign("tracknumber",
+                          FieldValue(tracknumber.toStdString(), "tracknumber"));
   }
   if (!date.isEmpty()) {
-    song["date"] = FieldValue(date.toStdString(), ColumnValueType::DateTime);
+    song.insert_or_assign("date", FieldValue(date.toStdString(), "date"));
   }
   if (!genre.isEmpty()) {
-    song["genre"] = genre.toStdString();
+    song.insert_or_assign("genre", FieldValue(genre.toStdString(), "genre"));
   }
-  song["filepath"] = path.toStdString();
+  song.insert_or_assign("filepath", FieldValue(path.toStdString(), "filepath"));
   const std::string identity = util::normalizedText(title).toStdString() + "|" +
                                util::normalizedText(artist).toStdString() +
                                "|" + util::normalizedText(album).toStdString();
-  song["song_identity_key"] = identity;
+  song.insert_or_assign("song_identity_key",
+                        FieldValue(identity, "song_identity_key"));
   return song;
 }
 } // namespace
@@ -48,6 +50,7 @@ private slots:
 
   void addToLibrary_sameFilepathUpdatesExistingSong();
   void loadFromDatabase_loadsBuiltInAndDynamicAttributes();
+  void loadFromDatabase_assignsFieldIdsForAllLoadedFields();
   void loadFromDatabase_removesUnknownDynamicAttributes();
   void loadFromDatabase_loadsPlayStatsDefaultsAndRows();
   void markSongPlayedAtStart_updatesTimestampOnly();
@@ -67,6 +70,7 @@ private slots:
   void search_supportsNumericFieldComparison();
   void search_supportsRelationalComparisons();
   void search_relationalComparisonSkipsMissingDate();
+  void search_lastPlayedTimestamp_supportsDateTimeEquality();
   void search_supportsNot();
   void search_supportsCustomFields();
   void search_supportsComputedFields();
@@ -106,16 +110,25 @@ void TestSongLibrary::cleanup() {
 }
 
 void TestSongLibrary::addToLibrary_sameFilepathUpdatesExistingSong() {
-  registry_->addOrUpdateDynamicColumn(
-      {"attr:rating", "Rating", ColumnSource::SongAttribute,
-       ColumnValueType::Number, "", true, false, 120});
+  registry_->addOrUpdateDynamicColumn({.id = "attr:rating",
+                                       .title = "Rating",
+                                       .sortable = true,
+                                       .visibleByDefault = false,
+                                       .defaultWidth = 120},
+                                      {.id = "attr:rating",
+                                       .source = ColumnSource::SongAttribute,
+                                       .valueType = ValueType::Number,
+                                       .displayKind = DisplayKind::Raw,
+                                       .expression = "",
+                                       .searchable = true,
+                                       .writable = true});
 
   MSong first = makeSong("Old Title", "Artist A", "/tmp/song-a.mp3");
-  first["attr:rating"] = "3";
+  first.insert_or_assign("attr:rating", FieldValue("3", "attr:rating"));
   const int firstId = library_->addTolibrary(std::move(first));
 
   MSong updated = makeSong("New Title", "Artist A", "/tmp/song-a.mp3");
-  updated["attr:rating"] = "5";
+  updated.insert_or_assign("attr:rating", FieldValue("5", "attr:rating"));
   const int secondId = library_->addTolibrary(std::move(updated));
 
   QCOMPARE(secondId, firstId);
@@ -147,9 +160,18 @@ void TestSongLibrary::addToLibrary_sameFilepathUpdatesExistingSong() {
 }
 
 void TestSongLibrary::loadFromDatabase_loadsBuiltInAndDynamicAttributes() {
-  registry_->addOrUpdateDynamicColumn(
-      {"attr:date_added", "Date Added", ColumnSource::SongAttribute,
-       ColumnValueType::DateTime, "", true, false, 180});
+  registry_->addOrUpdateDynamicColumn({.id = "attr:date_added",
+                                       .title = "Date Added",
+                                       .sortable = true,
+                                       .visibleByDefault = false,
+                                       .defaultWidth = 180},
+                                      {.id = "attr:date_added",
+                                       .source = ColumnSource::SongAttribute,
+                                       .valueType = ValueType::DateTime,
+                                       .displayKind = DisplayKind::Raw,
+                                       .expression = "",
+                                       .searchable = true,
+                                       .writable = true});
 
   QSqlDatabase &db = databaseManager_->db();
   QSqlQuery q(db);
@@ -172,7 +194,49 @@ void TestSongLibrary::loadFromDatabase_loadsBuiltInAndDynamicAttributes() {
   QVERIFY(song.contains("attr:date_added"));
   QCOMPARE(song.at("attr:date_added").text,
            std::string("2022-11-13 06:45:23+00:00"));
-  QCOMPARE(song.at("attr:date_added").type, ColumnValueType::DateTime);
+  const FieldDefinition *dateAddedDef =
+      registry_->findField(QStringLiteral("attr:date_added"));
+  QVERIFY(dateAddedDef != nullptr);
+  QCOMPARE(dateAddedDef->valueType, ValueType::DateTime);
+}
+
+void TestSongLibrary::loadFromDatabase_assignsFieldIdsForAllLoadedFields() {
+  registry_->addOrUpdateDynamicColumn({.id = "attr:rating",
+                                       .title = "Rating",
+                                       .sortable = true,
+                                       .visibleByDefault = false,
+                                       .defaultWidth = 120},
+                                      {.id = "attr:rating",
+                                       .source = ColumnSource::SongAttribute,
+                                       .valueType = ValueType::Number,
+                                       .displayKind = DisplayKind::Raw,
+                                       .expression = "",
+                                       .searchable = true,
+                                       .writable = true});
+
+  QSqlDatabase &db = databaseManager_->db();
+  QSqlQuery q(db);
+  QVERIFY(q.exec(
+      "INSERT INTO song_identities(identity_id, song_identity_key) VALUES "
+      "(71, 'song 71|artist 71|album 71')"));
+  QVERIFY(q.exec(
+      "INSERT INTO songs(song_id, title, artist, album, discnumber, "
+      "tracknumber, date, genre, filepath, identity_id) "
+      "VALUES (71, 'Song 71', 'Artist 71', 'Album 71', 1, 7, '2022-11-13', "
+      "'Jazz', '/tmp/song-71.mp3', 71)"));
+  QVERIFY(q.exec(
+      "INSERT INTO song_attributes(song_id, key, value_text, value_type) "
+      "VALUES (71, 'rating', '8', 'number')"));
+  QVERIFY(q.exec("INSERT INTO song_play_stats(identity_id, play_count, "
+                 "last_played_timestamp) VALUES (71, 3, 1234567890)"));
+
+  library_->loadFromDatabase();
+
+  const MSong &song = library_->getSongByPK(71);
+  QVERIFY(!song.empty());
+  for (const auto &[key, value] : song) {
+    QCOMPARE(value.fieldId, key);
+  }
 }
 
 void TestSongLibrary::loadFromDatabase_removesUnknownDynamicAttributes() {
@@ -621,6 +685,22 @@ void TestSongLibrary::search_relationalComparisonSkipsMissingDate() {
            std::string("Song 2"));
 }
 
+void TestSongLibrary::search_lastPlayedTimestamp_supportsDateTimeEquality() {
+  const int songPk = library_->addTolibrary(
+      makeSong("Song 1", "Artist A", "/tmp/search-last-played.mp3"));
+  const qint64 expectedEpochSeconds =
+      QDateTime(QDate(2026, 5, 13), QTime(1, 45, 59)).toSecsSinceEpoch();
+  QVERIFY(library_->markSongPlayedAtStart(songPk, expectedEpochSeconds));
+
+  ExprParseResult parsed = library_->parseLibraryExpression(
+      "last_played_timestamp = 2026-05-13 01:45:59");
+  QVERIFY(parsed.ok());
+
+  const std::vector<int> matches = library_->search(*parsed.expr);
+  QCOMPARE(matches.size(), size_t(1));
+  QCOMPARE(matches[0], songPk);
+}
+
 void TestSongLibrary::search_supportsNot() {
   library_->addTolibrary(makeSong("Song 1", "Artist A", "/tmp/search-na.mp3",
                                   "Album", "1", "2024-01-01",
@@ -641,17 +721,27 @@ void TestSongLibrary::search_supportsNot() {
 }
 
 void TestSongLibrary::search_supportsCustomFields() {
-  registry_->addOrUpdateDynamicColumn(
-      {"attr:musicbrainz_trackid", "MusicBrainz Track ID",
-       ColumnSource::SongAttribute, ColumnValueType::Text, "", true, false,
-       140});
+  registry_->addOrUpdateDynamicColumn({.id = "attr:musicbrainz_trackid",
+                                       .title = "MusicBrainz Track ID",
+                                       .sortable = true,
+                                       .visibleByDefault = false,
+                                       .defaultWidth = 140},
+                                      {.id = "attr:musicbrainz_trackid",
+                                       .source = ColumnSource::SongAttribute,
+                                       .valueType = ValueType::Text,
+                                       .displayKind = DisplayKind::Raw,
+                                       .expression = "",
+                                       .searchable = true,
+                                       .writable = true});
 
   MSong first = makeSong("Song 1", "Artist A", "/tmp/search-f.mp3");
-  first["attr:musicbrainz_trackid"] = "abc123";
+  first.insert_or_assign("attr:musicbrainz_trackid",
+                         FieldValue("abc123", "attr:musicbrainz_trackid"));
   library_->addTolibrary(std::move(first));
 
   MSong second = makeSong("Song 2", "Artist B", "/tmp/search-g.mp3");
-  second["attr:musicbrainz_trackid"] = "def456";
+  second.insert_or_assign("attr:musicbrainz_trackid",
+                          FieldValue("def456", "attr:musicbrainz_trackid"));
   library_->addTolibrary(std::move(second));
 
   ExprParseResult parsed =
@@ -667,18 +757,28 @@ void TestSongLibrary::search_supportsCustomFields() {
 void TestSongLibrary::search_supportsComputedFields() {
   QVERIFY(registry_->upsertComputedDefinition(
       databaseManager_->db(),
-      {"era", "Era", ColumnSource::Computed, ColumnValueType::Text,
-       "IF date < 2000 THEN classic ELSE new", true, true, 140}));
+      {.id = "computed:era",
+       .title = "Era",
+       .sortable = true,
+       .visibleByDefault = true,
+       .defaultWidth = 140},
+      {.id = "computed:era",
+       .source = ColumnSource::Computed,
+       .valueType = ValueType::Text,
+       .displayKind = DisplayKind::Raw,
+       .expression = "IF date < 2000 THEN classic ELSE new",
+       .searchable = true,
+       .writable = false}));
   QVERIFY(registry_->loadDynamicColumns(databaseManager_->db()));
 
   SongLibrary localLibrary(*registry_, *databaseManager_);
   MSong first = makeSong("Song 1", "Artist A", "/tmp/search-comp-a.mp3",
                          "Album", "1", "1998-01-01", "Pop");
-  first["era"] = "classic";
+  first.insert_or_assign("computed:era", FieldValue("classic", "computed:era"));
   localLibrary.addTolibrary(std::move(first));
   MSong second = makeSong("Song 2", "Artist B", "/tmp/search-comp-b.mp3",
                           "Album", "2", "2021-01-01", "Rock");
-  second["era"] = "new";
+  second.insert_or_assign("computed:era", FieldValue("new", "computed:era"));
   localLibrary.addTolibrary(std::move(second));
 
   ExprParseResult parsed =
@@ -712,9 +812,18 @@ void TestSongLibrary::search_noMatchReturnsEmpty() {
 }
 
 void TestSongLibrary::refreshSongFromFile_usesInjectedParserAndSyncsDb() {
-  registry_->addOrUpdateDynamicColumn(
-      {"attr:rating", "Rating", ColumnSource::SongAttribute,
-       ColumnValueType::Number, "", true, false, 120});
+  registry_->addOrUpdateDynamicColumn({.id = "attr:rating",
+                                       .title = "Rating",
+                                       .sortable = true,
+                                       .visibleByDefault = false,
+                                       .defaultWidth = 120},
+                                      {.id = "attr:rating",
+                                       .source = ColumnSource::SongAttribute,
+                                       .valueType = ValueType::Number,
+                                       .displayKind = DisplayKind::Raw,
+                                       .expression = "",
+                                       .searchable = true,
+                                       .writable = true});
 
   int parseCallCount = 0;
   std::string parsedPath;
@@ -727,7 +836,7 @@ void TestSongLibrary::refreshSongFromFile_usesInjectedParserAndSyncsDb() {
         MSong parsed =
             makeSong("Refreshed", "Artist B", QString::fromStdString(path),
                      "Album B", "9", "2024-02-03", "Pop");
-        parsed["attr:rating"] = FieldValue("8", ColumnValueType::Number);
+        parsed.insert_or_assign("attr:rating", FieldValue("8", "attr:rating"));
         return parsed;
       });
 
@@ -837,12 +946,30 @@ void TestSongLibrary::refreshSongFromFile_populatesRemainingFields() {
 }
 
 void TestSongLibrary::refreshSongFromFile_customLyricsFieldsPersist() {
-  registry_->addOrUpdateDynamicColumn(
-      {"attr:unsynced_lyrics", "Unsynced Lyrics", ColumnSource::SongAttribute,
-       ColumnValueType::Text, "", true, false, 200});
-  registry_->addOrUpdateDynamicColumn(
-      {"attr:lyrics", "Lyrics", ColumnSource::SongAttribute,
-       ColumnValueType::Text, "", true, false, 200});
+  registry_->addOrUpdateDynamicColumn({.id = "attr:unsynced_lyrics",
+                                       .title = "Unsynced Lyrics",
+                                       .sortable = true,
+                                       .visibleByDefault = false,
+                                       .defaultWidth = 200},
+                                      {.id = "attr:unsynced_lyrics",
+                                       .source = ColumnSource::SongAttribute,
+                                       .valueType = ValueType::Text,
+                                       .displayKind = DisplayKind::Raw,
+                                       .expression = "",
+                                       .searchable = true,
+                                       .writable = true});
+  registry_->addOrUpdateDynamicColumn({.id = "attr:lyrics",
+                                       .title = "Lyrics",
+                                       .sortable = true,
+                                       .visibleByDefault = false,
+                                       .defaultWidth = 200},
+                                      {.id = "attr:lyrics",
+                                       .source = ColumnSource::SongAttribute,
+                                       .valueType = ValueType::Text,
+                                       .displayKind = DisplayKind::Raw,
+                                       .expression = "",
+                                       .searchable = true,
+                                       .writable = true});
 
   SongLibrary localLibrary(
       *registry_, *databaseManager_,
@@ -854,10 +981,10 @@ void TestSongLibrary::refreshSongFromFile_customLyricsFieldsPersist() {
         }
         MSong parsed =
             makeSong("Refreshed", "Artist", QString::fromStdString(path));
-        parsed["attr:unsynced_lyrics"] =
-            FieldValue("big text", ColumnValueType::Text);
-        parsed["attr:lyrics"] =
-            FieldValue("fallback text", ColumnValueType::Text);
+        parsed.insert_or_assign("attr:unsynced_lyrics",
+                                FieldValue("big text", "attr:unsynced_lyrics"));
+        parsed.insert_or_assign("attr:lyrics",
+                                FieldValue("fallback text", "attr:lyrics"));
         return parsed;
       });
 

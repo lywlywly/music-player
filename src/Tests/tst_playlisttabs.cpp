@@ -34,22 +34,23 @@ namespace {
 MSong makeSong(const QString &title, const QString &artist, const QString &path,
                const QString &tracknumber = {}) {
   MSong song;
-  song["title"] = title.toStdString();
-  song["artist"] = artist.toStdString();
-  song["album"] = "Album";
-  song["discnumber"] = FieldValue("1", ColumnValueType::Number);
+  song.insert_or_assign("title", FieldValue(title.toStdString(), "title"));
+  song.insert_or_assign("artist", FieldValue(artist.toStdString(), "artist"));
+  song.insert_or_assign("album", FieldValue("Album", "album"));
+  song.insert_or_assign("discnumber", FieldValue("1", "discnumber"));
   if (!tracknumber.isEmpty()) {
-    song["tracknumber"] =
-        FieldValue(tracknumber.toStdString(), ColumnValueType::Number);
+    song.insert_or_assign("tracknumber",
+                          FieldValue(tracknumber.toStdString(), "tracknumber"));
   }
-  song["date"] = FieldValue("2024-01-01", ColumnValueType::DateTime);
-  song["genre"] = "genre";
-  song["filepath"] = path.toStdString();
+  song.insert_or_assign("date", FieldValue("2024-01-01", "date"));
+  song.insert_or_assign("genre", FieldValue("genre", "genre"));
+  song.insert_or_assign("filepath", FieldValue(path.toStdString(), "filepath"));
   const std::string identity =
       util::normalizedText(title).toStdString() + "|" +
       util::normalizedText(artist).toStdString() + "|" +
       util::normalizedText(QStringLiteral("Album")).toStdString();
-  song["song_identity_key"] = identity;
+  song.insert_or_assign("song_identity_key",
+                        FieldValue(identity, "song_identity_key"));
   return song;
 }
 
@@ -180,8 +181,8 @@ void TestPlaylistTabs::init() {
         MSong parsed = makeSong("ParsedTitle", "ParsedArtist",
                                 QString::fromStdString(path), "1");
         if (registry.hasColumn("attr:lyrics")) {
-          parsed["attr:lyrics"] =
-              FieldValue("old-lyrics", ColumnValueType::Text);
+          parsed.insert_or_assign("attr:lyrics",
+                                  FieldValue("old-lyrics", "attr:lyrics"));
         }
         return parsed;
       });
@@ -326,8 +327,18 @@ void TestPlaylistTabs::customContextMenu_bindsRowIntoQueueActions() {
 
 void TestPlaylistTabs::propertiesDialog_showsRefreshedAndRemainingFields() {
   registry_->addOrUpdateDynamicColumn(
-      {"era", "Era", ColumnSource::Computed, ColumnValueType::Text,
-       "IF artist IS ParsedArtist THEN classic ELSE modern", true, true, 140});
+      {.id = "computed:era",
+       .title = "Era",
+       .sortable = true,
+       .visibleByDefault = true,
+       .defaultWidth = 140},
+      {.id = "computed:era",
+       .source = ColumnSource::Computed,
+       .valueType = ValueType::Text,
+       .displayKind = DisplayKind::Raw,
+       .expression = "IF artist IS ParsedArtist THEN classic ELSE modern",
+       .searchable = true,
+       .writable = false});
 
   Playlist *pl = tabs_->currentPlaylist();
   QVERIFY(pl != nullptr);
@@ -408,9 +419,18 @@ void TestPlaylistTabs::propertiesDialog_showsRefreshedAndRemainingFields() {
 
 void TestPlaylistTabs::
     propertiesDialog_editSave_writesDirtyFieldAndEmitsSongUpdated() {
-  registry_->addOrUpdateDynamicColumn(
-      {"attr:lyrics", "Lyrics", ColumnSource::SongAttribute,
-       ColumnValueType::Text, "", true, true, 180});
+  registry_->addOrUpdateDynamicColumn({.id = "attr:lyrics",
+                                       .title = "Lyrics",
+                                       .sortable = true,
+                                       .visibleByDefault = true,
+                                       .defaultWidth = 180},
+                                      {.id = "attr:lyrics",
+                                       .source = ColumnSource::SongAttribute,
+                                       .valueType = ValueType::Text,
+                                       .displayKind = DisplayKind::Raw,
+                                       .expression = "",
+                                       .searchable = true,
+                                       .writable = true});
 
   const QString inputDirPath = QFINDTESTDATA("parser_inputs");
   QVERIFY(!inputDirPath.isEmpty());
@@ -525,9 +545,18 @@ void TestPlaylistTabs::
 }
 
 void TestPlaylistTabs::propertiesDialog_cancel_discardsBufferedEdits() {
-  registry_->addOrUpdateDynamicColumn(
-      {"attr:lyrics", "Lyrics", ColumnSource::SongAttribute,
-       ColumnValueType::Text, "", true, true, 180});
+  registry_->addOrUpdateDynamicColumn({.id = "attr:lyrics",
+                                       .title = "Lyrics",
+                                       .sortable = true,
+                                       .visibleByDefault = true,
+                                       .defaultWidth = 180},
+                                      {.id = "attr:lyrics",
+                                       .source = ColumnSource::SongAttribute,
+                                       .valueType = ValueType::Text,
+                                       .displayKind = DisplayKind::Raw,
+                                       .expression = "",
+                                       .searchable = true,
+                                       .writable = true});
 
   const QString inputDirPath = QFINDTESTDATA("parser_inputs");
   QVERIFY(!inputDirPath.isEmpty());
@@ -635,9 +664,18 @@ void TestPlaylistTabs::propertiesDialog_cancel_discardsBufferedEdits() {
 }
 
 void TestPlaylistTabs::propertiesDialog_removeField_removesNonBuiltInOnSave() {
-  registry_->addOrUpdateDynamicColumn(
-      {"attr:lyrics", "Lyrics", ColumnSource::SongAttribute,
-       ColumnValueType::Text, "", true, true, 180});
+  registry_->addOrUpdateDynamicColumn({.id = "attr:lyrics",
+                                       .title = "Lyrics",
+                                       .sortable = true,
+                                       .visibleByDefault = true,
+                                       .defaultWidth = 180},
+                                      {.id = "attr:lyrics",
+                                       .source = ColumnSource::SongAttribute,
+                                       .valueType = ValueType::Text,
+                                       .displayKind = DisplayKind::Raw,
+                                       .expression = "",
+                                       .searchable = true,
+                                       .writable = true});
 
   const QString inputDirPath = QFINDTESTDATA("parser_inputs");
   QVERIFY(!inputDirPath.isEmpty());
@@ -722,9 +760,18 @@ void TestPlaylistTabs::propertiesDialog_removeField_removesNonBuiltInOnSave() {
 }
 
 void TestPlaylistTabs::propertiesDialog_removeField_blocksBuiltIn() {
-  registry_->addOrUpdateDynamicColumn(
-      {"attr:lyrics", "Lyrics", ColumnSource::SongAttribute,
-       ColumnValueType::Text, "", true, true, 180});
+  registry_->addOrUpdateDynamicColumn({.id = "attr:lyrics",
+                                       .title = "Lyrics",
+                                       .sortable = true,
+                                       .visibleByDefault = true,
+                                       .defaultWidth = 180},
+                                      {.id = "attr:lyrics",
+                                       .source = ColumnSource::SongAttribute,
+                                       .valueType = ValueType::Text,
+                                       .displayKind = DisplayKind::Raw,
+                                       .expression = "",
+                                       .searchable = true,
+                                       .writable = true});
 
   Playlist *pl = tabs_->currentPlaylist();
   QVERIFY(pl != nullptr);

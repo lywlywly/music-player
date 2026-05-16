@@ -50,16 +50,15 @@ bool SongPropertiesDialog::isBuiltInFieldKey(const std::string &key) {
   return kBuiltins.find(key) != kBuiltins.end();
 }
 
-QString
-SongPropertiesDialog::valueTypeToDisplayText(ColumnValueType valueType) {
+QString SongPropertiesDialog::valueTypeToDisplayText(ValueType valueType) {
   switch (valueType) {
-  case ColumnValueType::Text:
+  case ValueType::Text:
     return QStringLiteral("Text");
-  case ColumnValueType::Number:
+  case ValueType::Number:
     return QStringLiteral("Number");
-  case ColumnValueType::DateTime:
+  case ValueType::DateTime:
     return QStringLiteral("Date/Time");
-  case ColumnValueType::Boolean:
+  case ValueType::Boolean:
     return QStringLiteral("Boolean");
   }
   return QStringLiteral("Text");
@@ -105,16 +104,23 @@ void SongPropertiesDialog::buildRows(
     const auto &value = song.at(key);
     const QString qKey = QString::fromStdString(key);
     const ColumnDefinition *definition = columnRegistry_.findColumn(qKey);
+    const FieldDefinition *field =
+        definition ? columnRegistry_.findField(definition->id) : nullptr;
+    const QString displayKey =
+        (field && field->source == ColumnSource::Computed)
+            ? ColumnRegistry::computedKeyFromFieldId(qKey)
+            : qKey;
 
     RowData row;
     row.rawKey = key;
     row.displayField =
-        definition ? QStringLiteral("%1 (%2)").arg(definition->title, qKey)
-                   : qKey;
+        definition
+            ? QStringLiteral("%1 (%2)").arg(definition->title, displayKey)
+            : qKey;
     row.valueText = QString::fromStdString(value.text);
     row.originalValueText = row.valueText;
-    row.valueType = definition ? definition->valueType : value.type;
-    if (definition && definition->source == ColumnSource::Computed) {
+    row.valueType = field ? field->valueType : ValueType::Text;
+    if (field && field->source == ColumnSource::Computed) {
       row.source = RowSource::ComputedField;
       row.editable = false;
     } else {
@@ -137,7 +143,7 @@ void SongPropertiesDialog::buildRows(
         .displayField = QString::fromStdString(key),
         .valueText = QString::fromStdString(value),
         .originalValueText = QString::fromStdString(value),
-        .valueType = ColumnValueType::Text,
+        .valueType = ValueType::Text,
         .source = RowSource::RemainingField,
         .editable = true,
         .dirty = false,
@@ -251,7 +257,7 @@ void SongPropertiesDialog::addField() {
       .displayField = name,
       .valueText = dialog.fieldValue(),
       .originalValueText = QString(),
-      .valueType = ColumnValueType::Text,
+      .valueType = ValueType::Text,
       .source = RowSource::RemainingField,
       .editable = true,
       .dirty = true,

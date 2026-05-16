@@ -21,8 +21,21 @@ of `README.md`.
 
 * `ColumnRegistry`
   * Source of truth for built-in, dynamic, and computed column definitions.
+  * Owns both `ColumnDefinition` (UI-facing column metadata) and
+    `FieldDefinition` (value type/display/searchability metadata).
+  * Exports parser symbols (`ExprSymbolInfo`) for expression field resolution.
 * `GlobalColumnLayoutManager`
   * Stores visible order/width/visibility for columns across playlist/search views.
+* `FieldTypePool`
+  * Process-wide pool of `FieldDefinition`, keyed by `fieldId`.
+  * Used by `FieldValue::display()` so formatting rules are schema-driven instead
+    of duplicated per value instance.
+  * `ColumnRegistry` upserts field definitions into the pool and removes
+    dropped dynamic/computed definitions during reload, so active registry
+    fields stay synchronized with pool entries.
+  * `StatusRuntimeSymbolTable` upserts runtime field definitions on
+    construction (`isplaying`, `ispaused`, `playback_time`, `duration`,
+    `bitrate`).
 
 ### Song domain
 
@@ -34,7 +47,7 @@ of `README.md`.
   * Maintains identity-based play stats using normalized `title|artist|album`.
 * `SongParser`
   * Parses file tags into built-in + dynamic fields and remaining raw tag fields.
-  * Multi-value tag fields are displayed as comma-separated text (`,`).
+  * Multi-value tag fields are displayed as comma-separated text (`", "`).
   * Writes updated/removed tags back to audio files (`writeTags`).
   * Uses TagLib built from the bundled fork submodule
     ([`third_party/taglib`](https://github.com/lywlywly/taglib)) by default, so TagLib source edits
@@ -88,7 +101,30 @@ of `README.md`.
 * `libraryexpression_*` modules
   * Tokenization, parsing, AST, static type inference, and operator evaluation.
   * Supports boolean expressions, comparisons, lists/ranges, and `IF ... THEN ... ELSE ...`.
+  * Supports string interpolation with backticks and `${...}` placeholders.
+  * Uses `ExprSymbolResolver` + `ExprSymbolInfo` to resolve names to canonical
+    `(resolvedId, valueType)`.
+  * Canonical resolved IDs are namespaced:
+    * runtime: `status:<name>`
+    * built-in: `builtin:<name>`
+    * dynamic tag: `attr:<key>`
+    * computed: `computed:<key>`
+  * Symbol exporters register two names per field:
+    * unqualified alias (for convenience), and
+    * fully-qualified alias (for explicit disambiguation).
+  * Unqualified resolution precedence is: `status > builtin > attr > computed`.
+  * Precedence is implemented by symbol list ordering plus first-match lookup:
+    * `ExprSymbolResolver::lookup(...)` returns the first symbol with matching
+      `name`.
+    * `ColumnRegistry::expressionSymbols()` appends unqualified aliases in
+      built-in, then attr, then computed order.
+    * Display expression contexts merge runtime symbols as primary and registry
+      symbols as fallback (`mergeExprSymbols(...)`), so collisions keep runtime
+      first.
   * `HAS` supports multi-value text split by comma separators.
+* `LibraryExprEvalContext`
+  * Evaluation boundary for field lookup.
+  * Provides `FieldValue` instances to the expression runtime.
 * `LibrarySearchDialog` + `LibrarySearchResultsModel`
   * Parse/evaluate query via `SongLibrary`, then present matching rows.
 
@@ -112,7 +148,7 @@ of `README.md`.
   * On play, `MainWindow` refreshes song metadata once and prefers embedded
     lyrics from parsed tag fields; file-based `.lrc` loading is fallback.
 * Lyrics panel style settings (`SettingsDialog` + `MainWindow`)
-  * Uses three settings keys: `lyrics/use_system_default_font`,
+  * Uses four settings keys: `lyrics/use_system_default_font`,
     `lyrics/font_family`, `lyrics/font_size`, and
     `lyrics/highlight_color`.
   * `font_family` is always persisted, even when system default is enabled.
@@ -125,6 +161,27 @@ of `README.md`.
   * Apply behavior:
     * `use_system_default_font=true`: system UI family + stored size
     * `use_system_default_font=false`: stored family + stored size
+* Display settings (`SettingsDialog` + `MainWindow`)
+  * Display theme mode is persisted as `display/theme_mode` with values:
+    `system`, `light`, `dark`.
+  * Theme mode switches `QStyleHints::colorScheme` (`system`/`light`/`dark`);
+    app widget style remains the system/default style.
+  * Status bar expression is persisted as `status_bar/expression`.
+  * Window title expression is persisted as `window_title/expression`.
+  * Settings dialog shows a live preview for the currently active display
+    expression editor, using current playback/runtime song context when
+    available (fallback sample values otherwise).
+  * Default expression comes from `StatusRuntimeSymbolTable::defaultStatusBarExpression()`.
+  * Default window title expression comes from
+    `StatusRuntimeSymbolTable::defaultWindowTitleExpression()`.
+  * `StatusRuntimeSymbolTable` also registers its runtime field definitions into
+    `FieldTypePool`, so runtime fields (for example `playback_time` and
+    `duration`) use the same `FieldValue::display()` formatting pipeline.
+  * Runtime symbols are exposed as `status:*` fields
+    (`status:isplaying`, `status:ispaused`, `status:playback_time`,
+    `status:duration`, `status:bitrate`) and also as unqualified aliases.
+  * Runtime symbols are only available in display-expression parsing/evaluation
+    contexts; library-search parsing uses registry symbols only.
 
 ## Core Feature Implementation Notes
 
@@ -132,6 +189,8 @@ of `README.md`.
 
 * Ingest path: parse file -> evaluate computed fields -> generate identity key -> upsert song -> sync dynamic/computed attributes.
 * Refresh path re-parses file and syncs built-in/dynamic/computed fields to DB + memory.
+* Computed values are namespaced in memory (`computed:<key>`) but persisted in
+  DB with plain keys (`<key>`) in `song_computed_attributes`.
 * Properties save path:
   * collect dirty/removed rows -> `SongParser::writeTags(...)` -> `SongLibrary::refreshSongFromFile(...)` -> emit song-updated signal for playlist model refresh.
 * Two bulk user-triggered flows are intentionally blocking with progress UI:
@@ -139,6 +198,36 @@ of `README.md`.
   * `MainWindow::openFolder()` (folder import)
   Both use modal progress dialogs and process events while work runs, instead of
   moving those operations to background threads.
+
+### FieldValue and typed conversion behavior
+
+* `FieldValue` stores only:
+  * canonical `text`
+  * `fieldId` (schema key)
+  * parsed typed union (`numberDouble` / `numberInt` / `boolean`)
+* Type/display metadata is resolved from `fieldId` through `FieldTypePool`
+  during `FieldValue::assign(...)`.
+* `assign(...)` parses by declared `ValueType`.
+  * On parse success, typed union stores parsed value.
+  * On parse failure, typed union keeps type default:
+    * Number -> `0.0`
+    * DateTime -> `0`
+    * Boolean -> `false`
+* Typed conversion helpers are centralized:
+  * `parseNumber`
+  * `parseBoolean`
+  * `parseDateTimeEpochMs`
+* DateTime parse accepts:
+  * year/month/day variants
+  * ISO date/datetime
+  * plain `yyyy-MM-dd HH:mm:ss`
+  * numeric epoch values (seconds or milliseconds)
+* Non-text typed handling:
+  * sorting compares typed union values directly.
+  * expression comparisons are type-aware by `ValueType`; number/boolean field
+    refs read typed values, while datetime comparisons parse field text.
+* Display formatting is schema-driven by `FieldDefinition.displayKind` through
+  `FieldTypePool`.
 
 ### Play statistics
 
@@ -148,7 +237,13 @@ of `README.md`.
 
 ### Bitrate display behavior
 
-* `MainWindow` status bar shows `time / duration`, and appends bitrate when available.
+* `MainWindow` evaluates both status bar and window title from display
+  expressions (same runtime symbol table + expression engine path).
+* `${bitrate}` in display expressions reads runtime symbol `status:bitrate`.
+* `status:bitrate` is updated from `MainWindow::effectiveBitrateKbps()`:
+  * if track is treated as CBR and parsed tag bitrate is available, use tag bitrate
+  * otherwise use runtime playback bitrate when available
+  * otherwise fall back to parsed tag bitrate (or `0`)
 * `GstAudioPlayer` provides playback-time bitrate:
   * hooks `playbin` `element-setup`,
   * attaches one pad probe to the first `Decoder/Audio` sink pad,
@@ -158,6 +253,64 @@ of `README.md`.
   status display prefers parsed tag bitrate from song metadata.
 * `QTAudioPlayer` does not currently emit runtime bitrate updates, so UI falls
   back to tag bitrate when present.
+
+### Expression parse/eval context split
+
+* `QString` / `std::string` boundary:
+  * `QString`: tokenizer/parser input, token text, and parse errors.
+  * `std::string`: AST/runtime/eval/storage data (`ExprValue`,
+    `ExprFieldRef`, runtime values, interpolated parts, `FieldValue::text`,
+    eval lookup key `std::string_view`).
+  * Main conversion happens during parse: `QString` tokens are normalized and
+    resolved into `std::string` AST/runtime payloads.
+
+* Library search:
+  * Resolver source: `ColumnRegistry::expressionSymbols()`
+  * Eval context: song-only (`SongLibraryExprEvalContext`)
+  * Eval lookup maps canonical IDs to song map keys:
+    * `builtin:* -> <builtin key>`
+    * `attr:* -> attr:*`
+    * `computed:* -> computed:*`
+* Display expressions (status bar + window title):
+  * Resolver source: runtime symbols merged first, then registry symbols
+  * Eval context: runtime-first, then current song (`DisplayExpressionEvalContext`)
+  * Name collisions prefer runtime symbol values.
+  * Fully-qualified names can always disambiguate collisions
+    (`status:*`, `builtin:*`, `attr:*`, `computed:*`).
+  * Interpolation is supported in backtick strings only.
+  * For interpolated backtick expressions, each `${field}` segment renders via
+    `FieldValue::display()` through context display lookup.
+* Comparison AST/eval shape is unified as `leftExpr op rightExpr`.
+  * The comparison type is resolved from the left expression:
+    field refs use field value type; non-field expressions use static type.
+  * Right side is validated against that left-side type (either literal/list/range
+    value form or another expression).
+* `ExprValueExpr` is the wrapper node for comparison RHS value-form literals
+  (scalar/list/range) parsed by `parseValue(...)`.
+  * It keeps value-form semantics (`IN [..]`, range checks, typed literal checks)
+    while still fitting the unified `leftExpr op rightExpr` shape.
+* Field resolution/evaluation split:
+  * Parse resolves a field token into canonical `ExprFieldRef.resolvedId`
+    (namespaced ID).
+  * Parser relies on symbol providers/resolver construction to supply canonical
+    namespaced `resolvedId`s.
+  * Unqualified names are canonicalized to fully-qualified IDs at parse time
+    using precedence; evaluation does not re-resolve by precedence.
+  * Eval always reads by that canonical ID (`context.fieldValue(resolvedId)`),
+    never by the original unqualified token text.
+  * In display context, canonical `status:*` fields are read from runtime
+    symbols; other canonical fields are read from the current song.
+* Parser flow (high level):
+  * `parseOr(...)` is the parse entry point, then `parseAnd(...)`,
+    `parseUnary(...)`, and `parsePrimary(...)` by precedence.
+  * `parsePrimary(...)` parses an atom first, then optional comparison suffix.
+    If atom-start is invalid, it falls back to field-comparison parsing for
+    clearer diagnostics.
+  * Field-led (`field op value`) and generic suffix (`expr op value`)
+    comparisons share the same comparison-tail parser path for consistency:
+    operator parse in `parseComparisonTail(...)`,
+    RHS parse+validation in `parseComparisonRightExpr(...)`,
+    then `ComparisonExpr` construction.
 
 ### Playlist persistence
 
@@ -180,8 +333,16 @@ of `README.md`.
   `max(maxUpdatedAtFromPages, now)`.
 * UUID change (on Settings `OK`) sets `rebase_pending=true` and resets
   `last_synced_at=0`.
+* On UUID change, `MainWindow` also triggers manual rebase immediately after
+  settings apply, so rebase starts right away (not only next startup).
+* Main window startup runs sync immediately:
+  * if `rebase_pending=true`, it runs rebase first
+  * otherwise it runs incremental pull
+* Manual menu action (`Library -> Manual cloud rebase`) triggers rebase when a
+  valid UUID is set.
 * Rebase success clears `rebase_pending` and sets `last_synced_at=now`.
-* If rebase pull/push fails, `rebase_pending` remains `true` and retries later.
+* If a pending rebase fails (pull or push), `rebase_pending` stays `true` and
+  startup will retry later. Manual rebase does not set this flag by itself.
 
 ### DynamoDB Data Model
 

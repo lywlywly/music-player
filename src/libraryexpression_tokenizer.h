@@ -8,6 +8,7 @@ enum class ExprTokenKind {
   Invalid,
   Identifier,
   StringLiteral,
+  InterpolatedStringLiteral,
   KeywordIs,
   KeywordAnd,
   KeywordOr,

@@ -9,15 +9,15 @@
 class QFileSystemMonitor : public QObject, virtual public IFileSystemMonitor {
   Q_OBJECT
   Q_INTERFACES(IFileSystemMonitor)
- public:
+public:
   explicit QFileSystemMonitor(QObject *parent = nullptr);
   void addWatchingPath(const QString &path) override;
- signals:
+signals:
   void directoryChanged(const QString &path) override;
   void fileChanged(const QString &path) override;
 
- private:
+private:
   QFileSystemWatcher qFSWatcher;
 };
 
-#endif  // QFILESYSTEMMONITOR_H
+#endif // QFILESYSTEMMONITOR_H

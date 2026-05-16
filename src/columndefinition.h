@@ -5,48 +5,58 @@
 
 enum class ColumnSource { SongAttribute, Computed };
 
-enum class ColumnValueType { Text, Number, DateTime, Boolean };
+enum class ValueType { Text, Number, DateTime, Boolean };
 
-enum class ColumnDisplayKind { Raw, EpochSecondsDateTime, DurationSeconds };
+enum class DisplayKind {
+  Raw,
+  EpochSecondsDateTime,
+  DurationSeconds,
+  ChannelLayout
+};
 
-inline QString columnValueTypeToStorageString(ColumnValueType valueType) {
+inline QString columnValueTypeToStorageString(ValueType valueType) {
   switch (valueType) {
-  case ColumnValueType::Number:
+  case ValueType::Number:
     return QStringLiteral("number");
-  case ColumnValueType::DateTime:
+  case ValueType::DateTime:
     return QStringLiteral("date");
-  case ColumnValueType::Boolean:
+  case ValueType::Boolean:
     return QStringLiteral("boolean");
-  case ColumnValueType::Text:
+  case ValueType::Text:
   default:
     return QStringLiteral("text");
   }
 }
 
-inline ColumnValueType
-columnValueTypeFromStorageString(const QString &storageValue) {
+inline ValueType columnValueTypeFromStorageString(const QString &storageValue) {
   if (storageValue == QStringLiteral("number")) {
-    return ColumnValueType::Number;
+    return ValueType::Number;
   }
   if (storageValue == QStringLiteral("date")) {
-    return ColumnValueType::DateTime;
+    return ValueType::DateTime;
   }
   if (storageValue == QStringLiteral("boolean")) {
-    return ColumnValueType::Boolean;
+    return ValueType::Boolean;
   }
-  return ColumnValueType::Text;
+  return ValueType::Text;
 }
 
 struct ColumnDefinition {
   QString id;
   QString title;
-  ColumnSource source;
-  ColumnValueType valueType;
-  QString expression;
   bool sortable = true;
   bool visibleByDefault = true;
   int defaultWidth = 140;
-  ColumnDisplayKind displayKind = ColumnDisplayKind::Raw;
+};
+
+struct FieldDefinition {
+  QString id;
+  ColumnSource source = ColumnSource::SongAttribute;
+  ValueType valueType = ValueType::Text;
+  DisplayKind displayKind = DisplayKind::Raw;
+  QString expression;
+  bool searchable = true;
+  bool writable = true;
 };
 
 #endif // COLUMNDEFINITION_H

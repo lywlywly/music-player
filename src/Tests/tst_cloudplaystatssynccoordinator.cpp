@@ -14,18 +14,19 @@ namespace {
 MSong makeSong(const QString &title, const QString &artist, const QString &path,
                const QString &album = QStringLiteral("Album")) {
   MSong song;
-  song["title"] = title.toStdString();
-  song["artist"] = artist.toStdString();
-  song["album"] = album.toStdString();
-  song["discnumber"] = FieldValue("1", ColumnValueType::Number);
-  song["tracknumber"] = FieldValue("1", ColumnValueType::Number);
-  song["date"] = FieldValue("2024-01-01", ColumnValueType::DateTime);
-  song["genre"] = "genre";
-  song["filepath"] = path.toStdString();
+  song.insert_or_assign("title", FieldValue(title.toStdString(), "title"));
+  song.insert_or_assign("artist", FieldValue(artist.toStdString(), "artist"));
+  song.insert_or_assign("album", FieldValue(album.toStdString(), "album"));
+  song.insert_or_assign("discnumber", FieldValue("1", "discnumber"));
+  song.insert_or_assign("tracknumber", FieldValue("1", "tracknumber"));
+  song.insert_or_assign("date", FieldValue("2024-01-01", "date"));
+  song.insert_or_assign("genre", FieldValue("genre", "genre"));
+  song.insert_or_assign("filepath", FieldValue(path.toStdString(), "filepath"));
   const std::string identity = util::normalizedText(title).toStdString() + "|" +
                                util::normalizedText(artist).toStdString() +
                                "|" + util::normalizedText(album).toStdString();
-  song["song_identity_key"] = identity;
+  song.insert_or_assign("song_identity_key",
+                        FieldValue(identity, "song_identity_key"));
   return song;
 }
 } // namespace

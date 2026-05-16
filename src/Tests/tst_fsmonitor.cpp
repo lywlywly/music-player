@@ -1,4 +1,6 @@
+#include <QDir>
 #include <QObject>
+#include <QTemporaryDir>
 #include <QTest>
 #include <cstdio>
 #include <fstream>
@@ -10,13 +12,13 @@
 
 class TestFSMonitor : public QObject {
   Q_OBJECT
- public:
-  explicit TestFSMonitor(QObject* parent = nullptr);
+public:
+  explicit TestFSMonitor(QObject *parent = nullptr);
   FileSystemComparer fsComparer;
-  IFileSystemMonitor* qFSMonitor = new QFileSystemMonitor{};
-  IFileSystemMonitor* efswFSMonitor = new EFSWFileSystemMonitor{};
- signals:
- private slots:
+  IFileSystemMonitor *qFSMonitor = new QFileSystemMonitor{};
+  IFileSystemMonitor *efswFSMonitor = new EFSWFileSystemMonitor{};
+signals:
+private slots:
   void testState();
   void testCompareTwoStates();
   void testFileSystemChange();
@@ -24,12 +26,14 @@ class TestFSMonitor : public QObject {
   void testEFSWFSMonitor();
 };
 
-TestFSMonitor::TestFSMonitor(QObject* parent) : QObject{parent} {}
+TestFSMonitor::TestFSMonitor(QObject *parent) : QObject{parent} {}
 
-void TestFSMonitor::testState()
-{
+void TestFSMonitor::testState() {
+  QTemporaryDir tempDir;
+  QVERIFY(tempDir.isValid());
   std::map<std::string, std::string> stateDict2 =
-      fsComparer.getDirectoryState("/Users/wangluyao/Documents/test/");
+      fsComparer.getDirectoryState(tempDir.path().toStdString());
+  QVERIFY(stateDict2.empty());
 }
 
 void TestFSMonitor::testCompareTwoStates() {
@@ -46,20 +50,29 @@ void TestFSMonitor::testCompareTwoStates() {
 }
 
 void TestFSMonitor::testFileSystemChange() {
-  std::string toBeAddedFilename = "/Users/wangluyao/Documents/test/exampleadd.mp3";
+  QTemporaryDir tempDir;
+  QVERIFY(tempDir.isValid());
+  const QString basePath = tempDir.path();
+  std::string toBeAddedFilename =
+      QDir(basePath).filePath("exampleadd.mp3").toStdString();
   std::string toBeModifiedFilename =
-      "/Users/wangluyao/Documents/test/examplemodify.mp3";
+      QDir(basePath).filePath("examplemodify.mp3").toStdString();
   std::string toBeDeletedFilename =
-      "/Users/wangluyao/Documents/test/exampledelete.mp3";
+      QDir(basePath).filePath("exampledelete.mp3").toStdString();
   std::remove(toBeAddedFilename.c_str());
   std::ofstream outputFile0(toBeDeletedFilename);
   if (outputFile0.is_open()) {
     outputFile0 << "This is some text written to the file." << std::endl;
     outputFile0.close();
   }
+  std::ofstream outputFile1(toBeModifiedFilename);
+  if (outputFile1.is_open()) {
+    outputFile1 << "Initial content." << std::endl;
+    outputFile1.close();
+  }
 
   std::map<std::string, std::string> stateDict1 =
-      fsComparer.getDirectoryState("/Users/wangluyao/Documents/test/");
+      fsComparer.getDirectoryState(basePath.toStdString());
 
   std::ofstream outputFile(toBeAddedFilename);
   if (outputFile.is_open()) {
@@ -76,18 +89,18 @@ void TestFSMonitor::testFileSystemChange() {
   std::remove(toBeDeletedFilename.c_str());
 
   std::map<std::string, std::string> stateDict2 =
-      fsComparer.getDirectoryState("/Users/wangluyao/Documents/test/");
+      fsComparer.getDirectoryState(basePath.toStdString());
 
   auto [removed, added, changed] =
       fsComparer.compareTwoStates(stateDict1, stateDict2);
-  QCOMPARE(removed, std::vector<std::string>{"/Users/wangluyao/Documents/test/exampledelete.mp3"});
-  QCOMPARE(added, std::vector<std::string>{"/Users/wangluyao/Documents/test/exampleadd.mp3"});
-  QCOMPARE(changed, std::vector<std::string>{"/Users/wangluyao/Documents/test/examplemodify.mp3"});
+  QCOMPARE(removed, std::vector<std::string>{toBeDeletedFilename});
+  QCOMPARE(added, std::vector<std::string>{toBeAddedFilename});
+  QCOMPARE(changed, std::vector<std::string>{toBeModifiedFilename});
 }
 
 void TestFSMonitor::testQFSMonitor() {
-  QSignalSpy spy(dynamic_cast<QObject*>(qFSMonitor),
-                 SIGNAL(directoryChanged(const QString&)));
+  QSignalSpy spy(dynamic_cast<QObject *>(qFSMonitor),
+                 SIGNAL(directoryChanged(const QString &)));
 
   qFSMonitor->addWatchingPath("/home/luyao/Documents/test/");
 
@@ -106,8 +119,8 @@ void TestFSMonitor::testQFSMonitor() {
 }
 
 void TestFSMonitor::testEFSWFSMonitor() {
-  QSignalSpy spy(dynamic_cast<QObject*>(efswFSMonitor),
-                 SIGNAL(fileChanged(const QString&)));
+  QSignalSpy spy(dynamic_cast<QObject *>(efswFSMonitor),
+                 SIGNAL(fileChanged(const QString &)));
 
   efswFSMonitor->addWatchingPath("/home/luyao/Documents/test/");
 

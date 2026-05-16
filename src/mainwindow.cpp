@@ -16,6 +16,9 @@
 #include "windowsmediacenter.h"
 #endif
 #include "databasemanager.h"
+#include "displayexpressionevalcontext.h"
+#include "libraryexpression_ops.h"
+#include "libraryexpression_parser.h"
 #include "librarysearchdialog.h"
 #include "lyricsloader.h"
 #include "settingsdialog.h"
@@ -30,36 +33,54 @@
 #include <QSqlDatabase>
 #include <QStandardPaths>
 #include <QStatusBar>
+#include <QStyleHints>
 #include <algorithm>
+#include <utility>
 
 namespace {
-QString formatPlaybackTime(qint64 milliseconds) {
-  const qint64 totalSeconds = std::max<qint64>(0, milliseconds / 1000);
-  const qint64 hours = totalSeconds / 3600;
-  const qint64 minutes = (totalSeconds % 3600) / 60;
-  const qint64 seconds = totalSeconds % 60;
-
-  if (hours > 0) {
-    return QStringLiteral("%1:%2:%3")
-        .arg(hours)
-        .arg(minutes, 2, 10, QLatin1Char('0'))
-        .arg(seconds, 2, 10, QLatin1Char('0'));
-  }
-
-  return QStringLiteral("%1:%2")
-      .arg(minutes, 2, 10, QLatin1Char('0'))
-      .arg(seconds, 2, 10, QLatin1Char('0'));
+ExprSymbolResolver makeDisplayExprResolver(const ColumnRegistry &registry) {
+  return ExprSymbolResolver(
+      mergeExprSymbols(std::vector<ExprSymbolInfo>(
+                           StatusRuntimeSymbolTable::expressionSymbols()),
+                       registry.expressionSymbols()));
 }
+
+ExprPtr parseDisplayExpressionWithFallback(const ExprSymbolResolver &resolver,
+                                           const QString &expression,
+                                           const QString &defaultExpression,
+                                           const QString &logPrefix) {
+  ExprParseResult parsed = parseLibraryExpression(expression, resolver);
+  if (!parsed.ok()) {
+    qWarning() << logPrefix << "parse failed:" << parsed.error.message << "at"
+               << parsed.error.position;
+    parsed = parseLibraryExpression(defaultExpression, resolver);
+    if (!parsed.ok()) {
+      qFatal("%s: failed to parse default expression",
+             logPrefix.toUtf8().constData());
+    }
+  }
+  return std::move(parsed.expr);
+}
+
 } // namespace
 
 MainWindow::MainWindow(QWidget *parent)
+    : MainWindow(QString{}, QString{}, parent) {}
+
+MainWindow::MainWindow(QString databaseName, QString connectionName,
+                       QWidget *parent)
     : QMainWindow(parent), ui(new Ui::MainWindow), control{playbackQueue_},
       columnLayoutManager_(columnRegistry_, this),
-      databaseManager_(columnRegistry_),
+      databaseManager_(columnRegistry_, std::move(databaseName),
+                       std::move(connectionName)),
       songLibrary(columnRegistry_, databaseManager_), lyricsManager{this},
       cloudPlayStatsSyncCoordinator_(songLibrary, cloudPlayStatsSyncService_,
                                      this) {
   ui->setupUi(this);
+  applyDisplayThemeFromSettings();
+  defaultWindowTitle_ = windowTitle();
+  initStatusBarExpression();
+  initWindowTitleExpression();
   updatePlaybackTimeStatus();
   setUpMenuBar();
   setUpPlaylist();
@@ -214,6 +235,25 @@ void MainWindow::initSettings() {
     connect(
         dialog, &SettingsDialog::lyricsHighlightColorChanged, this,
         [this](const QColor &color) { setLyricsPanelHighlightColor(color); });
+    connect(dialog, &SettingsDialog::statusBarExpressionChanged, this,
+            [this](const QString &) {
+              initStatusBarExpression();
+              updatePlaybackTimeStatus();
+            });
+    connect(dialog, &SettingsDialog::windowTitleExpressionChanged, this,
+            [this](const QString &) {
+              initWindowTitleExpression();
+              updatePlaybackTimeStatus();
+            });
+    connect(dialog, &SettingsDialog::displayThemeModeChanged, this,
+            [this](const QString &mode) { applyDisplayThemeMode(mode); });
+    updateStatusRuntimeSymbols();
+    const MSong *activeSong = nullptr;
+    if (currentTrackPk_ >= 0) {
+      activeSong = &songLibrary.getSongByPK(currentTrackPk_);
+    }
+    dialog->setDisplayExpressionPreviewContext(activeSong,
+                                               statusRuntimeSymbols_);
     dialog->show();
   });
 }
@@ -298,6 +338,28 @@ void MainWindow::applyLyricsHighlightColorFromSettings() {
   setLyricsPanelHighlightColor(color);
 }
 
+void MainWindow::applyDisplayThemeFromSettings() {
+  QSettings settings;
+  applyDisplayThemeMode(
+      settings.value("display/theme_mode", QStringLiteral("system"))
+          .toString()
+          .trimmed()
+          .toLower());
+}
+
+void MainWindow::applyDisplayThemeMode(const QString &mode) {
+  QStyleHints *styleHints = QGuiApplication::styleHints();
+  if (mode == QStringLiteral("dark")) {
+    styleHints->setColorScheme(Qt::ColorScheme::Dark);
+    return;
+  }
+  if (mode == QStringLiteral("light")) {
+    styleHints->setColorScheme(Qt::ColorScheme::Light);
+    return;
+  }
+  styleHints->setColorScheme(Qt::ColorScheme::Unknown);
+}
+
 void MainWindow::setUpSplitter() {
   connect(ui->splitter, &QSplitter::splitterMoved, this,
           &MainWindow::updateImageSize);
@@ -330,8 +392,11 @@ void MainWindow::playSong(const MSong &song, int row, Playlist *pl) {
   useTagBitrateForCurrentTrack_ = false;
   if (const auto bitrateIt = activeSong.find("bitrate");
       bitrateIt != activeSong.end()) {
-    currentTagBitrateBps_ = static_cast<qint64>(bitrateIt->second.typed.number *
-                                                static_cast<double>(1000));
+    const FieldValue &bitrate = bitrateIt->second;
+    if (bitrate.valueType() == ValueType::Number) {
+      currentTagBitrateBps_ = static_cast<qint64>(bitrate.typed.numberDouble *
+                                                  static_cast<double>(1000));
+    }
   }
   if (currentTagBitrateBps_ > 0) {
     useTagBitrateForCurrentTrack_ = SongParser::isLikelyCbrAudioFile(filepath);
@@ -524,24 +589,112 @@ void MainWindow::bitrateChanged(qint64 bitsPerSecond) {
   updatePlaybackTimeStatus();
 }
 
+void MainWindow::initStatusBarExpression() {
+  const ExprSymbolResolver resolver = makeDisplayExprResolver(columnRegistry_);
+  const QString defaultExpression =
+      StatusRuntimeSymbolTable::defaultStatusBarExpression();
+  QSettings settings;
+  QString expression =
+      settings.value("status_bar/expression", defaultExpression)
+          .toString()
+          .trimmed();
+  if (expression.isEmpty()) {
+    expression = defaultExpression;
+  }
+  statusBarExpr_ = parseDisplayExpressionWithFallback(
+      resolver, expression, defaultExpression,
+      QStringLiteral("initStatusBarExpression"));
+}
+
+void MainWindow::initWindowTitleExpression() {
+  const ExprSymbolResolver resolver = makeDisplayExprResolver(columnRegistry_);
+  const QString defaultExpression =
+      StatusRuntimeSymbolTable::defaultWindowTitleExpression();
+  QSettings settings;
+  QString expression =
+      settings.value("window_title/expression", defaultExpression)
+          .toString()
+          .trimmed();
+  if (expression.isEmpty()) {
+    expression = defaultExpression;
+  }
+  windowTitleExpr_ = parseDisplayExpressionWithFallback(
+      resolver, expression, defaultExpression,
+      QStringLiteral("initWindowTitleExpression"));
+}
+
+qint64 MainWindow::effectiveBitrateKbps() const {
+  const qint64 tagKbps = currentTagBitrateBps_ / static_cast<qint64>(1000);
+  if (useTagBitrateForCurrentTrack_ && tagKbps > 0) {
+    return tagKbps;
+  }
+
+  const qint64 runtimeKbps = currentBitrateBps_ / static_cast<qint64>(1000);
+  if (runtimeKbps > 0) {
+    return runtimeKbps;
+  }
+  return tagKbps > 0 ? tagKbps : 0;
+}
+
+void MainWindow::updateStatusRuntimeSymbols() {
+  const auto status = control.getStatus();
+  statusRuntimeSymbols_.setIsPlaying(status ==
+                                     PlaybackQueue::PlaybackStatus::Playing);
+  statusRuntimeSymbols_.setIsPaused(status ==
+                                    PlaybackQueue::PlaybackStatus::Paused);
+  statusRuntimeSymbols_.setPlaybackTimeSeconds(currentPositionMs_ / 1000);
+  statusRuntimeSymbols_.setDurationSeconds(currentDurationMs_ / 1000);
+  statusRuntimeSymbols_.setBitrateKbps(effectiveBitrateKbps());
+}
+
+QString MainWindow::evaluateStatusBarExpression() const {
+  if (!statusBarExpr_) {
+    return {};
+  }
+  const MSong *activeSong = nullptr;
+  if (currentTrackPk_ >= 0) {
+    activeSong = &songLibrary.getSongByPK(currentTrackPk_);
+  }
+  DisplayExpressionEvalContext context(statusRuntimeSymbols_, activeSong);
+  return runtimeValueToQString(statusBarExpr_->evaluateValue(context));
+}
+
+QString MainWindow::evaluateWindowTitleExpression() const {
+  if (!windowTitleExpr_) {
+    return defaultWindowTitle_;
+  }
+  const MSong *activeSong = nullptr;
+  if (currentTrackPk_ >= 0) {
+    activeSong = &songLibrary.getSongByPK(currentTrackPk_);
+  }
+  DisplayExpressionEvalContext context(statusRuntimeSymbols_, activeSong);
+  return runtimeValueToQString(windowTitleExpr_->evaluateValue(context));
+}
+
+void MainWindow::updateOpenSettingsDisplayPreviewContext() {
+  SettingsDialog *dialog = findChild<SettingsDialog *>();
+  if (!dialog) {
+    return;
+  }
+  const MSong *activeSong = nullptr;
+  if (currentTrackPk_ >= 0) {
+    activeSong = &songLibrary.getSongByPK(currentTrackPk_);
+  }
+  dialog->setDisplayExpressionPreviewContext(activeSong, statusRuntimeSymbols_);
+}
+
 void MainWindow::updatePlaybackTimeStatus() {
   if (control.getStatus() == PlaybackQueue::PlaybackStatus::None) {
     statusBar()->clearMessage();
+    setWindowTitle(defaultWindowTitle_);
+    updateStatusRuntimeSymbols();
+    updateOpenSettingsDisplayPreviewContext();
     return;
   }
-  QString message =
-      QStringLiteral("%1 / %2").arg(formatPlaybackTime(currentPositionMs_),
-                                    formatPlaybackTime(currentDurationMs_));
-  const qint64 bitrateBps =
-      useTagBitrateForCurrentTrack_ && currentTagBitrateBps_ > 0
-          ? currentTagBitrateBps_
-          : (currentBitrateBps_ > 0 ? currentBitrateBps_
-                                    : currentTagBitrateBps_);
-  if (bitrateBps > 0) {
-    message += QStringLiteral("  |  %1 kbps")
-                   .arg(bitrateBps / static_cast<qint64>(1000));
-  }
-  statusBar()->showMessage(message);
+  updateStatusRuntimeSymbols();
+  updateOpenSettingsDisplayPreviewContext();
+  statusBar()->showMessage(evaluateStatusBarExpression());
+  setWindowTitle(evaluateWindowTitleExpression());
 }
 
 void MainWindow::seek(int mseconds) {

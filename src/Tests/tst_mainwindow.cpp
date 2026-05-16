@@ -2,9 +2,11 @@
 #include <QDataStream>
 #include <QDir>
 #include <QFile>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMainWindow>
 #include <QObject>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
 #include <QSignalSpy>
@@ -26,6 +28,7 @@
 #include "../mainwindow.h"
 #include "../playbackbackendmanager.h"
 #include "../playlisttabs.h"
+#include "../settingsdialog.h"
 #include "../utils.h"
 
 namespace {
@@ -68,19 +71,21 @@ bool writeSilentWav(const QString &path) {
 MSong makeSong(const QString &title, const QString &artist,
                const QString &filepath) {
   MSong song;
-  song["title"] = title.toStdString();
-  song["artist"] = artist.toStdString();
-  song["album"] = "Album";
-  song["discnumber"] = FieldValue("1", ColumnValueType::Number);
-  song["tracknumber"] = FieldValue("1", ColumnValueType::Number);
-  song["date"] = FieldValue("2024-01-01", ColumnValueType::DateTime);
-  song["genre"] = "genre";
-  song["filepath"] = filepath.toStdString();
+  song.insert_or_assign("title", FieldValue(title.toStdString(), "title"));
+  song.insert_or_assign("artist", FieldValue(artist.toStdString(), "artist"));
+  song.insert_or_assign("album", FieldValue("Album", "album"));
+  song.insert_or_assign("discnumber", FieldValue("1", "discnumber"));
+  song.insert_or_assign("tracknumber", FieldValue("1", "tracknumber"));
+  song.insert_or_assign("date", FieldValue("2024-01-01", "date"));
+  song.insert_or_assign("genre", FieldValue("genre", "genre"));
+  song.insert_or_assign("filepath",
+                        FieldValue(filepath.toStdString(), "filepath"));
   const std::string identity =
       util::normalizedText(title).toStdString() + "|" +
       util::normalizedText(artist).toStdString() + "|" +
       util::normalizedText(QStringLiteral("Album")).toStdString();
-  song["song_identity_key"] = identity;
+  song.insert_or_assign("song_identity_key",
+                        FieldValue(identity, "song_identity_key"));
   return song;
 }
 
@@ -113,41 +118,57 @@ private slots:
   void systemMediaRequests_areWired();
   void backendSignals_updateUiAndSystemMedia();
   void systemMediaToggleRequest_togglesPlayback();
+  void windowTitleExpression_updatesOnPlaybackAndResetsOnStop();
+  void settingsDisplayPreview_usesCurrentSongContext();
   void sliderReleased_invokesSeekFlow();
   void playlistTableBackspace_removesSelectedRow();
   void queueActions_fromContextMenu_areWired();
   void playbackOrderMenuActions_areExclusive();
   void playbackOrderMenuActions_persistToSettings();
+  void playbackOrderMenuActions_restoreFromSettingsOnStartup();
   void librarySearchAction_opensDialog();
   void librarySearchDialog_canCreateNewPlaylistTabFromResults();
   void playStats_seekToEndWithoutListenDoesNotCount();
   void playStats_nearEndWithListenCountsOnceAndRefreshes();
-  void cloudSync_startupPull_appliesCloudPlayCount_integration();
+  void cloudSync_startupRebase_runsOnWindowStartup();
+  void cloudSync_manualRebase_appliesCloudPlayCount_integration();
 
 private:
+  void recreateWindow();
   MainWindow *window_ = nullptr;
   QTemporaryDir *workDir_ = nullptr;
   QString oldCwd_;
+  QString connectionName_;
 };
+
+void TestMainWindow::recreateWindow() {
+  delete window_;
+  window_ = nullptr;
+  connectionName_ =
+      QStringLiteral("mainwindow_test_%1")
+          .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+  window_ = new MainWindow(":memory:", connectionName_);
+}
 
 void TestMainWindow::init() {
   qputenv("MYPLAYER_USE_DUMMY_AUDIO_PLAYER", "1");
   qputenv("MYPLAYER_USE_DUMMY_MEDIA_INTERFACE", "1");
-  const QString org =
-      QStringLiteral("music-player-tests-%1")
-          .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
-  const QString app =
-      QStringLiteral("mainwindow-tests-%1")
-          .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
-  QCoreApplication::setOrganizationName(org);
-  QCoreApplication::setApplicationName(app);
+  {
+    QSettings settings;
+    settings.clear();
+    settings.setValue("window_title/expression",
+                      StatusRuntimeSymbolTable::defaultWindowTitleExpression());
+    settings.setValue("status_bar/expression",
+                      StatusRuntimeSymbolTable::defaultStatusBarExpression());
+    settings.sync();
+  }
 
   workDir_ = new QTemporaryDir();
   QVERIFY(workDir_->isValid());
   oldCwd_ = QDir::currentPath();
   QVERIFY(QDir::setCurrent(workDir_->path()));
 
-  window_ = new MainWindow();
+  recreateWindow();
 }
 
 void TestMainWindow::cleanup() {
@@ -360,27 +381,100 @@ void TestMainWindow::systemMediaToggleRequest_togglesPlayback() {
   QTRY_COMPARE(statusAt(playlist, 0, statusCol), QString::fromUtf8("\u25B6"));
 
   backend->player()->setPosition(65000);
-  QTRY_VERIFY(statusBar->currentMessage().startsWith("01:05 / 02:05"));
+  QTRY_VERIFY(statusBar->currentMessage().contains("01:05 / 02:05"));
 
   media->requestToggleForTest();
   QTRY_COMPARE(statusAt(playlist, 0, statusCol), QString::fromUtf8("\u23F8"));
   QTRY_COMPARE(media->stateForTest().playbackState,
                ISystemMediaInterface::PlaybackState::Paused);
-  QTRY_VERIFY(statusBar->currentMessage().startsWith("01:05 / 02:05"));
+  QTRY_VERIFY(statusBar->currentMessage().contains("01:05 / 02:05"));
 
   media->requestToggleForTest();
   QTRY_COMPARE(statusAt(playlist, 0, statusCol), QString::fromUtf8("\u25B6"));
   QTRY_COMPARE(media->stateForTest().playbackState,
                ISystemMediaInterface::PlaybackState::Playing);
-  QTRY_VERIFY(statusBar->currentMessage().startsWith("01:05 / 02:05"));
+  QTRY_VERIFY(statusBar->currentMessage().contains("01:05 / 02:05"));
 
   media->requestPauseForTest();
-  QTRY_VERIFY(statusBar->currentMessage().startsWith("01:05 / 02:05"));
+  QTRY_VERIFY(statusBar->currentMessage().contains("01:05 / 02:05"));
 
   QAction *stopAction = window_->findChild<QAction *>("actionStop");
   QVERIFY(stopAction != nullptr);
   stopAction->trigger();
   QTRY_COMPARE(statusBar->currentMessage(), QString());
+}
+
+void TestMainWindow::windowTitleExpression_updatesOnPlaybackAndResetsOnStop() {
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(tabs != nullptr);
+  Playlist *playlist = tabs->currentPlaylist();
+  QVERIFY(playlist != nullptr);
+
+  const QString initialTitle = window_->windowTitle();
+  const QString wav = workDir_->filePath("window-title-song.wav");
+  QVERIFY(writeSilentWav(wav));
+  playlist->addSong(makeSong("Song", "Artist", wav));
+  playlist->setLastPlayed(playlist->getPkByIndex(0));
+
+  QAction *playAction = window_->findChild<QAction *>("actionPlay");
+  QAction *stopAction = window_->findChild<QAction *>("actionStop");
+  QVERIFY(playAction != nullptr);
+  QVERIFY(stopAction != nullptr);
+
+  playAction->trigger();
+  QTRY_VERIFY(window_->windowTitle() != initialTitle);
+  QTRY_VERIFY(!window_->windowTitle().isEmpty());
+
+  stopAction->trigger();
+  QTRY_COMPARE(window_->windowTitle(), initialTitle);
+}
+
+void TestMainWindow::settingsDisplayPreview_usesCurrentSongContext() {
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(tabs != nullptr);
+  Playlist *playlist = tabs->currentPlaylist();
+  QVERIFY(playlist != nullptr);
+
+  const QString wav = workDir_->filePath("settings-preview-song.wav");
+  QVERIFY(writeSilentWav(wav));
+  playlist->addSong(makeSong("Song", "Artist", wav));
+  playlist->setLastPlayed(playlist->getPkByIndex(0));
+  PlaybackBackendManager *backend =
+      window_->findChild<PlaybackBackendManager *>();
+  QVERIFY(backend != nullptr);
+  DummyAudioPlayer *dummyPlayer =
+      qobject_cast<DummyAudioPlayer *>(backend->player());
+  QVERIFY(dummyPlayer != nullptr);
+  dummyPlayer->setDurationForTest(125000);
+
+  QAction *playAction = window_->findChild<QAction *>("actionPlay");
+  QVERIFY(playAction != nullptr);
+  playAction->trigger();
+
+  QAction *settingsAction = window_->findChild<QAction *>("actionSettings");
+  QVERIFY(settingsAction != nullptr);
+  settingsAction->trigger();
+
+  SettingsDialog *dialog = window_->findChild<SettingsDialog *>();
+  QTRY_VERIFY(dialog != nullptr);
+  QPlainTextEdit *statusEdit =
+      dialog->findChild<QPlainTextEdit *>("status_expression_edit");
+  QLabel *preview =
+      dialog->findChild<QLabel *>("display_expression_preview_value_label");
+  QVERIFY(statusEdit != nullptr);
+  QVERIFY(preview != nullptr);
+
+  statusEdit->setPlainText("`${artist} - ${title}`");
+  const MSong &playedSong = playlist->getSongByIndex(0);
+  const QString expectedArtistTitle =
+      QStringLiteral("%1 - %2")
+          .arg(QString::fromStdString(playedSong.at("artist").text))
+          .arg(QString::fromStdString(playedSong.at("title").text));
+  QTRY_COMPARE(preview->text(), expectedArtistTitle);
+
+  statusEdit->setPlainText("`${playback_time}`");
+  backend->player()->setPosition(65000);
+  QTRY_COMPARE(preview->text(), QString("01:05"));
 }
 
 void TestMainWindow::sliderReleased_invokesSeekFlow() {
@@ -505,6 +599,23 @@ void TestMainWindow::playbackOrderMenuActions_persistToSettings() {
   }
 }
 
+void TestMainWindow::playbackOrderMenuActions_restoreFromSettingsOnStartup() {
+  {
+    QSettings settings;
+    settings.setValue("playback/order_action", "actionShuffle_tracks");
+  }
+
+  recreateWindow();
+
+  QAction *defaultAction = window_->findChild<QAction *>("actionDefault");
+  QAction *shuffleAction =
+      window_->findChild<QAction *>("actionShuffle_tracks");
+  QVERIFY(defaultAction != nullptr);
+  QVERIFY(shuffleAction != nullptr);
+  QVERIFY(shuffleAction->isChecked());
+  QVERIFY(!defaultAction->isChecked());
+}
+
 void TestMainWindow::librarySearchAction_opensDialog() {
   QAction *searchAction = window_->findChild<QAction *>("actionSearch");
   QVERIFY(searchAction != nullptr);
@@ -588,7 +699,7 @@ void TestMainWindow::playStats_seekToEndWithoutListenDoesNotCount() {
   QVERIFY(QMetaObject::invokeMethod(slider, "sliderReleased",
                                     Qt::DirectConnection));
 
-  QSqlDatabase db = QSqlDatabase::database("myplayer_main");
+  QSqlDatabase db = QSqlDatabase::database(connectionName_);
   QVERIFY(db.isValid());
   QSqlQuery q(db);
   QVERIFY(q.exec("SELECT IFNULL(MAX(play_count), 0) FROM song_play_stats"));
@@ -625,7 +736,7 @@ void TestMainWindow::playStats_nearEndWithListenCountsOnceAndRefreshes() {
   backend->player()->setPosition(115000);
   backend->player()->setPosition(119000);
 
-  QSqlDatabase db = QSqlDatabase::database("myplayer_main");
+  QSqlDatabase db = QSqlDatabase::database(connectionName_);
   QVERIFY(db.isValid());
   QSqlQuery q(db);
   QVERIFY(q.exec("SELECT COUNT(*) FROM song_play_stats"));
@@ -639,59 +750,69 @@ void TestMainWindow::playStats_nearEndWithListenCountsOnceAndRefreshes() {
   QVERIFY(q.value(1).toLongLong() > 0);
 }
 
-void TestMainWindow::cloudSync_startupPull_appliesCloudPlayCount_integration() {
-  const QString dbPath = QSqlDatabase::database("myplayer_main").databaseName();
-  QVERIFY(!dbPath.isEmpty());
-
-  delete window_;
-  window_ = nullptr;
-
+void TestMainWindow::cloudSync_startupRebase_runsOnWindowStartup() {
   qputenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC", "1");
   CloudPlayStatsSyncService::clearDummyPullPages();
   CloudPlayStatsSyncService::clearDummyPushCalls();
-
-  const QString seedConn =
-      QStringLiteral("seed_mainwindow_%1")
-          .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
   {
-    QSqlDatabase seedDb = QSqlDatabase::addDatabase("QSQLITE", seedConn);
-    seedDb.setDatabaseName(dbPath);
-    QVERIFY(seedDb.open());
-    QSqlQuery q(seedDb);
-    QVERIFY(q.exec("PRAGMA foreign_keys = ON"));
-    QVERIFY(q.exec("INSERT OR REPLACE INTO song_identities(identity_id, "
-                   "song_identity_key) VALUES (1, 'song|artist|album')"));
-    QVERIFY(q.exec("INSERT OR REPLACE INTO songs(song_id, title, artist, "
-                   "album, discnumber, tracknumber, date, genre, filepath, "
-                   "identity_id) VALUES "
-                   "(1, 'Song', 'Artist', 'Album', 1, 1, '2024-01-01', "
-                   "'genre', '/tmp/cloud-seeded.wav', 1)"));
-    QVERIFY(q.exec("INSERT OR REPLACE INTO playlists(playlist_id, name, "
-                   "last_played) VALUES (1, 'Default Playlist', 1)"));
-    QVERIFY(
-        q.exec("INSERT OR REPLACE INTO playlist_items(playlist_id, song_id, "
-               "position) VALUES (1, 1, 1)"));
-    seedDb.close();
+    QSettings settings;
+    settings.setValue("cloud_sync/user_uuid",
+                      "11111111-1111-1111-1111-111111111111");
+    settings.setValue("cloud_sync/last_synced_at", 1000);
+    settings.setValue("cloud_sync/rebase_pending", true);
   }
-  QSqlDatabase::removeDatabase(seedConn);
-
-  QSettings settings;
-  settings.setValue("cloud_sync/user_uuid",
-                    "11111111-1111-1111-1111-111111111111");
-  settings.setValue("cloud_sync/last_synced_at", 1000);
-  settings.setValue("cloud_sync/rebase_pending", false);
 
   CloudPlayStatItem item{.songIdentityKey = "song|artist|album",
                          .playCount = 7,
                          .updatedAt = 2000};
   CloudPlayStatsSyncService::setDummyPullPages({{item}}, true, 2000);
 
-  window_ = new MainWindow();
+  recreateWindow();
+
+  QSettings settings;
+  QTRY_VERIFY(!settings.value("cloud_sync/rebase_pending", true).toBool());
+  const qint64 syncedAt =
+      settings.value("cloud_sync/last_synced_at", 0).toLongLong();
+  QVERIFY(syncedAt >= 2000);
+
+  CloudPlayStatsSyncService::clearDummyPullPages();
+  CloudPlayStatsSyncService::clearDummyPushCalls();
+  qunsetenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC");
+}
+
+void TestMainWindow::
+    cloudSync_manualRebase_appliesCloudPlayCount_integration() {
+  qputenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC", "1");
+  CloudPlayStatsSyncService::clearDummyPullPages();
+  CloudPlayStatsSyncService::clearDummyPushCalls();
+
   PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
   QVERIFY(tabs != nullptr);
   Playlist *playlist = tabs->currentPlaylist();
   QVERIFY(playlist != nullptr);
-  QTRY_COMPARE(playlist->songCount(), 1);
+
+  const QString wav = workDir_->filePath("cloud-sync-song.wav");
+  QVERIFY(writeSilentWav(wav));
+  playlist->addSong(makeSong("Song", "Artist", wav));
+  QCOMPARE(playlist->songCount(), 1);
+
+  QSettings settings;
+  settings.setValue("cloud_sync/user_uuid",
+                    "11111111-1111-1111-1111-111111111111");
+  settings.setValue("cloud_sync/last_synced_at", 1000);
+  settings.setValue("cloud_sync/rebase_pending", true);
+
+  CloudPlayStatItem item{.songIdentityKey = "song|artist|album",
+                         .playCount = 7,
+                         .updatedAt = 2000};
+  CloudPlayStatsSyncService::setDummyPullPages({{item}}, true, 2000);
+
+  QAction *manualRebase =
+      window_->findChild<QAction *>("actionManual_cloud_rebase");
+  QVERIFY(manualRebase != nullptr);
+  manualRebase->setEnabled(true);
+  manualRebase->trigger();
+
   QTRY_COMPARE(playlist->getSongByIndex(0).at("play_count").text,
                std::string("7"));
 

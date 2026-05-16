@@ -7,38 +7,30 @@
 #include <string>
 
 struct FieldValue {
-  // Declared field type from column definition.
-  ColumnValueType type = ColumnValueType::Text;
-
   // Canonical string representation loaded from DB/tag/query input.
   // Presence checks should use this field: an empty text means "no value".
   std::string text;
-
-  // Parsed typed cache for non-text fields.
-  // Number   -> typed.number
-  // DateTime -> typed.epochMs (Unix epoch milliseconds)
-  // Boolean  -> typed.boolean
-  //
-  // Note: this cache alone is not a reliable presence signal because failed
-  // parses keep default values. Use `text.empty()` to test value presence.
+  // Field identity used to resolve schema/display behavior.
+  std::string fieldId;
+  // Parsed typed value for non-text fields.
+  // If parsing fails, assign() keeps a type-appropriate default:
+  // Number -> 0.0, DateTime -> 0, Boolean -> false.
   union {
-    double number;
-    int64_t epochMs;
+    double numberDouble;
+    int64_t numberInt;
     bool boolean;
-  } typed{.epochMs = 0};
+  } typed{.numberInt = 0};
 
-  FieldValue() = default;
-  FieldValue(const std::string &textValue, ColumnValueType valueType);
-  FieldValue(const char *textValue);
-  FieldValue &operator=(const std::string &textValue);
-  FieldValue &operator=(const char *textValue);
+  FieldValue() = delete;
+  FieldValue(const std::string &textValue, std::string fieldIdValue);
 
-  void assign(const std::string &textValue, ColumnValueType valueType);
-  static FieldValue fromDefinition(const ColumnDefinition *definition,
-                                   const std::string &textValue);
-  static bool canConvert(const std::string &textValue,
-                         ColumnValueType valueType);
-  QString display(const ColumnDefinition *definition) const;
+  void assign(const std::string &textValue, std::string fieldIdValue);
+  ValueType valueType() const;
+  static bool canConvert(const std::string &textValue, ValueType valueType);
+  static bool parseNumber(const std::string &textValue, double &out);
+  static bool parseDateTimeEpochMs(const std::string &textValue, int64_t &out);
+  static bool parseBoolean(const std::string &textValue, bool &out);
+  QString display() const;
   bool operator==(const FieldValue &other) const;
   operator const std::string &() const { return text; }
 };

@@ -1,5 +1,4 @@
 #include "librarysearchresultsmodel.h"
-
 LibrarySearchResultsModel::LibrarySearchResultsModel(
     SongLibrary &songLibrary, GlobalColumnLayoutManager &columnLayoutManager,
     QObject *parent)
@@ -36,9 +35,7 @@ QVariant LibrarySearchResultsModel::data(const QModelIndex &index,
   if (it == song.end()) {
     return {};
   }
-  const ColumnDefinition *definition =
-      columnLayoutManager_.registry().findColumn(columnId);
-  return it->second.display(definition);
+  return it->second.display();
 }
 
 QVariant LibrarySearchResultsModel::headerData(int section,
@@ -81,10 +78,15 @@ QList<QString> LibrarySearchResultsModel::visibleSongColumnIds() const {
     if (!definition) {
       continue;
     }
+    const FieldDefinition *fieldDefinition =
+        columnLayoutManager_.registry().findField(definition->id);
+    if (!fieldDefinition) {
+      continue;
+    }
     const bool isSongColumn =
-        definition->source == ColumnSource::SongAttribute ||
-        (definition->source == ColumnSource::Computed &&
-         !definition->expression.trimmed().isEmpty());
+        fieldDefinition->source == ColumnSource::SongAttribute ||
+        (fieldDefinition->source == ColumnSource::Computed &&
+         !fieldDefinition->expression.trimmed().isEmpty());
     if (!isSongColumn) {
       continue;
     }

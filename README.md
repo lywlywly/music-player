@@ -12,6 +12,8 @@ A cross-platform desktop music player focused on local-library playback, lyrics,
 * ReplayGain (GStreamer backend)
 * Lyrics display (embedded tag lyrics on play, with `.lrc` fallback)
 * Customizable lyrics panel style
+* Customizable display expressions (status bar + window title)
+* Display theme mode: system default / light / dark
 * System media integration
 * Play stats: `play_count`, `last_played_timestamp`
 * Optional UUID-scoped cloud sync for `play_count`
@@ -53,7 +55,8 @@ Rules:
 * `IN` supports lists for all field types and ranges for numeric/datetime fields.
 * Text matching is normalized (case-insensitive style matching).
 * Multi-value tag text is displayed as comma-separated (`a, b, c`); `HAS` matching uses comma-separated values.
-* Typed fields (number/datetime/boolean) use typed comparison; invalid conversions fail parsing.
+* Typed fields (number/datetime/boolean) use typed comparison and reject invalid query literals.
+* Interpolated strings use backticks with `${...}` (for example `` `${artist} - ${title}` ``).
 
 Examples:
 
@@ -79,8 +82,9 @@ Cloud sync:
 * Sync target is `play_count` (UUID-scoped user data).
 * Merge rule is `max(local, cloud)` per song identity.
 * On local completed-play increment, app pushes `delta=1` asynchronously (best effort).
-* On startup, app pulls updates from cloud and reconciles counts.
+* On startup, app runs cloud sync immediately (rebase first if `rebase_pending=true`; otherwise incremental pull).
 * If UUID changes and is saved with `OK`, app triggers rebase sync.
+* Manual cloud rebase is available from the Library menu.
 
 ## Build and Run
 

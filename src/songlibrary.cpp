@@ -42,7 +42,7 @@ public:
   explicit SongLibraryExprEvalContext(const MSong &song) : song_(song) {}
 
   const FieldValue *fieldValue(std::string_view fieldId) const override {
-    auto it = song_.find(std::string(fieldId));
+    auto it = song_.find(songKeyForFieldId(fieldId));
     if (it == song_.end()) {
       return nullptr;
     }
@@ -50,53 +50,61 @@ public:
   }
 
 private:
+  static std::string songKeyForFieldId(std::string_view fieldId) {
+    if (fieldId.starts_with("builtin:")) {
+      return std::string(fieldId.substr(8));
+    }
+    return std::string(fieldId);
+  }
+
   const MSong &song_;
 };
 
 FieldValue fieldValueFromRuntime(const ExprRuntimeValue &runtimeValue,
-                                 ColumnValueType valueType, bool &ok) {
+                                 ValueType valueType, bool &ok,
+                                 const std::string &fieldId) {
   ok = true;
   switch (valueType) {
-  case ColumnValueType::Text:
+  case ValueType::Text:
     if (runtimeValue.isText()) {
-      return FieldValue(runtimeValue.textValue(), ColumnValueType::Text);
+      return FieldValue(runtimeValue.textValue(), fieldId);
     }
     if (runtimeValue.isBool()) {
       return FieldValue(runtimeValue.boolValueOrFalse() ? "true" : "false",
-                        ColumnValueType::Text);
+                        fieldId);
     }
     return FieldValue(
         QString::number(runtimeValue.numberValue(), 'g', 17).toStdString(),
-        ColumnValueType::Text);
-  case ColumnValueType::Number:
+        fieldId);
+  case ValueType::Number:
     if (!runtimeValue.isNumber()) {
       ok = false;
-      return {};
+      return FieldValue("", fieldId);
     }
     return FieldValue(
         QString::number(runtimeValue.numberValue(), 'g', 17).toStdString(),
-        ColumnValueType::Number);
-  case ColumnValueType::Boolean:
+        fieldId);
+  case ValueType::Boolean:
     if (!runtimeValue.isBool()) {
       ok = false;
-      return {};
+      return FieldValue("", fieldId);
     }
     return FieldValue(runtimeValue.boolValueOrFalse() ? "true" : "false",
-                      ColumnValueType::Boolean);
-  case ColumnValueType::DateTime:
+                      fieldId);
+  case ValueType::DateTime:
     if (!runtimeValue.isText()) {
       ok = false;
-      return {};
+      return FieldValue("", fieldId);
     }
     if (!FieldValue::canConvert(runtimeValue.textValue(),
-                                ColumnValueType::DateTime)) {
+                                ValueType::DateTime)) {
       ok = false;
-      return {};
+      return FieldValue("", fieldId);
     }
-    return FieldValue(runtimeValue.textValue(), ColumnValueType::DateTime);
+    return FieldValue(runtimeValue.textValue(), fieldId);
   }
   ok = false;
-  return {};
+  return FieldValue("", fieldId);
 }
 
 std::string songIdentityKeyFromSong(const MSong &song) {
@@ -110,6 +118,7 @@ std::string songIdentityKeyFromSong(const MSong &song) {
 }
 
 void evaluateComputedFieldsInSong(MSong &song, const ColumnRegistry &registry) {
+  const ExprSymbolResolver resolver(registry.expressionSymbols());
   for (auto it = song.begin(); it != song.end();) {
     if (it->first.rfind("attr:", 0) == 0) {
       ++it;
@@ -121,7 +130,9 @@ void evaluateComputedFieldsInSong(MSong &song, const ColumnRegistry &registry) {
       continue;
     }
     const ColumnDefinition *definition = registry.findColumn(key);
-    if (!definition || definition->source == ColumnSource::Computed) {
+    const FieldDefinition *field =
+        definition ? registry.findField(definition->id) : nullptr;
+    if (!definition || (field && field->source == ColumnSource::Computed)) {
       it = song.erase(it);
     } else {
       ++it;
@@ -129,22 +140,24 @@ void evaluateComputedFieldsInSong(MSong &song, const ColumnRegistry &registry) {
   }
 
   SongLibraryExprEvalContext context(song);
-  for (const ColumnDefinition &definition : registry.computedDefinitions()) {
+  for (const FieldDefinition &definition :
+       registry.computedFieldDefinitions()) {
     ExprParseResult parsed =
-        ::parseLibraryExpression(definition.expression, registry);
+        ::parseLibraryExpression(definition.expression, resolver);
     if (!parsed.ok()) {
       song.erase(definition.id.toStdString());
       continue;
     }
     const ExprRuntimeValue runtimeValue = parsed.expr->evaluateValue(context);
     bool conversionOk = false;
-    const FieldValue computedValue =
-        fieldValueFromRuntime(runtimeValue, definition.valueType, conversionOk);
+    const std::string fieldId = definition.id.toStdString();
+    const FieldValue computedValue = fieldValueFromRuntime(
+        runtimeValue, definition.valueType, conversionOk, fieldId);
     if (!conversionOk) {
       song.erase(definition.id.toStdString());
       continue;
     }
-    song[definition.id.toStdString()] = computedValue;
+    song.insert_or_assign(fieldId, FieldValue(computedValue.text, fieldId));
   }
 }
 } // namespace
@@ -195,7 +208,8 @@ int SongLibrary::addTolibrary(MSong &&s) {
 
 ExprParseResult
 SongLibrary::parseLibraryExpression(const QString &expressionText) const {
-  return ::parseLibraryExpression(expressionText, columnRegistry_);
+  const ExprSymbolResolver resolver(columnRegistry_.expressionSymbols());
+  return ::parseLibraryExpression(expressionText, resolver);
 }
 
 std::vector<int> SongLibrary::search(const Expr &expression) const {
@@ -326,17 +340,18 @@ void SongLibrary::loadBuiltInSongs() {
       const QString &columnId = columns[col];
       const std::string key = columnId.toStdString();
       const std::string value = q.value(col + 1).toString().toStdString();
-      const ColumnDefinition *definition = columnRegistry_.findColumn(columnId);
-      m[key] = FieldValue::fromDefinition(definition, value);
+      m.insert_or_assign(key, FieldValue(value, key));
     }
     const int identityId = q.value(columns.size() + 1).toInt();
-    m["song_identity_id"] =
-        FieldValue(std::to_string(identityId), ColumnValueType::Number);
-    m["song_identity_key"] =
+    m.insert_or_assign(
+        "song_identity_id",
+        FieldValue(std::to_string(identityId), "song_identity_id"));
+    m.insert_or_assign(
+        "song_identity_key",
         FieldValue(q.value(columns.size() + 2).toString().toStdString(),
-                   ColumnValueType::Text);
+                   "song_identity_key"));
 
-    const std::string path = m["filepath"].text;
+    const std::string path = m.at("filepath").text;
     if (path.empty()) {
       qFatal("loadBuiltInSongs: filepath is empty for song_id=%d", id);
     }
@@ -383,15 +398,15 @@ void SongLibrary::loadDynamicAttributes() {
       qFatal("loadDynamicAttributes: song_id out of range: %d", songId);
     }
     const QString columnId = QStringLiteral("attr:") + key;
-    const ColumnDefinition *definition = columnRegistry_.findColumn(columnId);
-    if (!definition) {
+    const FieldDefinition *field = columnRegistry_.findField(columnId);
+    if (!field || field->source != ColumnSource::SongAttribute) {
       qWarning() << "loadDynamicAttributes: removing stale dynamic attribute"
                  << columnId;
       unknownKeys.insert(key);
       continue;
     }
-    songs[songId][columnId.toStdString()] =
-        FieldValue(valueText, definition->valueType);
+    const std::string fieldId = columnId.toStdString();
+    songs[songId].insert_or_assign(fieldId, FieldValue(valueText, fieldId));
   }
 
   if (!unknownKeys.empty()) {
@@ -413,9 +428,9 @@ void SongLibrary::loadDynamicAttributes() {
 void SongLibrary::loadComputedValues() {
   QSqlDatabase &db = databaseManager_.db();
   QSet<QString> knownKeys;
-  for (const ColumnDefinition &definition :
-       columnRegistry_.computedDefinitions()) {
-    knownKeys.insert(definition.id);
+  for (const FieldDefinition &definition :
+       columnRegistry_.computedFieldDefinitions()) {
+    knownKeys.insert(ColumnRegistry::computedKeyFromFieldId(definition.id));
   }
 
   QSqlQuery query(db);
@@ -460,7 +475,8 @@ void SongLibrary::loadComputedValues() {
 
   while (query.next()) {
     const int songId = query.value(0).toInt();
-    const QString columnId = query.value(1).toString();
+    const QString fieldId =
+        ColumnRegistry::computedFieldId(query.value(1).toString());
     const std::string valueText = query.value(2).toString().toStdString();
     if (songId < 0) {
       qFatal("loadComputedValues: negative song_id=%d", songId);
@@ -468,13 +484,13 @@ void SongLibrary::loadComputedValues() {
     if (songId >= static_cast<int>(songs.size())) {
       qFatal("loadComputedValues: song_id out of range: %d", songId);
     }
-    const ColumnDefinition *definition = columnRegistry_.findColumn(columnId);
-    if (!definition || definition->source != ColumnSource::Computed ||
-        definition->expression.trimmed().isEmpty()) {
+    const FieldDefinition *field = columnRegistry_.findField(fieldId);
+    if (!field || field->source != ColumnSource::Computed ||
+        field->expression.trimmed().isEmpty()) {
       continue;
     }
-    songs[songId][columnId.toStdString()] =
-        FieldValue(valueText, definition->valueType);
+    const std::string fieldKey = fieldId.toStdString();
+    songs[songId].insert_or_assign(fieldKey, FieldValue(valueText, fieldKey));
   }
 }
 
@@ -498,10 +514,11 @@ void SongLibrary::loadPlayStats() {
       continue;
     }
     for (int songId : it->second) {
-      songs[songId]["play_count"] =
-          FieldValue(std::to_string(playCount), ColumnValueType::Number);
-      songs[songId]["last_played_timestamp"] =
-          FieldValue(std::to_string(lastPlayed), ColumnValueType::DateTime);
+      songs[songId].insert_or_assign(
+          "play_count", FieldValue(std::to_string(playCount), "play_count"));
+      songs[songId].insert_or_assign(
+          "last_played_timestamp",
+          FieldValue(std::to_string(lastPlayed), "last_played_timestamp"));
     }
   }
 }
@@ -512,11 +529,14 @@ int SongLibrary::songIdentityIdBySongId(int songId) const {
     return -1;
   }
   auto it = songs[songId].find("song_identity_id");
-  if (it == songs[songId].end() || it->second.type != ColumnValueType::Number ||
-      it->second.text.empty()) {
+  if (it == songs[songId].end() || it->second.text.empty()) {
     return -1;
   }
-  const int identityId = static_cast<int>(it->second.typed.number);
+  bool ok = false;
+  const int identityId = QString::fromStdString(it->second.text).toInt(&ok);
+  if (!ok) {
+    return -1;
+  }
   if (identityId <= 0) {
     return -1;
   }
@@ -588,8 +608,8 @@ bool SongLibrary::markSongPlayedAtStart(int songPk, qint64 unixSeconds) {
   int playCount = 0;
   auto playCountIt = songs[songPk].find("play_count");
   if (playCountIt != songs[songPk].end() &&
-      playCountIt->second.type == ColumnValueType::Number) {
-    playCount = static_cast<int>(playCountIt->second.typed.number);
+      playCountIt->second.valueType() == ValueType::Number) {
+    playCount = static_cast<int>(playCountIt->second.typed.numberDouble);
   }
 
   const int identityId = songIdentityIdBySongId(songPk);
@@ -617,10 +637,11 @@ bool SongLibrary::markSongPlayedAtStart(int songPk, qint64 unixSeconds) {
     return true;
   }
   for (int id : identityIt->second) {
-    songs[id]["last_played_timestamp"] =
-        FieldValue(std::to_string(unixSeconds), ColumnValueType::DateTime);
+    songs[id].insert_or_assign(
+        "last_played_timestamp",
+        FieldValue(std::to_string(unixSeconds), "last_played_timestamp"));
     if (songs[id].find("play_count") == songs[id].end()) {
-      songs[id]["play_count"] = FieldValue("0", ColumnValueType::Number);
+      songs[id].insert_or_assign("play_count", FieldValue("0", "play_count"));
     }
   }
   return true;
@@ -651,8 +672,8 @@ bool SongLibrary::incrementPlayCount(int songPk) {
   } else {
     auto countIt = songs[songPk].find("play_count");
     if (countIt != songs[songPk].end() &&
-        countIt->second.type == ColumnValueType::Number) {
-      currentCount = static_cast<int>(countIt->second.typed.number);
+        countIt->second.valueType() == ValueType::Number) {
+      currentCount = static_cast<int>(countIt->second.typed.numberDouble);
     }
   }
   const int newCount = currentCount + 1;
@@ -660,11 +681,7 @@ bool SongLibrary::incrementPlayCount(int songPk) {
   qint64 lastPlayedTs = 0;
   auto tsIt = songs[songPk].find("last_played_timestamp");
   if (tsIt != songs[songPk].end()) {
-    if (tsIt->second.type == ColumnValueType::DateTime) {
-      lastPlayedTs = static_cast<qint64>(tsIt->second.typed.epochMs);
-    } else {
-      lastPlayedTs = QString::fromStdString(tsIt->second.text).toLongLong();
-    }
+    lastPlayedTs = QString::fromStdString(tsIt->second.text).toLongLong();
   }
 
   QSqlQuery query(db);
@@ -686,8 +703,8 @@ bool SongLibrary::incrementPlayCount(int songPk) {
     return true;
   }
   for (int id : identityIt->second) {
-    songs[id]["play_count"] =
-        FieldValue(std::to_string(newCount), ColumnValueType::Number);
+    songs[id].insert_or_assign(
+        "play_count", FieldValue(std::to_string(newCount), "play_count"));
   }
   return true;
 }
@@ -754,8 +771,8 @@ SongLibrary::applyCloudPlayCount(const std::string &identityKey,
   }
   affected.reserve(identityIt->second.size());
   for (int songPk : identityIt->second) {
-    songs[songPk]["play_count"] =
-        FieldValue(std::to_string(merged), ColumnValueType::Number);
+    songs[songPk].insert_or_assign(
+        "play_count", FieldValue(std::to_string(merged), "play_count"));
     affected.push_back(songPk);
   }
   return affected;
@@ -775,8 +792,8 @@ std::unordered_map<std::string, int> SongLibrary::identityPlayCounts() const {
     int count = 0;
     auto countIt = song.find("play_count");
     if (countIt != song.end() &&
-        countIt->second.type == ColumnValueType::Number) {
-      count = static_cast<int>(countIt->second.typed.number);
+        countIt->second.valueType() == ValueType::Number) {
+      count = static_cast<int>(countIt->second.typed.numberDouble);
     }
     auto existing = counts.find(keyIt->second.text);
     if (existing == counts.end()) {
@@ -789,19 +806,19 @@ std::unordered_map<std::string, int> SongLibrary::identityPlayCounts() const {
 }
 
 void SongLibrary::syncComputedValuesBySongId(int songId, const MSong &song) {
-  for (const ColumnDefinition &definition :
-       columnRegistry_.computedDefinitions()) {
+  for (const FieldDefinition &definition :
+       columnRegistry_.computedFieldDefinitions()) {
     auto it = song.find(definition.id.toStdString());
     if (it == song.end()) {
       continue;
     }
-    songs[songId][definition.id.toStdString()] = it->second;
+    songs[songId].insert_or_assign(definition.id.toStdString(), it->second);
     upsertComputedFieldValueInDb(songId, definition, it->second);
   }
 }
 
 void SongLibrary::upsertComputedFieldValueInDb(
-    int songId, const ColumnDefinition &definition, const FieldValue &value) {
+    int songId, const FieldDefinition &definition, const FieldValue &value) {
   QSqlDatabase &db = databaseManager_.db();
   QSqlQuery query(db);
   query.prepare(R"(
@@ -812,9 +829,11 @@ void SongLibrary::upsertComputedFieldValueInDb(
           value_type=excluded.value_type
   )");
   query.bindValue(":song_id", songId);
-  query.bindValue(":key", definition.id);
+  query.bindValue(":key",
+                  ColumnRegistry::computedKeyFromFieldId(definition.id));
   query.bindValue(":value_text", QString::fromStdString(value.text));
-  query.bindValue(":value_type", columnValueTypeToStorageString(value.type));
+  query.bindValue(":value_type",
+                  columnValueTypeToStorageString(definition.valueType));
   if (!query.exec()) {
     qFatal("upsert song_computed_attributes failed: %s",
            query.lastError().text().toUtf8().data());
@@ -830,8 +849,9 @@ MSong SongLibrary::loadPreparedSongFromFile(
   MSong parsed = SongParser::parse(path, columnRegistry_, remainingFields);
 #endif
   evaluateComputedFieldsInSong(parsed, columnRegistry_);
-  parsed["song_identity_key"] =
-      FieldValue(songIdentityKeyFromSong(parsed), ColumnValueType::Text);
+  parsed.insert_or_assign(
+      "song_identity_key",
+      FieldValue(songIdentityKeyFromSong(parsed), "song_identity_key"));
   return parsed;
 }
 
@@ -927,8 +947,9 @@ int SongLibrary::ensureSongInDb(MSong &song) {
     qFatal("ensureSongInDb insert failed: %s",
            insert.lastError().text().toUtf8().data());
   }
-  song["song_identity_id"] =
-      FieldValue(std::to_string(identityId), ColumnValueType::Number);
+  song.insert_or_assign(
+      "song_identity_id",
+      FieldValue(std::to_string(identityId), "song_identity_id"));
 
   QSqlQuery find(db);
   find.prepare("SELECT song_id FROM songs WHERE filepath=:path");
@@ -961,18 +982,17 @@ void SongLibrary::syncBuiltInFieldsBySongId(int songId, const MSong &song) {
     const QString value = songFieldText(song, key);
     updateSong.bindValue(":" + columnId, value);
 
-    const ColumnDefinition *definition = columnRegistry_.findColumn(columnId);
-    songs[songId][key] =
-        FieldValue::fromDefinition(definition, value.toStdString());
+    songs[songId].insert_or_assign(key, FieldValue(value.toStdString(), key));
   }
   const int oldIdentityId = songIdentityIdBySongId(songId);
   const std::string identityKey = song.at("song_identity_key").text;
   const int identityId = ensureSongIdentityId(identityKey);
   updateSong.bindValue(":identity_id", identityId);
-  songs[songId]["song_identity_id"] =
-      FieldValue(std::to_string(identityId), ColumnValueType::Number);
-  songs[songId]["song_identity_key"] =
-      FieldValue(identityKey, ColumnValueType::Text);
+  songs[songId].insert_or_assign(
+      "song_identity_id",
+      FieldValue(std::to_string(identityId), "song_identity_id"));
+  songs[songId].insert_or_assign("song_identity_key",
+                                 FieldValue(identityKey, "song_identity_key"));
   updateSong.bindValue(":song_id", songId);
   if (!updateSong.exec()) {
     qFatal("syncBuiltInFieldsBySongId failed: %s",
@@ -1010,17 +1030,17 @@ void SongLibrary::syncDynamicAttributesBySongId(int songId, const MSong &song) {
 
     const QString columnId =
         QString::fromStdString(std::string{"attr:"} + attrKey);
-    const ColumnDefinition *definition = columnRegistry_.findColumn(columnId);
-    if (!definition) {
+    const FieldDefinition *field = columnRegistry_.findField(columnId);
+    if (!field) {
       qFatal("syncDynamicAttributesBySongId: unknown column id: %s",
              columnId.toStdString().c_str());
     }
-    const QString valueType =
-        columnValueTypeToStorageString(definition->valueType);
+    const QString valueType = columnValueTypeToStorageString(field->valueType);
     const QString valueText = QString::fromStdString(v.text);
 
-    songs[songId][std::string("attr:") + attrKey] =
-        FieldValue(v.text, definition->valueType);
+    songs[songId].insert_or_assign(
+        std::string("attr:") + attrKey,
+        FieldValue(v.text, std::string("attr:") + attrKey));
 
     upsertAttr.bindValue(":song_id", songId);
     upsertAttr.bindValue(":key", QString::fromStdString(attrKey));

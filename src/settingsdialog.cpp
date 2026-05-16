@@ -1,5 +1,8 @@
 #include "settingsdialog.h"
+#include "displayexpressionevalcontext.h"
+#include "libraryexpression_ops.h"
 #include "libraryexpression_parser.h"
+#include "statusruntimesymboltable.h"
 #include "ui_settingsdialog.h"
 #include "utils.h"
 #include <QApplication>
@@ -9,10 +12,13 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QPainter>
+#include <QPlainTextEdit>
 #include <QSettings>
 #include <QUuid>
 #include <QVBoxLayout>
 #include <QWidget>
+#include <algorithm>
+#include <unordered_map>
 
 SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
                                DatabaseManager &databaseManager,
@@ -40,6 +46,23 @@ SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
           .toBool();
   const int initialLyricsFontSize =
       settings.value("lyrics/font_size", defaultLyricsFontSize).toInt();
+  const QString defaultStatusExpression =
+      StatusRuntimeSymbolTable::defaultStatusBarExpression();
+  const QString initialStatusExpression =
+      settings.value("status_bar/expression", defaultStatusExpression)
+          .toString()
+          .trimmed();
+  const QString defaultWindowTitleExpression =
+      StatusRuntimeSymbolTable::defaultWindowTitleExpression();
+  const QString initialWindowTitleExpression =
+      settings.value("window_title/expression", defaultWindowTitleExpression)
+          .toString()
+          .trimmed();
+  const QString initialDisplayThemeMode =
+      settings.value("display/theme_mode", QStringLiteral("system"))
+          .toString()
+          .trimmed()
+          .toLower();
   lyricsHighlightColor_ = QColor(
       settings.value("lyrics/highlight_color", QString("#0064ff")).toString());
   if (!lyricsHighlightColor_.isValid()) {
@@ -96,6 +119,82 @@ SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
   lyricsLayout->addLayout(lyricsForm);
   lyricsLayout->addStretch();
   ui->settings_tab_widget->addTab(lyricsTab, "Lyrics");
+
+  QWidget *statusTab = new QWidget(this);
+  QVBoxLayout *statusLayout = new QVBoxLayout(statusTab);
+  QLabel *statusNote = new QLabel(
+      "Customize status bar and window title using the expression language.",
+      statusTab);
+  statusNote->setWordWrap(true);
+  statusLayout->addWidget(statusNote);
+  displayThemeModeCombo_ = new QComboBox(statusTab);
+  displayThemeModeCombo_->setObjectName("display_theme_mode_combo");
+  displayThemeModeCombo_->addItem("System default", "system");
+  displayThemeModeCombo_->addItem("Light", "light");
+  displayThemeModeCombo_->addItem("Dark", "dark");
+  const int themeIndex =
+      std::max(0, displayThemeModeCombo_->findData(initialDisplayThemeMode));
+  displayThemeModeCombo_->setCurrentIndex(themeIndex);
+  statusLayout->addWidget(new QLabel("Theme:", statusTab));
+  statusLayout->addWidget(displayThemeModeCombo_);
+  QLabel *statusExprLabel = new QLabel("Expression:", statusTab);
+  statusLayout->addWidget(statusExprLabel);
+  statusExpressionEdit_ = new QPlainTextEdit(statusTab);
+  statusExpressionEdit_->setObjectName("status_expression_edit");
+  statusExpressionEdit_->setMinimumHeight(140);
+  statusExpressionEdit_->setSizePolicy(QSizePolicy::Expanding,
+                                       QSizePolicy::Expanding);
+  statusExpressionEdit_->setPlainText(initialStatusExpression.isEmpty()
+                                          ? defaultStatusExpression
+                                          : initialStatusExpression);
+  statusExpressionEdit_->setPlaceholderText(defaultStatusExpression);
+  statusLayout->addWidget(statusExpressionEdit_);
+  QLabel *windowTitleExprLabel =
+      new QLabel("Window title expression:", statusTab);
+  statusLayout->addWidget(windowTitleExprLabel);
+  windowTitleExpressionEdit_ = new QPlainTextEdit(statusTab);
+  windowTitleExpressionEdit_->setObjectName("window_title_expression_edit");
+  windowTitleExpressionEdit_->setMinimumHeight(80);
+  windowTitleExpressionEdit_->setSizePolicy(QSizePolicy::Expanding,
+                                            QSizePolicy::Expanding);
+  windowTitleExpressionEdit_->setPlainText(
+      initialWindowTitleExpression.isEmpty() ? defaultWindowTitleExpression
+                                             : initialWindowTitleExpression);
+  windowTitleExpressionEdit_->setPlaceholderText(defaultWindowTitleExpression);
+  statusLayout->addWidget(windowTitleExpressionEdit_);
+  QLabel *previewLabel = new QLabel("Preview (active expression):", statusTab);
+  statusLayout->addWidget(previewLabel);
+  activeDisplayExpressionPreviewLabel_ = new QLabel(statusTab);
+  activeDisplayExpressionPreviewLabel_->setObjectName(
+      "display_expression_preview_value_label");
+  activeDisplayExpressionPreviewLabel_->setWordWrap(true);
+  activeDisplayExpressionPreviewLabel_->setTextInteractionFlags(
+      Qt::TextSelectableByMouse);
+  statusLayout->addWidget(activeDisplayExpressionPreviewLabel_);
+  resetDisplayExpressionsButton_ =
+      new QPushButton("Reset to Default", statusTab);
+  connect(resetDisplayExpressionsButton_, &QPushButton::clicked, this,
+          [this]() {
+            statusExpressionEdit_->setPlainText(
+                StatusRuntimeSymbolTable::defaultStatusBarExpression());
+            windowTitleExpressionEdit_->setPlainText(
+                StatusRuntimeSymbolTable::defaultWindowTitleExpression());
+          });
+  const auto bindDisplayExpressionEditor = [this](QPlainTextEdit *editor) {
+    connect(editor, &QPlainTextEdit::cursorPositionChanged, this,
+            [this, editor]() { setActiveDisplayExpressionEditor(editor); });
+    connect(editor, &QPlainTextEdit::textChanged, this, [this, editor]() {
+      if (activeDisplayExpressionEdit_ == editor) {
+        updateActiveDisplayExpressionPreview();
+      }
+    });
+  };
+  bindDisplayExpressionEditor(statusExpressionEdit_);
+  bindDisplayExpressionEditor(windowTitleExpressionEdit_);
+  setActiveDisplayExpressionEditor(statusExpressionEdit_);
+  statusLayout->addWidget(resetDisplayExpressionsButton_, 0, Qt::AlignLeft);
+  statusLayout->addStretch();
+  ui->settings_tab_widget->addTab(statusTab, "Display");
   QString cloudUuid =
       settings.value("cloud_sync/user_uuid").toString().trimmed();
   const bool disabledByUser =
@@ -109,31 +208,39 @@ SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
   pendingCloudDisabledByUser_ = disabledByUser;
   ui->cloud_uuid_edit->setText(pendingCloudUuid_);
   updateCloudUuidStatus();
+  ui->custom_field_value_type_combo->addItem("Text",
+                                             static_cast<int>(ValueType::Text));
   ui->custom_field_value_type_combo->addItem(
-      "Text", static_cast<int>(ColumnValueType::Text));
+      "Number", static_cast<int>(ValueType::Number));
   ui->custom_field_value_type_combo->addItem(
-      "Number", static_cast<int>(ColumnValueType::Number));
-  ui->custom_field_value_type_combo->addItem(
-      "Date/Time", static_cast<int>(ColumnValueType::DateTime));
+      "Date/Time", static_cast<int>(ValueType::DateTime));
   ui->custom_field_visible_checkbox->setChecked(true);
 
   ui->computed_field_value_type_combo->addItem(
-      "Text", static_cast<int>(ColumnValueType::Text));
+      "Text", static_cast<int>(ValueType::Text));
   ui->computed_field_value_type_combo->addItem(
-      "Number", static_cast<int>(ColumnValueType::Number));
+      "Number", static_cast<int>(ValueType::Number));
   ui->computed_field_value_type_combo->addItem(
-      "Date/Time", static_cast<int>(ColumnValueType::DateTime));
+      "Date/Time", static_cast<int>(ValueType::DateTime));
   ui->computed_field_value_type_combo->addItem(
-      "Boolean", static_cast<int>(ColumnValueType::Boolean));
+      "Boolean", static_cast<int>(ValueType::Boolean));
   ui->computed_field_visible_checkbox->setChecked(true);
 
   customFields_ = columnRegistry_.customTagDefinitions();
   computedFields_ = columnRegistry_.computedDefinitions();
   for (const ColumnDefinition &definition : customFields_) {
     originalCustomFieldIds_.insert(definition.id);
+    if (const FieldDefinition *field =
+            columnRegistry_.findField(definition.id)) {
+      customFieldSchemasById_.insert(definition.id, *field);
+    }
   }
   for (const ColumnDefinition &definition : computedFields_) {
     originalComputedFieldIds_.insert(definition.id);
+    if (const FieldDefinition *field =
+            columnRegistry_.findField(definition.id)) {
+      computedFieldSchemasById_.insert(definition.id, *field);
+    }
   }
 
   refreshCustomFieldsList();
@@ -210,6 +317,17 @@ SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
 
 SettingsDialog::~SettingsDialog() { delete ui; }
 
+void SettingsDialog::setDisplayExpressionPreviewContext(
+    const std::unordered_map<std::string, FieldValue> *song,
+    const StatusRuntimeSymbolTable &runtimeSymbols) {
+  previewRuntimeSymbols_ = runtimeSymbols;
+  previewSong_.clear();
+  if (song) {
+    previewSong_ = *song;
+  }
+  updateActiveDisplayExpressionPreview();
+}
+
 void SettingsDialog::refreshCustomFieldsList() {
   ui->custom_fields_list->clear();
   for (const ColumnDefinition &definition : customFields_) {
@@ -226,8 +344,9 @@ void SettingsDialog::refreshCustomFieldsList() {
 void SettingsDialog::refreshComputedFieldsList() {
   ui->computed_fields_list->clear();
   for (const ColumnDefinition &definition : computedFields_) {
-    QListWidgetItem *item = new QListWidgetItem(
-        QString("%1 (%2)").arg(definition.title, definition.id));
+    const QString key = ColumnRegistry::computedKeyFromFieldId(definition.id);
+    QListWidgetItem *item =
+        new QListWidgetItem(QString("%1 (%2)").arg(definition.title, key));
     item->setData(Qt::UserRole, definition.id);
     ui->computed_fields_list->addItem(item);
   }
@@ -240,54 +359,76 @@ ColumnDefinition SettingsDialog::buildCustomFieldDefinitionFromForm() const {
       ui->custom_field_display_name_edit->text().trimmed();
   const QString normalizedKey =
       util::canonicalizeTagKey(ui->custom_field_key_edit->text());
-  const auto valueType = static_cast<ColumnValueType>(
-      ui->custom_field_value_type_combo->currentData().toInt());
 
-  return {QStringLiteral("attr:") + normalizedKey,
-          displayName,
-          ColumnSource::SongAttribute,
-          valueType,
-          "",
-          true,
-          ui->custom_field_visible_checkbox->isChecked(),
-          140};
+  const QString columnId = QStringLiteral("attr:") + normalizedKey;
+  return ColumnDefinition{
+      .id = columnId,
+      .title = displayName,
+      .sortable = true,
+      .visibleByDefault = ui->custom_field_visible_checkbox->isChecked(),
+      .defaultWidth = 140,
+  };
+}
+
+FieldDefinition SettingsDialog::buildCustomFieldSchemaFromForm() const {
+  const QString normalizedKey =
+      util::canonicalizeTagKey(ui->custom_field_key_edit->text());
+  const auto valueType = static_cast<ValueType>(
+      ui->custom_field_value_type_combo->currentData().toInt());
+  const QString columnId = QStringLiteral("attr:") + normalizedKey;
+  return FieldDefinition{.id = columnId,
+                         .source = ColumnSource::SongAttribute,
+                         .valueType = valueType,
+                         .displayKind = DisplayKind::Raw,
+                         .expression = QString{},
+                         .searchable = true,
+                         .writable = true};
 }
 
 ColumnDefinition SettingsDialog::buildComputedFieldDefinitionFromForm() const {
   const QString displayName =
       ui->computed_field_display_name_edit->text().trimmed();
+  const QString key =
+      util::canonicalizeTagKey(ui->computed_field_key_edit->text());
+  return ColumnDefinition{
+      .id = ColumnRegistry::computedFieldId(key),
+      .title = displayName,
+      .sortable = true,
+      .visibleByDefault = ui->computed_field_visible_checkbox->isChecked(),
+      .defaultWidth = 140,
+  };
+}
+
+FieldDefinition SettingsDialog::buildComputedFieldSchemaFromForm() const {
   const QString normalizedKey =
       util::canonicalizeTagKey(ui->computed_field_key_edit->text());
-  const auto valueType = static_cast<ColumnValueType>(
+  const auto valueType = static_cast<ValueType>(
       ui->computed_field_value_type_combo->currentData().toInt());
   const QString expression =
       ui->computed_field_expression_edit->text().trimmed();
-
-  return {normalizedKey,
-          displayName,
-          ColumnSource::Computed,
-          valueType,
-          expression,
-          true,
-          ui->computed_field_visible_checkbox->isChecked(),
-          140};
+  return FieldDefinition{.id = ColumnRegistry::computedFieldId(normalizedKey),
+                         .source = ColumnSource::Computed,
+                         .valueType = valueType,
+                         .displayKind = DisplayKind::Raw,
+                         .expression = expression,
+                         .searchable = true,
+                         .writable = false};
 }
 
 bool SettingsDialog::expressionTypeMatchesValueType(
-    const Expr &expr, ColumnValueType expectedType) const {
+    const Expr &expr, ValueType expectedType) const {
   const ExprStaticType actual = inferExprStaticType(expr);
   if (actual == ExprStaticType::Invalid) {
     return false;
   }
 
-  if (expectedType == ColumnValueType::Text ||
-      expectedType == ColumnValueType::DateTime) {
+  if (expectedType == ValueType::Text || expectedType == ValueType::DateTime) {
     return actual == ExprStaticType::Text;
   }
-  if (expectedType == ColumnValueType::Number) {
+  if (expectedType == ValueType::Number) {
     return actual == ExprStaticType::Number;
   }
-  if (expectedType == ColumnValueType::Boolean) {
+  if (expectedType == ValueType::Boolean) {
     return actual == ExprStaticType::Bool;
   }
   return false;
@@ -295,6 +436,7 @@ bool SettingsDialog::expressionTypeMatchesValueType(
 
 void SettingsDialog::addCustomFieldFromForm() {
   const ColumnDefinition definition = buildCustomFieldDefinitionFromForm();
+  const FieldDefinition field = buildCustomFieldSchemaFromForm();
   const QString key = definition.id.mid(QStringLiteral("attr:").size());
 
   if (definition.title.isEmpty()) {
@@ -306,11 +448,6 @@ void SettingsDialog::addCustomFieldFromForm() {
     QMessageBox::warning(this, "Add Custom Field", "Tag key cannot be empty.");
     return;
   }
-  if (columnRegistry_.isBuiltInSongAttributeKey(key)) {
-    QMessageBox::warning(this, "Add Custom Field",
-                         "That tag key is already used by a built-in field.");
-    return;
-  }
   for (const ColumnDefinition &existing : customFields_) {
     if (existing.id == definition.id) {
       QMessageBox::warning(this, "Add Custom Field",
@@ -318,15 +455,9 @@ void SettingsDialog::addCustomFieldFromForm() {
       return;
     }
   }
-  for (const ColumnDefinition &existing : computedFields_) {
-    if (existing.id == key) {
-      QMessageBox::warning(this, "Add Custom Field",
-                           "That key is already used by a computed field.");
-      return;
-    }
-  }
 
   customFields_.push_back(definition);
+  customFieldSchemasById_.insert(definition.id, field);
   refreshCustomFieldsList();
   ui->custom_field_display_name_edit->clear();
   ui->custom_field_key_edit->clear();
@@ -336,29 +467,22 @@ void SettingsDialog::addCustomFieldFromForm() {
 
 void SettingsDialog::addComputedFieldFromForm() {
   const ColumnDefinition definition = buildComputedFieldDefinitionFromForm();
+  const FieldDefinition field = buildComputedFieldSchemaFromForm();
 
   if (definition.title.isEmpty()) {
     QMessageBox::warning(this, "Add Computed Field",
                          "Display name cannot be empty.");
     return;
   }
-  if (definition.id.isEmpty()) {
+  if (ColumnRegistry::computedKeyFromFieldId(definition.id).isEmpty()) {
     QMessageBox::warning(this, "Add Computed Field",
                          "Field key cannot be empty.");
     return;
   }
-  if (definition.expression.trimmed().isEmpty()) {
+  if (field.expression.trimmed().isEmpty()) {
     QMessageBox::warning(this, "Add Computed Field",
                          "Expression cannot be empty.");
     return;
-  }
-
-  for (const ColumnDefinition &existing : customFields_) {
-    if (existing.id == QStringLiteral("attr:") + definition.id) {
-      QMessageBox::warning(this, "Add Computed Field",
-                           "That key is already used by a custom tag field.");
-      return;
-    }
   }
 
   for (const ColumnDefinition &existing : computedFields_) {
@@ -369,21 +493,23 @@ void SettingsDialog::addComputedFieldFromForm() {
     }
   }
 
-  if (columnRegistry_.isReservedComputedFieldKey(definition.id)) {
+  if (columnRegistry_.isReservedComputedFieldKey(
+          ColumnRegistry::computedKeyFromFieldId(definition.id))) {
     QMessageBox::warning(this, "Add Computed Field",
                          "That key conflicts with an existing field.");
     return;
   }
 
+  const ExprSymbolResolver resolver(columnRegistry_.expressionSymbols());
   const ExprParseResult parsed =
-      parseLibraryExpression(definition.expression, columnRegistry_);
+      parseLibraryExpression(field.expression, resolver);
   if (!parsed.ok()) {
     QMessageBox::warning(
         this, "Add Computed Field",
         QString("Expression is invalid: %1").arg(parsed.error.message));
     return;
   }
-  if (!expressionTypeMatchesValueType(*parsed.expr, definition.valueType)) {
+  if (!expressionTypeMatchesValueType(*parsed.expr, field.valueType)) {
     QMessageBox::warning(
         this, "Add Computed Field",
         "Expression result type does not match selected value type.");
@@ -391,6 +517,7 @@ void SettingsDialog::addComputedFieldFromForm() {
   }
 
   computedFields_.push_back(definition);
+  computedFieldSchemasById_.insert(definition.id, field);
   refreshComputedFieldsList();
   ui->computed_field_display_name_edit->clear();
   ui->computed_field_key_edit->clear();
@@ -410,6 +537,7 @@ void SettingsDialog::removeSelectedCustomField() {
   const QString columnId = item->data(Qt::UserRole).toString();
   for (auto it = customFields_.begin(); it != customFields_.end(); ++it) {
     if (it->id == columnId) {
+      customFieldSchemasById_.remove(columnId);
       customFields_.erase(it);
       refreshCustomFieldsList();
       return;
@@ -428,6 +556,7 @@ void SettingsDialog::removeSelectedComputedField() {
   const QString columnId = item->data(Qt::UserRole).toString();
   for (auto it = computedFields_.begin(); it != computedFields_.end(); ++it) {
     if (it->id == columnId) {
+      computedFieldSchemasById_.remove(columnId);
       computedFields_.erase(it);
       refreshComputedFieldsList();
       return;
@@ -473,6 +602,59 @@ void SettingsDialog::updateLyricsHighlightColorButton() {
   lyricsHighlightColorButton_->setIconSize(swatch.size());
 }
 
+void SettingsDialog::setActiveDisplayExpressionEditor(QPlainTextEdit *editor) {
+  activeDisplayExpressionEdit_ = editor;
+  updateActiveDisplayExpressionPreview();
+}
+
+QString SettingsDialog::evaluateDisplayExpressionPreview(
+    const QString &expressionText, const QString &fallbackExpression) const {
+  const QString expression =
+      expressionText.trimmed().isEmpty() ? fallbackExpression : expressionText;
+  const ExprSymbolResolver resolver(
+      mergeExprSymbols(std::vector<ExprSymbolInfo>(
+                           StatusRuntimeSymbolTable::expressionSymbols()),
+                       columnRegistry_.expressionSymbols()));
+  const ExprParseResult parsed = parseLibraryExpression(expression, resolver);
+  if (!parsed.ok()) {
+    return QStringLiteral("Invalid expression: %1").arg(parsed.error.message);
+  }
+
+  StatusRuntimeSymbolTable runtimeSymbols = previewRuntimeSymbols_;
+  std::unordered_map<std::string, FieldValue> song = previewSong_;
+  if (song.empty()) {
+    runtimeSymbols.setIsPlaying(true);
+    runtimeSymbols.setIsPaused(false);
+    runtimeSymbols.setPlaybackTimeSeconds(65);
+    runtimeSymbols.setDurationSeconds(125);
+    runtimeSymbols.setBitrateKbps(320);
+
+    song.insert_or_assign("artist", FieldValue("Artist", "artist"));
+    song.insert_or_assign("title", FieldValue("Title", "title"));
+    song.insert_or_assign("album", FieldValue("Album", "album"));
+    song.insert_or_assign("codec", FieldValue("mp3", "codec"));
+    song.insert_or_assign("sample_rate", FieldValue("44100", "sample_rate"));
+    song.insert_or_assign("channels", FieldValue("2", "channels"));
+  }
+
+  DisplayExpressionEvalContext context(runtimeSymbols, &song);
+  return runtimeValueToQString(parsed.expr->evaluateValue(context));
+}
+
+void SettingsDialog::updateActiveDisplayExpressionPreview() {
+  if (!activeDisplayExpressionPreviewLabel_ || !activeDisplayExpressionEdit_) {
+    return;
+  }
+  const bool isStatusEditor =
+      activeDisplayExpressionEdit_ == statusExpressionEdit_;
+  const QString fallback =
+      isStatusEditor ? StatusRuntimeSymbolTable::defaultStatusBarExpression()
+                     : StatusRuntimeSymbolTable::defaultWindowTitleExpression();
+  activeDisplayExpressionPreviewLabel_->setText(
+      evaluateDisplayExpressionPreview(
+          activeDisplayExpressionEdit_->toPlainText(), fallback));
+}
+
 void SettingsDialog::applySettings() {
   int selected = ui->backend_combo_box->currentIndex();
   auto selectedBackend = static_cast<PlaybackBackendManager::Backend>(selected);
@@ -497,10 +679,28 @@ void SettingsDialog::applySettings() {
   settings.setValue("lyrics/font_size", lyricsFontSizeSpin_->value());
   settings.setValue("lyrics/highlight_color",
                     lyricsHighlightColor_.name(QColor::HexRgb));
+  QString statusExpression = statusExpressionEdit_->toPlainText().trimmed();
+  if (statusExpression.isEmpty()) {
+    statusExpression = StatusRuntimeSymbolTable::defaultStatusBarExpression();
+  }
+  QString windowTitleExpression =
+      windowTitleExpressionEdit_->toPlainText().trimmed();
+  if (windowTitleExpression.isEmpty()) {
+    windowTitleExpression =
+        StatusRuntimeSymbolTable::defaultWindowTitleExpression();
+  }
+  settings.setValue("status_bar/expression", statusExpression);
+  settings.setValue("window_title/expression", windowTitleExpression);
+  settings.setValue("display/theme_mode",
+                    displayThemeModeCombo_->currentData().toString());
   const QString emittedFamily =
       useSystemDefaultFont ? QString() : resolvedFamily;
   emit lyricsFontChanged(emittedFamily, lyricsFontSizeSpin_->value());
   emit lyricsHighlightColorChanged(lyricsHighlightColor_);
+  emit statusBarExpressionChanged(statusExpression);
+  emit windowTitleExpressionChanged(windowTitleExpression);
+  emit displayThemeModeChanged(
+      displayThemeModeCombo_->currentData().toString());
   const QString cloudUuid = pendingCloudUuid_.trimmed();
   if (!cloudUuid.isEmpty() && QUuid(cloudUuid).isNull()) {
     QMessageBox::warning(this, "Settings", "Cloud UUID format is invalid.");
@@ -534,7 +734,10 @@ void SettingsDialog::applySettings() {
   }
 
   for (const ColumnDefinition &definition : customFields_) {
-    if (!columnRegistry_.upsertCustomTagDefinition(db, definition)) {
+    auto it = customFieldSchemasById_.find(definition.id);
+    if (it == customFieldSchemasById_.end() ||
+        !columnRegistry_.upsertCustomTagDefinition(db, definition,
+                                                   it.value())) {
       db.rollback();
       qFatal("applySettings: failed to persist custom field");
     }
@@ -551,7 +754,9 @@ void SettingsDialog::applySettings() {
   }
 
   for (const ColumnDefinition &definition : computedFields_) {
-    if (!columnRegistry_.upsertComputedDefinition(db, definition)) {
+    auto it = computedFieldSchemasById_.find(definition.id);
+    if (it == computedFieldSchemasById_.end() ||
+        !columnRegistry_.upsertComputedDefinition(db, definition, it.value())) {
       db.rollback();
       qFatal("applySettings: failed to persist computed field");
     }

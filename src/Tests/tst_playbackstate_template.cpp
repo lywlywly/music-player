@@ -12,8 +12,7 @@ private slots:
 };
 
 TestClass::TestClass(QObject *parent) : QObject{parent} {}
-void TestPlaybackState::test1() {
-}
+void TestPlaybackState::test1() {}
 
 QTEST_MAIN(TestClass)
 #include "tst_.moc"

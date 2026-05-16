@@ -7,6 +7,45 @@ bool isTokenBoundaryStart(QChar ch) {
   return isOperatorStart(ch) || ch == '(' || ch == ')' || ch == '[' ||
          ch == ']' || ch == ',';
 }
+
+int findBacktickLiteralEnd(const QString &text, int contentStart) {
+  int depth = 0;
+  int i = contentStart;
+  while (i < text.size()) {
+    const QChar ch = text.at(i);
+    if (ch == '"' || ch == '\'') {
+      const QChar quote = ch;
+      ++i;
+      while (i < text.size() && text.at(i) != quote) {
+        ++i;
+      }
+      if (i >= text.size()) {
+        return -1;
+      }
+      ++i;
+      continue;
+    }
+    if (ch == '`') {
+      if (depth == 0) {
+        return i;
+      }
+      ++i;
+      continue;
+    }
+    if (ch == '$' && i + 1 < text.size() && text.at(i + 1) == '{') {
+      depth += 1;
+      i += 2;
+      continue;
+    }
+    if (ch == '}' && depth > 0) {
+      depth -= 1;
+      ++i;
+      continue;
+    }
+    ++i;
+  }
+  return -1;
+}
 } // namespace
 
 std::vector<ExprToken>
@@ -21,6 +60,21 @@ tokenizeLibraryExpression(const QString &expressionText) {
     }
 
     const int start = i;
+    if (expressionText.at(i) == '`') {
+      ++i;
+      const int contentStart = i;
+      const int end = findBacktickLiteralEnd(expressionText, contentStart);
+      if (end < 0) {
+        tokens.push_back(
+            {ExprTokenKind::Invalid, expressionText.mid(start), start, length});
+        break;
+      }
+      tokens.push_back({ExprTokenKind::InterpolatedStringLiteral,
+                        expressionText.mid(contentStart, end - contentStart),
+                        start, end + 1});
+      i = end + 1;
+      continue;
+    }
     if (expressionText.at(i) == '"' || expressionText.at(i) == '\'') {
       const QChar quote = expressionText.at(i);
       ++i;

@@ -16,8 +16,8 @@ int main(int argc, char *argv[]) {
   w.show();
 
   // std::thread glib_thread([]() {
-  //   glib_loop = g_main_loop_new(nullptr, FALSE); // default global GMainContext
-  //   g_main_loop_run(glib_loop);
+  //   glib_loop = g_main_loop_new(nullptr, FALSE); // default global
+  //   GMainContext g_main_loop_run(glib_loop);
   // });
   // glib_thread.detach();
 

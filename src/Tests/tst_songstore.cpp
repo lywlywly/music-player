@@ -19,26 +19,27 @@ MSong makeSong(const QString &title, const QString &artist, const QString &path,
                const QString &tracknumber = {}, const QString &date = {},
                const QString &genre = {}) {
   MSong song;
-  song["title"] = title.toStdString();
-  song["artist"] = artist.toStdString();
-  song["album"] = "Album";
-  song["discnumber"] = FieldValue("1", ColumnValueType::Number);
+  song.insert_or_assign("title", FieldValue(title.toStdString(), "title"));
+  song.insert_or_assign("artist", FieldValue(artist.toStdString(), "artist"));
+  song.insert_or_assign("album", FieldValue("Album", "album"));
+  song.insert_or_assign("discnumber", FieldValue("1", "discnumber"));
   if (!tracknumber.isEmpty()) {
-    song["tracknumber"] =
-        FieldValue(tracknumber.toStdString(), ColumnValueType::Number);
+    song.insert_or_assign("tracknumber",
+                          FieldValue(tracknumber.toStdString(), "tracknumber"));
   }
   if (!date.isEmpty()) {
-    song["date"] = FieldValue(date.toStdString(), ColumnValueType::DateTime);
+    song.insert_or_assign("date", FieldValue(date.toStdString(), "date"));
   }
   if (!genre.isEmpty()) {
-    song["genre"] = genre.toStdString();
+    song.insert_or_assign("genre", FieldValue(genre.toStdString(), "genre"));
   }
-  song["filepath"] = path.toStdString();
+  song.insert_or_assign("filepath", FieldValue(path.toStdString(), "filepath"));
   const std::string identity =
       util::normalizedText(title).toStdString() + "|" +
       util::normalizedText(artist).toStdString() + "|" +
       util::normalizedText(QStringLiteral("Album")).toStdString();
-  song["song_identity_key"] = identity;
+  song.insert_or_assign("song_identity_key",
+                        FieldValue(identity, "song_identity_key"));
   return song;
 }
 } // namespace
@@ -124,22 +125,40 @@ void TestSongStore::dateFormats_supported() {
     const int64_t expectedEpochMs =
         QDateTime(QDate(c.year, c.month, c.day), QTime(0, 0), QTimeZone::UTC)
             .toMSecsSinceEpoch();
-    const FieldValue parsed(c.input.toStdString(), ColumnValueType::DateTime);
-    QCOMPARE(parsed.typed.epochMs, expectedEpochMs);
+    int64_t parsedEpochMs = 0;
+    QVERIFY(
+        FieldValue::parseDateTimeEpochMs(c.input.toStdString(), parsedEpochMs));
+    QCOMPARE(parsedEpochMs, expectedEpochMs);
   }
 }
 
 void TestSongStore::dateFormats_timezoneAndInvalid() {
-  const FieldValue withOffset("2025-04-23 17:52:00+08:00",
-                              ColumnValueType::DateTime);
+  int64_t epochSecondsMs = 0;
+  QVERIFY(FieldValue::parseDateTimeEpochMs("1747125959", epochSecondsMs));
+  QCOMPARE(epochSecondsMs, 1747125959000LL);
+
+  int64_t epochMs = 0;
+  QVERIFY(FieldValue::parseDateTimeEpochMs("1747125959000", epochMs));
+  QCOMPARE(epochMs, 1747125959000LL);
+
+  int64_t plainDateTimeEpochMs = 0;
+  QVERIFY(FieldValue::parseDateTimeEpochMs("2026-05-13 01:45:59",
+                                           plainDateTimeEpochMs));
+  const int64_t expectedPlainDateTimeEpochMs =
+      QDateTime(QDate(2026, 5, 13), QTime(1, 45, 59)).toMSecsSinceEpoch();
+  QCOMPARE(plainDateTimeEpochMs, expectedPlainDateTimeEpochMs);
+
+  int64_t withOffsetEpochMs = 0;
+  QVERIFY(FieldValue::parseDateTimeEpochMs("2025-04-23 17:52:00+08:00",
+                                           withOffsetEpochMs));
   const int64_t expectedEpochMs =
       QDateTime(QDate(2025, 4, 23), QTime(9, 52, 0), QTimeZone::UTC)
           .toMSecsSinceEpoch();
-  QVERIFY(withOffset.typed.epochMs > 0);
-  QCOMPARE(withOffset.typed.epochMs, expectedEpochMs);
+  QVERIFY(withOffsetEpochMs > 0);
+  QCOMPARE(withOffsetEpochMs, expectedEpochMs);
 
-  const FieldValue invalid("2026-13-40", ColumnValueType::DateTime);
-  QCOMPARE(invalid.typed.epochMs, static_cast<int64_t>(0));
+  int64_t invalidEpochMs = 0;
+  QVERIFY(!FieldValue::parseDateTimeEpochMs("2026-13-40", invalidEpochMs));
 }
 
 void TestSongStore::sortByField_missingValuesLast() {

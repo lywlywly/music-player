@@ -116,7 +116,7 @@ private:
   void removeSongFromIdentityIndex(int songId, int identityId);
   void syncComputedValuesBySongId(int songId, const MSong &song);
   void upsertComputedFieldValueInDb(int songId,
-                                    const ColumnDefinition &definition,
+                                    const FieldDefinition &definition,
                                     const FieldValue &value);
   int ensureSongInDb(MSong &song);
   // Syncs built-in song fields in memory and DB for a known song_id.

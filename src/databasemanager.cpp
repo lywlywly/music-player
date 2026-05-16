@@ -15,21 +15,21 @@ QString defaultDatabasePath() {
   return QDir(baseDir).filePath("myplayer.db");
 }
 
-QString toSqlType(ColumnValueType valueType) {
+QString toSqlType(ValueType valueType) {
   switch (valueType) {
-  case ColumnValueType::Number:
+  case ValueType::Number:
     return "REAL";
-  case ColumnValueType::Boolean:
+  case ValueType::Boolean:
     return "TEXT";
-  case ColumnValueType::DateTime:
+  case ValueType::DateTime:
     return "TEXT";
-  case ColumnValueType::Text:
+  case ValueType::Text:
   default:
     return "text";
   }
 }
 
-QString songsColumnDefinition(const ColumnDefinition &definition) {
+QString songsColumnDefinition(const FieldDefinition &definition) {
   const QString columnName = definition.id;
   const QString columnType = toSqlType(definition.valueType);
   QString sql = QString("%1 %2").arg(columnName, columnType);
@@ -124,7 +124,7 @@ bool DatabaseManager::ensureSongIdentitiesSchema(QSqlQuery &q) {
 bool DatabaseManager::ensureSongsSchema(QSqlQuery &q) {
   QStringList songsColumns;
   songsColumns.push_back("song_id INTEGER PRIMARY KEY AUTOINCREMENT");
-  for (const ColumnDefinition &definition :
+  for (const FieldDefinition &definition :
        columnRegistry_.songAttributeDefinitions()) {
     songsColumns.push_back(songsColumnDefinition(definition));
   }
