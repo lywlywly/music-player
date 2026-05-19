@@ -28,22 +28,16 @@ of `README.md`.
   * Stores visible order/width/visibility for columns across playlist/search views.
 * `FieldTypePool`
   * Process-wide pool of `FieldDefinition`, keyed by `fieldId`.
-  * Used by `FieldValue::display()` so formatting rules are schema-driven instead
-    of duplicated per value instance.
-  * `ColumnRegistry` upserts field definitions into the pool and removes
-    dropped dynamic/computed definitions during reload, so active registry
-    fields stay synchronized with pool entries.
-  * `StatusRuntimeSymbolTable` upserts runtime field definitions on
-    construction (`isplaying`, `ispaused`, `playback_time`, `duration`,
-    `bitrate`).
+  * `FieldValue` resolves type/display behavior through this pool.
+  * `ColumnRegistry` and `StatusRuntimeSymbolTable` upsert active definitions.
 
 ### Song domain
 
 * `SongLibrary`
   * Canonical song repository in memory + DB sync.
-  * Loads built-in + dynamic + computed + play-stats data.
-  * Parses files (`loadSongFromFile`), upserts song rows (`addTolibrary`), refreshes metadata, and evaluates computed fields.
-  * Evaluates search expressions.
+  * Loads built-in, dynamic, computed, and play-stats fields.
+  * Parses/imports files, refreshes metadata, evaluates computed fields, and
+    evaluates library search expressions.
   * Maintains identity-based play stats using normalized `title|artist|album`.
 * `SongParser`
   * Parses file tags into built-in + dynamic fields and remaining raw tag fields.
@@ -66,7 +60,7 @@ of `README.md`.
   * Delegates storage/order to `SongStore` and renders status column from `PlaybackQueue`.
 * `SongStore`
   * Per-playlist song-id ordering and sorting.
-  * Owns `playlist_items` persistence (append/clear/load by playlist).
+  * Owns `playlist_items` persistence.
 
 ### Song Properties UI
 
@@ -99,28 +93,20 @@ of `README.md`.
 ### Search expression domain
 
 * `libraryexpression_*` modules
-  * Tokenization, parsing, AST, static type inference, and operator evaluation.
+  * Tokenization, parsing, AST, type inference, and operator evaluation.
   * Supports boolean expressions, comparisons, lists/ranges, and `IF ... THEN ... ELSE ...`.
   * Supports string interpolation with backticks and `${...}` placeholders.
-  * Uses `ExprSymbolResolver` + `ExprSymbolInfo` to resolve names to canonical
-    `(resolvedId, valueType)`.
-  * Canonical resolved IDs are namespaced:
+  * Resolves names through `ExprSymbolResolver` into canonical namespaced ids:
     * runtime: `status:<name>`
     * built-in: `builtin:<name>`
     * dynamic tag: `attr:<key>`
     * computed: `computed:<key>`
-  * Symbol exporters register two names per field:
-    * unqualified alias (for convenience), and
-    * fully-qualified alias (for explicit disambiguation).
+  * Symbol providers export both unqualified aliases and fully-qualified names.
   * Unqualified resolution precedence is: `status > builtin > attr > computed`.
-  * Precedence is implemented by symbol list ordering plus first-match lookup:
-    * `ExprSymbolResolver::lookup(...)` returns the first symbol with matching
-      `name`.
-    * `ColumnRegistry::expressionSymbols()` appends unqualified aliases in
-      built-in, then attr, then computed order.
-    * Display expression contexts merge runtime symbols as primary and registry
-      symbols as fallback (`mergeExprSymbols(...)`), so collisions keep runtime
-      first.
+  * Precedence is implemented by first-match lookup in
+    `ExprSymbolResolver::lookup(...)` over merged symbol order:
+    display contexts prepend runtime symbols, while registry symbols are emitted
+    in `builtin`, then `attr`, then `computed` order.
   * `HAS` supports multi-value text split by comma separators.
 * `LibraryExprEvalContext`
   * Evaluation boundary for field lookup.
@@ -133,11 +119,8 @@ of `README.md`.
 * `CloudPlayStatsSyncService`
   * Thin async HTTP client for Lambda APIs (pull/push/bulk-push + throttle retry).
 * `CloudPlayStatsSyncCoordinator`
-  * Sync policy layer:
-    * startup incremental pull or rebase
-    * merge rule `max(local, cloud)`
-    * rebase delta push when local is ahead
-    * emit affected song PKs for UI refresh
+  * Sync policy layer: startup incremental/rebase pull, `max(local, cloud)`
+    merge, rebase delta push, and affected-song UI notifications.
 
 ### System media and lyrics
 
@@ -201,13 +184,13 @@ of `README.md`.
 
 ### FieldValue and typed conversion behavior
 
-* `FieldValue` stores only:
+* `FieldValue` stores:
   * canonical `text`
   * `fieldId` (schema key)
-  * parsed typed union (`numberDouble` / `numberInt` / `boolean`)
+  * typed union (`numberDouble` / `numberInt` / `boolean`)
 * Type/display metadata is resolved from `fieldId` through `FieldTypePool`
   during `FieldValue::assign(...)`.
-* `assign(...)` parses by declared `ValueType`.
+* `assign(...)` parses by declared `ValueType` from `FieldTypePool`.
   * On parse success, typed union stores parsed value.
   * On parse failure, typed union keeps type default:
     * Number -> `0.0`
@@ -224,8 +207,8 @@ of `README.md`.
   * numeric epoch values (seconds or milliseconds)
 * Non-text typed handling:
   * sorting compares typed union values directly.
-  * expression comparisons are type-aware by `ValueType`; number/boolean field
-    refs read typed values, while datetime comparisons parse field text.
+  * expression evaluation reads typed union for number/boolean; datetime
+    comparisons use shared datetime conversion helpers.
 * Display formatting is schema-driven by `FieldDefinition.displayKind` through
   `FieldTypePool`.
 
@@ -238,7 +221,7 @@ of `README.md`.
 ### Bitrate display behavior
 
 * `MainWindow` evaluates both status bar and window title from display
-  expressions (same runtime symbol table + expression engine path).
+  expressions (same expression engine + runtime symbols).
 * `${bitrate}` in display expressions reads runtime symbol `status:bitrate`.
 * `status:bitrate` is updated from `MainWindow::effectiveBitrateKbps()`:
   * if track is treated as CBR and parsed tag bitrate is available, use tag bitrate
@@ -261,7 +244,7 @@ of `README.md`.
   * `std::string`: AST/runtime/eval/storage data (`ExprValue`,
     `ExprFieldRef`, runtime values, interpolated parts, `FieldValue::text`,
     eval lookup key `std::string_view`).
-  * Main conversion happens during parse: `QString` tokens are normalized and
+  * Main conversion happens during parse, where token text is normalized and
     resolved into `std::string` AST/runtime payloads.
 
 * Library search:
@@ -274,30 +257,21 @@ of `README.md`.
 * Display expressions (status bar + window title):
   * Resolver source: runtime symbols merged first, then registry symbols
   * Eval context: runtime-first, then current song (`DisplayExpressionEvalContext`)
-  * Name collisions prefer runtime symbol values.
-  * Fully-qualified names can always disambiguate collisions
-    (`status:*`, `builtin:*`, `attr:*`, `computed:*`).
+  * Collisions prefer runtime symbols; fully-qualified names always disambiguate.
   * Interpolation is supported in backtick strings only.
-  * For interpolated backtick expressions, each `${field}` segment renders via
-    `FieldValue::display()` through context display lookup.
+  * In interpolation, `${field}` display comes from `FieldValue::display()`.
 * Comparison AST/eval shape is unified as `leftExpr op rightExpr`.
   * The comparison type is resolved from the left expression:
     field refs use field value type; non-field expressions use static type.
   * Right side is validated against that left-side type (either literal/list/range
     value form or another expression).
-* `ExprValueExpr` is the wrapper node for comparison RHS value-form literals
-  (scalar/list/range) parsed by `parseValue(...)`.
-  * It keeps value-form semantics (`IN [..]`, range checks, typed literal checks)
-    while still fitting the unified `leftExpr op rightExpr` shape.
+* `ExprValueExpr` wraps RHS value-form literals (scalar/list/range) parsed by
+  `parseValue(...)`, so comparisons keep one `leftExpr op rightExpr` shape.
 * Field resolution/evaluation split:
-  * Parse resolves a field token into canonical `ExprFieldRef.resolvedId`
-    (namespaced ID).
-  * Parser relies on symbol providers/resolver construction to supply canonical
-    namespaced `resolvedId`s.
+  * Parse resolves field tokens into canonical namespaced `resolvedId`s.
   * Unqualified names are canonicalized to fully-qualified IDs at parse time
     using precedence; evaluation does not re-resolve by precedence.
-  * Eval always reads by that canonical ID (`context.fieldValue(resolvedId)`),
-    never by the original unqualified token text.
+  * Eval always reads by canonical ID (`context.fieldValue(resolvedId)`).
   * In display context, canonical `status:*` fields are read from runtime
     symbols; other canonical fields are read from the current song.
 * Parser flow (high level):
@@ -379,6 +353,7 @@ of `README.md`.
 * Pull inter-page gap: `1s`
 * Rebase bulk push chunk size: `10`
 * Rebase inter-chunk gap: `1s`
+* Pull/bulk API validation enforces `limit <= 200` and `updates <= 200`.
 * Throttle handling (lambda):
   * botocore retry mode `adaptive`, max attempts `10`
 * Throttle handling (client):

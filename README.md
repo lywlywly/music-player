@@ -18,6 +18,58 @@ A cross-platform desktop music player focused on local-library playback, lyrics,
 * Play stats: `play_count`, `last_played_timestamp`
 * Optional UUID-scoped cloud sync for `play_count`
 
+## Build and Run
+
+```bash
+cd src
+cmake -S . -B build
+cmake --build build -j
+./build/EXEC.app/Contents/MacOS/EXEC   # macOS
+```
+
+Build with tests:
+
+```bash
+cd src
+cmake -S . -B build-tests -DBUILD_TESTING=ON
+cmake --build build-tests -j
+```
+
+Run tests:
+
+```bash
+cd src
+ctest --test-dir build-tests --output-on-failure
+```
+
+### TagLib source in this repo
+
+By default, this project builds TagLib from the bundled submodule at
+`third_party/taglib` (`MYPLAYER_USE_BUNDLED_TAGLIB=ON` in CMake).
+
+This repo uses a [TagLib fork](https://github.com/lywlywly/taglib) submodule and currently prefers
+ALAC bitrate computed from MP4 `mdat` payload bytes and duration (average bitrate)
+instead of nominal header bitrate.
+
+### macOS (Qt Creator troubleshooting)
+
+Qt Creator may set `DYLD_LIBRARY_PATH` in the Run Environment. On macOS, this can cause system image decode paths used by Media Center artwork/now-playing integration to load Homebrew codec libraries (for example `/opt/homebrew/Cellar/libpng/...`) and lead to runtime crashes.
+
+If issues occur, open Qt Creator `Projects -> Run Settings -> Environment` and remove or unset `DYLD_LIBRARY_PATH` to avoid ImageIO/PNG decode crashes.
+
+### Windows (vcpkg)
+
+If building on Windows with vcpkg, install GStreamer with:
+
+```powershell
+.\vcpkg install gstreamer[core,plugins-base,plugins-good,mpg123,flac,ogg,libav,vorbis]
+```
+
+Set `GST_PLUGIN_PATH` as:
+
+* Release: `<vcpkg-root>\installed\x64-windows\plugins\gstreamer`
+* Debug: `<vcpkg-root>\installed\x64-windows\debug\plugins\gstreamer`
+
 ## Library Search Query Syntax
 
 The library search dialog supports a compact query language for filtering songs.
@@ -85,58 +137,6 @@ Cloud sync:
 * On startup, app runs cloud sync immediately (rebase first if `rebase_pending=true`; otherwise incremental pull).
 * If UUID changes and is saved with `OK`, app triggers rebase sync.
 * Manual cloud rebase is available from the Library menu.
-
-## Build and Run
-
-```bash
-cd src
-cmake -S . -B build
-cmake --build build -j
-./build/EXEC.app/Contents/MacOS/EXEC   # macOS
-```
-
-Build with tests:
-
-```bash
-cd src
-cmake -S . -B build-tests -DBUILD_TESTING=ON
-cmake --build build-tests -j
-```
-
-Run tests:
-
-```bash
-cd src
-ctest --test-dir build-tests --output-on-failure
-```
-
-### TagLib source in this repo
-
-By default, this project builds TagLib from the bundled submodule at
-`third_party/taglib` (`MYPLAYER_USE_BUNDLED_TAGLIB=ON` in CMake).
-
-This repo uses a [TagLib fork](https://github.com/lywlywly/taglib) submodule and currently prefers
-ALAC bitrate computed from MP4 `mdat` payload bytes and duration (average bitrate)
-instead of nominal header bitrate.
-
-### macOS (Qt Creator troubleshooting)
-
-Qt Creator may set `DYLD_LIBRARY_PATH` in the Run Environment. On macOS, this can cause system image decode paths used by Media Center artwork/now-playing integration to load Homebrew codec libraries (for example `/opt/homebrew/Cellar/libpng/...`) and lead to runtime crashes.
-
-If issues occur, open Qt Creator `Projects -> Run Settings -> Environment` and remove or unset `DYLD_LIBRARY_PATH` to avoid ImageIO/PNG decode crashes.
-
-### Windows (vcpkg)
-
-If building on Windows with vcpkg, install GStreamer with:
-
-```powershell
-.\vcpkg install gstreamer[core,plugins-base,plugins-good,mpg123,flac,ogg,libav,vorbis]
-```
-
-Set `GST_PLUGIN_PATH` as:
-
-* Release: `<vcpkg-root>\installed\x64-windows\plugins\gstreamer`
-* Debug: `<vcpkg-root>\installed\x64-windows\debug\plugins\gstreamer`
 
 ## Implementation Notes
 
