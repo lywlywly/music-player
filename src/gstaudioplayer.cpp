@@ -2,14 +2,39 @@
 #include <QAudioDevice>
 #include <QtGlobal>
 #include <cstring>
+#include <future>
+#include <mutex>
 #include <qdebug.h>
+
+namespace {
+std::mutex gstInitMutex;
+std::shared_future<void> gstInitFuture;
+
+void runGstInit() { gst_init(nullptr, nullptr); }
+
+void ensureGstInitialized() {
+  std::shared_future<void> future;
+  {
+    std::lock_guard<std::mutex> lock(gstInitMutex);
+    future = gstInitFuture;
+  }
+  if (future.valid()) {
+    future.get();
+    return;
+  }
+  runGstInit();
+}
+} // namespace
 
 #if defined(Q_OS_MACOS)
 #include <CoreAudio/CoreAudio.h>
 namespace {
 const char *platformSinkFactoryName() { return "osxaudiosink"; }
 
-AudioDeviceID defaultOutputDeviceId() {
+std::mutex defaultOutputDeviceMutex;
+std::shared_future<AudioDeviceID> defaultOutputDeviceFuture;
+
+AudioDeviceID queryDefaultOutputDeviceId() {
   AudioDeviceID deviceId = kAudioObjectUnknown;
   UInt32 dataSize = sizeof(deviceId);
   AudioObjectPropertyAddress address = {
@@ -24,6 +49,18 @@ AudioDeviceID defaultOutputDeviceId() {
     return kAudioObjectUnknown;
   }
   return deviceId;
+}
+
+AudioDeviceID defaultOutputDeviceId() {
+  std::shared_future<AudioDeviceID> future;
+  {
+    std::lock_guard<std::mutex> lock(defaultOutputDeviceMutex);
+    future = defaultOutputDeviceFuture;
+  }
+  if (future.valid()) {
+    return future.get();
+  }
+  return queryDefaultOutputDeviceId();
 }
 
 bool applyDefaultOutputDevice(GstElement *audioSink) {
@@ -98,9 +135,29 @@ bool applyDefaultOutputDevice(GstElement *audioSink) {
 } // namespace
 #endif
 
+void GstAudioPlayer::prewarmStartup() {
+  {
+    std::lock_guard<std::mutex> lock(gstInitMutex);
+    if (!gstInitFuture.valid()) {
+      gstInitFuture =
+          std::async(std::launch::async, []() { runGstInit(); }).share();
+    }
+  }
+#if defined(Q_OS_MACOS)
+  {
+    std::lock_guard<std::mutex> lock(defaultOutputDeviceMutex);
+    if (!defaultOutputDeviceFuture.valid()) {
+      defaultOutputDeviceFuture = std::async(std::launch::async, []() {
+                                    return queryDefaultOutputDeviceId();
+                                  }).share();
+    }
+  }
+#endif
+}
+
 GstAudioPlayer::GstAudioPlayer(QObject *parent)
     : AudioPlayer{parent}, playbin_(nullptr) {
-  gst_init(nullptr, nullptr);
+  ensureGstInitialized();
 
   initializePipeline();
   lastKnownDefaultOutputId_ = QMediaDevices::defaultAudioOutput().id();

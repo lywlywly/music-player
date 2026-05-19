@@ -1,10 +1,7 @@
 #ifndef CLOUDPLAYSTATSSYNCSERVICE_H
 #define CLOUDPLAYSTATSSYNCSERVICE_H
 
-#include <QNetworkAccessManager>
-#include <QObject>
 #include <QString>
-#include <functional>
 #include <vector>
 
 struct CloudPlayStatItem {
@@ -13,57 +10,51 @@ struct CloudPlayStatItem {
   qint64 updatedAt = 0;
 };
 
-// CloudPlayStatsSyncService is a thin HTTP client for the AWS Lambda endpoint.
-// It performs asynchronous requests, retries on throttle with a fixed delay,
-// and streams pull pages through callbacks.
-class CloudPlayStatsSyncService : public QObject {
-  Q_OBJECT
-public:
-  explicit CloudPlayStatsSyncService(QObject *parent = nullptr);
+struct CloudPlayStatsPullResult {
+  bool ok = false;
+  qint64 maxUpdatedAt = 0;
+  std::vector<std::vector<CloudPlayStatItem>> pages;
+};
 
-  // Sends one increment update:
-  // { user_uuid, song_identity_key, delta }.
-  // Optional callback reports final success/failure.
-  void pushIncrement(const QString &userUuid,
-                     const std::string &songIdentityKey, int delta = 1);
-  void pushIncrement(const QString &userUuid,
-                     const std::string &songIdentityKey, int delta,
-                     const std::function<void(bool ok)> &onFinished);
+namespace CloudPlayStatsSync {
 
-  // Sends a bulk increment update:
-  // { user_uuid, updates: [{ song_identity_key, delta }, ...] }.
-  // Caller controls chunk sizing.
-  void
-  pushBulkIncrement(const QString &userUuid,
-                    const std::vector<std::pair<std::string, int>> &updates,
-                    const std::function<void(bool ok)> &onFinished);
+// Blocking HTTP functions for the AWS Lambda endpoint. Call from a worker
+// thread, not from the UI thread.
+bool pushIncrement(const QString &userUuid, const std::string &songIdentityKey,
+                   int delta = 1);
 
-  // Pulls cloud stats with paging. `updatedAfter` is the lower cursor bound.
-  // `onPage` is called for each page. `onFinished(ok, maxUpdatedAt)` is called
-  // once when the pull completes or fails.
-  void pullDeltaPaged(
-      const QString &userUuid, qint64 updatedAfter, int pageLimit,
-      const std::function<void(const std::vector<CloudPlayStatItem> &)> &onPage,
-      const std::function<void(bool ok, qint64 maxUpdatedAt)> &onFinished);
+bool pushBulkIncrement(const QString &userUuid,
+                       const std::vector<std::pair<std::string, int>> &updates);
+
+CloudPlayStatsPullResult pullDeltaPaged(const QString &userUuid,
+                                        qint64 updatedAfter, int pageLimit);
 
 #ifdef MYPLAYER_TESTING
-  struct DummyPushCall {
-    QString userUuid;
-    std::string songIdentityKey;
-    int delta = 0;
-  };
+struct DummyPushCall {
+  QString userUuid;
+  std::string songIdentityKey;
+  int delta = 0;
+};
+struct TestingHttpStep {
+  bool ok = false;
+  bool throttled = false;
+  bool timedOut = false;
+};
+struct TestingRetryResult {
+  bool ok = false;
+  int attempts = 0;
+};
 
-  static void
-  setDummyPullPages(const std::vector<std::vector<CloudPlayStatItem>> &pages,
-                    bool ok = true, qint64 maxUpdatedAt = 0);
-  static void clearDummyPullPages();
-  static std::vector<DummyPushCall> dummyPushCalls();
-  static void clearDummyPushCalls();
-  static void setDummyPushResults(const std::vector<bool> &results);
+void setDummyPullPages(const std::vector<std::vector<CloudPlayStatItem>> &pages,
+                       bool ok = true, qint64 maxUpdatedAt = 0);
+void clearDummyPullPages();
+std::vector<DummyPushCall> dummyPushCalls();
+void clearDummyPushCalls();
+void setDummyPushResults(const std::vector<bool> &results);
+TestingRetryResult
+testingRunRetrySequence(const std::vector<TestingHttpStep> &steps);
 #endif
 
-private:
-  QNetworkAccessManager network_;
-};
+} // namespace CloudPlayStatsSync
 
 #endif // CLOUDPLAYSTATSSYNCSERVICE_H

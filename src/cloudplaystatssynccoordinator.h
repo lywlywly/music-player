@@ -5,6 +5,7 @@
 #include "songlibrary.h"
 #include <QObject>
 #include <QString>
+#include <QThread>
 #include <unordered_map>
 #include <vector>
 
@@ -14,9 +15,9 @@ class CloudPlayStatsSyncCoordinator : public QObject {
   Q_OBJECT
 
 public:
-  CloudPlayStatsSyncCoordinator(SongLibrary &songLibrary,
-                                CloudPlayStatsSyncService &syncService,
-                                QObject *parent = nullptr);
+  explicit CloudPlayStatsSyncCoordinator(SongLibrary &songLibrary,
+                                         QObject *parent = nullptr);
+  ~CloudPlayStatsSyncCoordinator() override;
 
   // Starts sync from persisted state: rebase if `rebase_pending`, otherwise
   // incremental pull.
@@ -38,6 +39,16 @@ signals:
 private:
   void runIncrementalSync(const QString &uuid);
   void runRebaseSync(const QString &uuid);
+  void pushIncrementOnWorker(const QString &uuid,
+                             const std::string &songIdentityKey, int delta);
+  void pushBulkIncrementOnWorker(
+      const QString &uuid,
+      const std::vector<std::pair<std::string, int>> &updates,
+      const std::function<void(bool ok)> &onFinished);
+  void pullDeltaPagedOnWorker(
+      const QString &uuid, qint64 updatedAfter, int pageLimit,
+      const std::function<void(const std::vector<CloudPlayStatItem> &)> &onPage,
+      const std::function<void(bool ok, qint64 maxUpdatedAt)> &onFinished);
   void applyCloudPullPage(
       const std::vector<CloudPlayStatItem> &items,
       std::unordered_map<std::string, int> *cloudCounts = nullptr,
@@ -54,7 +65,8 @@ private:
   QString currentValidUuid() const;
 
   SongLibrary &songLibrary_;
-  CloudPlayStatsSyncService &syncService_;
+  QThread syncThread_;
+  QObject syncWorker_;
 };
 
 #endif // CLOUDPLAYSTATSSYNCCOORDINATOR_H

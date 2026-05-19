@@ -23,6 +23,8 @@ class GstAudioPlayer : public AudioPlayer {
 public:
   explicit GstAudioPlayer(QObject *parent = nullptr);
   ~GstAudioPlayer() override;
+  // Starts expensive process-wide GStreamer startup work early.
+  static void prewarmStartup();
 
   // AudioPlayer interface
 public:

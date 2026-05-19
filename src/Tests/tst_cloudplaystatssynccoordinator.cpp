@@ -48,15 +48,14 @@ private:
   ColumnRegistry *registry_ = nullptr;
   DatabaseManager *databaseManager_ = nullptr;
   SongLibrary *library_ = nullptr;
-  CloudPlayStatsSyncService *service_ = nullptr;
   CloudPlayStatsSyncCoordinator *coordinator_ = nullptr;
   QString connectionName_;
 };
 
 void TestCloudPlayStatsSyncCoordinator::init() {
   qputenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC", "1");
-  CloudPlayStatsSyncService::clearDummyPullPages();
-  CloudPlayStatsSyncService::clearDummyPushCalls();
+  CloudPlayStatsSync::clearDummyPullPages();
+  CloudPlayStatsSync::clearDummyPushCalls();
 
   const QString org =
       QStringLiteral("music-player-tests-%1")
@@ -76,15 +75,12 @@ void TestCloudPlayStatsSyncCoordinator::init() {
   databaseManager_ =
       new DatabaseManager(*registry_, ":memory:", connectionName_);
   library_ = new SongLibrary(*registry_, *databaseManager_);
-  service_ = new CloudPlayStatsSyncService();
-  coordinator_ = new CloudPlayStatsSyncCoordinator(*library_, *service_);
+  coordinator_ = new CloudPlayStatsSyncCoordinator(*library_);
 }
 
 void TestCloudPlayStatsSyncCoordinator::cleanup() {
   delete coordinator_;
   coordinator_ = nullptr;
-  delete service_;
-  service_ = nullptr;
   delete library_;
   library_ = nullptr;
   delete databaseManager_;
@@ -92,8 +88,8 @@ void TestCloudPlayStatsSyncCoordinator::cleanup() {
   delete registry_;
   registry_ = nullptr;
 
-  CloudPlayStatsSyncService::clearDummyPullPages();
-  CloudPlayStatsSyncService::clearDummyPushCalls();
+  CloudPlayStatsSync::clearDummyPullPages();
+  CloudPlayStatsSync::clearDummyPushCalls();
   qunsetenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC");
 }
 
@@ -111,7 +107,7 @@ void TestCloudPlayStatsSyncCoordinator::
   CloudPlayStatItem item{.songIdentityKey = "song|artist|album",
                          .playCount = 7,
                          .updatedAt = 2000};
-  CloudPlayStatsSyncService::setDummyPullPages({{item}}, true, 2000);
+  CloudPlayStatsSync::setDummyPullPages({{item}}, true, 2000);
 
   QSignalSpy spy(coordinator_, &CloudPlayStatsSyncCoordinator::songDataChanged);
   coordinator_->startSync();
@@ -135,11 +131,11 @@ void TestCloudPlayStatsSyncCoordinator::
   settings.setValue("cloud_sync/user_uuid",
                     "11111111-1111-1111-1111-111111111111");
 
-  CloudPlayStatsSyncService::clearDummyPushCalls();
+  CloudPlayStatsSync::clearDummyPushCalls();
   coordinator_->pushIncrementForSongPk(songPk);
 
-  const auto calls = CloudPlayStatsSyncService::dummyPushCalls();
-  QCOMPARE(calls.size(), size_t(1));
+  QTRY_COMPARE(CloudPlayStatsSync::dummyPushCalls().size(), size_t(1));
+  const auto calls = CloudPlayStatsSync::dummyPushCalls();
   QCOMPARE(calls[0].songIdentityKey, std::string("song|artist|album"));
   QCOMPARE(calls[0].delta, 1);
 }
@@ -159,17 +155,17 @@ void TestCloudPlayStatsSyncCoordinator::
   settings.setValue("cloud_sync/rebase_pending", true);
   settings.setValue("cloud_sync/last_synced_at", 0);
 
-  CloudPlayStatsSyncService::clearDummyPushCalls();
-  CloudPlayStatsSyncService::setDummyPushResults({});
+  CloudPlayStatsSync::clearDummyPushCalls();
+  CloudPlayStatsSync::setDummyPushResults({});
   CloudPlayStatItem item{.songIdentityKey = "song|artist|album",
                          .playCount = 10,
                          .updatedAt = 3000};
-  CloudPlayStatsSyncService::setDummyPullPages({{item}}, true, 3000);
+  CloudPlayStatsSync::setDummyPullPages({{item}}, true, 3000);
 
   coordinator_->startSync();
 
   QTRY_VERIFY(!settings.value("cloud_sync/rebase_pending").toBool());
-  QCOMPARE(CloudPlayStatsSyncService::dummyPushCalls().size(), size_t(0));
+  QCOMPARE(CloudPlayStatsSync::dummyPushCalls().size(), size_t(0));
   QCOMPARE(library_->getSongByPK(songPk).at("play_count").text,
            std::string("10"));
 }
@@ -189,17 +185,17 @@ void TestCloudPlayStatsSyncCoordinator::
   settings.setValue("cloud_sync/rebase_pending", true);
   settings.setValue("cloud_sync/last_synced_at", 0);
 
-  CloudPlayStatsSyncService::clearDummyPushCalls();
-  CloudPlayStatsSyncService::setDummyPushResults({true});
+  CloudPlayStatsSync::clearDummyPushCalls();
+  CloudPlayStatsSync::setDummyPushResults({true});
   CloudPlayStatItem item{.songIdentityKey = "song|artist|album",
                          .playCount = 3,
                          .updatedAt = 3001};
-  CloudPlayStatsSyncService::setDummyPullPages({{item}}, true, 3001);
+  CloudPlayStatsSync::setDummyPullPages({{item}}, true, 3001);
 
   coordinator_->startSync();
 
   QTRY_VERIFY(!settings.value("cloud_sync/rebase_pending").toBool());
-  const auto calls = CloudPlayStatsSyncService::dummyPushCalls();
+  const auto calls = CloudPlayStatsSync::dummyPushCalls();
   QCOMPARE(calls.size(), size_t(1));
   QCOMPARE(calls.front().songIdentityKey, std::string("song|artist|album"));
   QCOMPARE(calls.front().delta, 5);
@@ -221,18 +217,18 @@ void TestCloudPlayStatsSyncCoordinator::rebase_pushFailure_keepsPending() {
   settings.setValue("cloud_sync/rebase_pending", true);
   settings.setValue("cloud_sync/last_synced_at", 0);
 
-  CloudPlayStatsSyncService::clearDummyPushCalls();
-  CloudPlayStatsSyncService::setDummyPushResults({false});
+  CloudPlayStatsSync::clearDummyPushCalls();
+  CloudPlayStatsSync::setDummyPushResults({false});
   CloudPlayStatItem item{.songIdentityKey = "song|artist|album",
                          .playCount = 3,
                          .updatedAt = 3002};
-  CloudPlayStatsSyncService::setDummyPullPages({{item}}, true, 3002);
+  CloudPlayStatsSync::setDummyPullPages({{item}}, true, 3002);
 
   coordinator_->startSync();
 
-  QTRY_VERIFY(settings.value("cloud_sync/rebase_pending").toBool());
-  const auto calls = CloudPlayStatsSyncService::dummyPushCalls();
-  QCOMPARE(calls.size(), size_t(1));
+  QTRY_COMPARE(CloudPlayStatsSync::dummyPushCalls().size(), size_t(1));
+  QVERIFY(settings.value("cloud_sync/rebase_pending").toBool());
+  const auto calls = CloudPlayStatsSync::dummyPushCalls();
   QCOMPARE(calls.front().delta, 5);
 }
 

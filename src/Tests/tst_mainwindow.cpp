@@ -115,6 +115,7 @@ private slots:
   void menuPlaybackActions_areWired();
   void playbackButtons_areWired();
   void clearPlaylistAction_clearsCurrentPlaylist();
+  void deferredFileBackedStartup_disablesActionsAndIgnoresMediaRequests();
   void systemMediaRequests_areWired();
   void backendSignals_updateUiAndSystemMedia();
   void systemMediaToggleRequest_togglesPlayback();
@@ -180,6 +181,7 @@ void TestMainWindow::cleanup() {
   workDir_ = nullptr;
   qunsetenv("MYPLAYER_USE_DUMMY_AUDIO_PLAYER");
   qunsetenv("MYPLAYER_USE_DUMMY_MEDIA_INTERFACE");
+  qunsetenv("MYPLAYER_TEST_LIBRARY_LOAD_DELAY_MS");
 }
 
 void TestMainWindow::menuPlaybackActions_areWired() {
@@ -277,6 +279,47 @@ void TestMainWindow::clearPlaylistAction_clearsCurrentPlaylist() {
   QVERIFY(clearAction != nullptr);
   clearAction->trigger();
   QCOMPARE(playlist->songCount(), 0);
+}
+
+void TestMainWindow::
+    deferredFileBackedStartup_disablesActionsAndIgnoresMediaRequests() {
+  delete window_;
+  window_ = nullptr;
+  qputenv("MYPLAYER_TEST_LIBRARY_LOAD_DELAY_MS", "300");
+
+  connectionName_ =
+      QStringLiteral("mainwindow_file_test_%1")
+          .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+  const QString dbPath = workDir_->filePath("deferred-startup.sqlite");
+  window_ = new MainWindow(dbPath, connectionName_);
+
+  QAction *openAction = window_->findChild<QAction *>("actionOpen");
+  QAction *playAction = window_->findChild<QAction *>("actionPlay");
+  QAction *manualRebase =
+      window_->findChild<QAction *>("actionManual_cloud_rebase");
+  QStatusBar *statusBar = window_->findChild<QStatusBar *>("statusbar");
+  auto *media = window_->findChild<DummySystemMediaInterface *>();
+  QVERIFY(openAction != nullptr);
+  QVERIFY(playAction != nullptr);
+  QVERIFY(manualRebase != nullptr);
+  QVERIFY(statusBar != nullptr);
+  QVERIFY(media != nullptr);
+
+  QVERIFY(!openAction->isEnabled());
+  QVERIFY(!playAction->isEnabled());
+  QVERIFY(!manualRebase->isEnabled());
+  QCOMPARE(statusBar->currentMessage(), QStringLiteral("Loading library..."));
+
+  media->requestPlayForTest();
+  media->requestNextForTest();
+  media->requestPreviousForTest();
+  QCOMPARE(media->stateForTest().playbackState,
+           ISystemMediaInterface::PlaybackState::Stopped);
+
+  QTRY_VERIFY(openAction->isEnabled());
+  QTRY_VERIFY(playAction->isEnabled());
+  QCOMPARE(statusBar->currentMessage(), QString{});
+  qunsetenv("MYPLAYER_TEST_LIBRARY_LOAD_DELAY_MS");
 }
 
 void TestMainWindow::systemMediaRequests_areWired() {
@@ -752,8 +795,8 @@ void TestMainWindow::playStats_nearEndWithListenCountsOnceAndRefreshes() {
 
 void TestMainWindow::cloudSync_startupRebase_runsOnWindowStartup() {
   qputenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC", "1");
-  CloudPlayStatsSyncService::clearDummyPullPages();
-  CloudPlayStatsSyncService::clearDummyPushCalls();
+  CloudPlayStatsSync::clearDummyPullPages();
+  CloudPlayStatsSync::clearDummyPushCalls();
   {
     QSettings settings;
     settings.setValue("cloud_sync/user_uuid",
@@ -765,7 +808,7 @@ void TestMainWindow::cloudSync_startupRebase_runsOnWindowStartup() {
   CloudPlayStatItem item{.songIdentityKey = "song|artist|album",
                          .playCount = 7,
                          .updatedAt = 2000};
-  CloudPlayStatsSyncService::setDummyPullPages({{item}}, true, 2000);
+  CloudPlayStatsSync::setDummyPullPages({{item}}, true, 2000);
 
   recreateWindow();
 
@@ -775,16 +818,16 @@ void TestMainWindow::cloudSync_startupRebase_runsOnWindowStartup() {
       settings.value("cloud_sync/last_synced_at", 0).toLongLong();
   QVERIFY(syncedAt >= 2000);
 
-  CloudPlayStatsSyncService::clearDummyPullPages();
-  CloudPlayStatsSyncService::clearDummyPushCalls();
+  CloudPlayStatsSync::clearDummyPullPages();
+  CloudPlayStatsSync::clearDummyPushCalls();
   qunsetenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC");
 }
 
 void TestMainWindow::
     cloudSync_manualRebase_appliesCloudPlayCount_integration() {
   qputenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC", "1");
-  CloudPlayStatsSyncService::clearDummyPullPages();
-  CloudPlayStatsSyncService::clearDummyPushCalls();
+  CloudPlayStatsSync::clearDummyPullPages();
+  CloudPlayStatsSync::clearDummyPushCalls();
 
   PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
   QVERIFY(tabs != nullptr);
@@ -805,7 +848,7 @@ void TestMainWindow::
   CloudPlayStatItem item{.songIdentityKey = "song|artist|album",
                          .playCount = 7,
                          .updatedAt = 2000};
-  CloudPlayStatsSyncService::setDummyPullPages({{item}}, true, 2000);
+  CloudPlayStatsSync::setDummyPullPages({{item}}, true, 2000);
 
   QAction *manualRebase =
       window_->findChild<QAction *>("actionManual_cloud_rebase");
@@ -813,6 +856,7 @@ void TestMainWindow::
   manualRebase->setEnabled(true);
   manualRebase->trigger();
 
+  QTRY_VERIFY(playlist->getSongByIndex(0).contains("play_count"));
   QTRY_COMPARE(playlist->getSongByIndex(0).at("play_count").text,
                std::string("7"));
 
@@ -820,8 +864,8 @@ void TestMainWindow::
       settings.value("cloud_sync/last_synced_at", 0).toLongLong();
   QVERIFY(syncedAt >= 2000);
 
-  CloudPlayStatsSyncService::clearDummyPullPages();
-  CloudPlayStatsSyncService::clearDummyPushCalls();
+  CloudPlayStatsSync::clearDummyPullPages();
+  CloudPlayStatsSync::clearDummyPushCalls();
   qunsetenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC");
 }
 

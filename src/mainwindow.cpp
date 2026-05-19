@@ -17,6 +17,7 @@
 #endif
 #include "databasemanager.h"
 #include "displayexpressionevalcontext.h"
+#include "gstaudioplayer.h"
 #include "libraryexpression_ops.h"
 #include "libraryexpression_parser.h"
 #include "librarysearchdialog.h"
@@ -28,12 +29,16 @@
 #include <QDateTime>
 #include <QEvent>
 #include <QFileDialog>
+#include <QFutureWatcher>
 #include <QProgressDialog>
 #include <QSettings>
 #include <QSqlDatabase>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QStyleHints>
+#include <QThread>
+#include <QTimer>
+#include <QtConcurrent>
 #include <algorithm>
 #include <utility>
 
@@ -62,6 +67,43 @@ ExprPtr parseDisplayExpressionWithFallback(const ExprSymbolResolver &resolver,
   return std::move(parsed.expr);
 }
 
+SongLibrary::Snapshot loadSongLibrarySnapshot(const QString &databaseName) {
+  // TODO: Extract DB-only library loading so startup does not need to construct
+  // temporary full ColumnRegistry/SongLibrary instances on the worker thread.
+#ifdef MYPLAYER_TESTING
+  if (const int delayMs =
+          qEnvironmentVariableIntValue("MYPLAYER_TEST_LIBRARY_LOAD_DELAY_MS");
+      delayMs > 0) {
+    QThread::msleep(static_cast<unsigned long>(delayMs));
+  }
+#endif
+  ColumnRegistry registry;
+  DatabaseManager databaseManager(
+      registry, databaseName,
+      QStringLiteral("playlist_loader_%1")
+          .arg(reinterpret_cast<quintptr>(QThread::currentThread())));
+  if (!registry.loadDynamicColumns(databaseManager.db())) {
+    qFatal("loadSongLibrarySnapshot: failed to load dynamic columns");
+  }
+  SongLibrary library(registry, databaseManager);
+  library.loadFromDatabase();
+  return library.snapshot();
+}
+
+void prewarmSelectedPlaybackBackend() {
+  QSettings settings;
+  const int backendIndex =
+      settings
+          .value(
+              "playback/backend",
+              static_cast<int>(PlaybackBackendManager::Backend::QMediaPlayer))
+          .toInt();
+  if (static_cast<PlaybackBackendManager::Backend>(backendIndex) ==
+      PlaybackBackendManager::Backend::GStreamer) {
+    GstAudioPlayer::prewarmStartup();
+  }
+}
+
 } // namespace
 
 MainWindow::MainWindow(QWidget *parent)
@@ -74,8 +116,8 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
       databaseManager_(columnRegistry_, std::move(databaseName),
                        std::move(connectionName)),
       songLibrary(columnRegistry_, databaseManager_), lyricsManager{this},
-      cloudPlayStatsSyncCoordinator_(songLibrary, cloudPlayStatsSyncService_,
-                                     this) {
+      cloudPlayStatsSyncCoordinator_(songLibrary, this) {
+  prewarmSelectedPlaybackBackend();
   ui->setupUi(this);
   applyDisplayThemeFromSettings();
   defaultWindowTitle_ = windowTitle();
@@ -83,6 +125,7 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
   initWindowTitleExpression();
   updatePlaybackTimeStatus();
   setUpMenuBar();
+  initCloudSync();
   setUpPlaylist();
   initSettings();
   initPlaybackBackend();
@@ -90,7 +133,6 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
   setUpLyricsPanel();
   setUpSplitter();
   setupSystemMediaInterface();
-  initCloudSync();
 }
 
 void MainWindow::initCloudSync() {
@@ -99,7 +141,6 @@ void MainWindow::initCloudSync() {
           [this](int songPk) {
             playlistTabs->notifySongDataChangedInAllPlaylists(songPk);
           });
-  cloudPlayStatsSyncCoordinator_.startSync();
   refreshManualCloudRebaseActionEnabled();
 }
 
@@ -174,12 +215,36 @@ void MainWindow::setUpMenuBar() {
 
 void MainWindow::setUpPlaylist() {
   playlistTabs = ui->playlistTabs;
-  QSqlDatabase &db = databaseManager_.db();
-  if (!columnRegistry_.loadDynamicColumns(db)) {
-    qFatal("setUpPlaylist: failed to load dynamic columns");
+  setPlaylistDependentActionsEnabled(false);
+  statusBar()->showMessage(tr("Loading library..."));
+
+  if (databaseManager_.db().databaseName() == QStringLiteral(":memory:")) {
+    QSqlDatabase &db = databaseManager_.db();
+    if (!columnRegistry_.loadDynamicColumns(db)) {
+      qFatal("setUpPlaylist: failed to load dynamic columns");
+    }
+    songLibrary.loadFromDatabase();
+    finishSetUpPlaylist(songLibrary.snapshot());
+    return;
+  }
+
+  auto *watcher = new QFutureWatcher<SongLibrary::Snapshot>(this);
+  connect(watcher, &QFutureWatcher<SongLibrary::Snapshot>::finished, this,
+          [this, watcher]() {
+            SongLibrary::Snapshot snapshot = watcher->result();
+            finishSetUpPlaylist(std::move(snapshot));
+            watcher->deleteLater();
+          });
+  watcher->setFuture(QtConcurrent::run(loadSongLibrarySnapshot,
+                                       databaseManager_.db().databaseName()));
+}
+
+void MainWindow::finishSetUpPlaylist(SongLibrary::Snapshot &&snapshot) {
+  if (!columnRegistry_.loadDynamicColumns(databaseManager_.db())) {
+    qFatal("finishSetUpPlaylist: failed to load dynamic columns");
   }
   columnLayoutManager_.refreshFromRegistry();
-  songLibrary.loadFromDatabase();
+  songLibrary.replaceWithSnapshot(std::move(snapshot));
   playlistTabs->init(&songLibrary, &playbackQueue_, &control,
                      playbackOrderMenuActionGroup, &columnRegistry_,
                      &columnLayoutManager_, &databaseManager_);
@@ -198,6 +263,29 @@ void MainWindow::setUpPlaylist() {
       current->clear();
     }
   });
+  playlistReady_ = true;
+  setPlaylistDependentActionsEnabled(true);
+  updatePlaybackTimeStatus();
+  cloudPlayStatsSyncCoordinator_.startSync();
+}
+
+void MainWindow::setPlaylistDependentActionsEnabled(bool enabled) {
+  ui->actionOpen->setEnabled(enabled);
+  ui->actionAdd_folder->setEnabled(enabled);
+  ui->actionAdd->setEnabled(enabled);
+  ui->actionClear_Playlist->setEnabled(enabled);
+  ui->actionSearch->setEnabled(enabled);
+  ui->actionPlay->setEnabled(enabled);
+  ui->actionPause->setEnabled(enabled);
+  ui->actionStop->setEnabled(enabled);
+  ui->actionNext->setEnabled(enabled);
+  ui->actionPrevious->setEnabled(enabled);
+  ui->play_button->setEnabled(enabled);
+  ui->pause_button->setEnabled(enabled);
+  ui->stop_button->setEnabled(enabled);
+  ui->next_button->setEnabled(enabled);
+  ui->prev_button->setEnabled(enabled);
+  refreshManualCloudRebaseActionEnabled();
 }
 
 void MainWindow::initSettings() {
@@ -417,6 +505,9 @@ void MainWindow::playSong(const MSong &song, int row, Playlist *pl) {
 }
 
 void MainWindow::next() {
+  if (!playlistReady_) {
+    return;
+  }
   const auto &[song, row, pl] = control.next();
   if (row < 0)
     return;
@@ -426,6 +517,9 @@ void MainWindow::next() {
 }
 
 void MainWindow::prev() {
+  if (!playlistReady_) {
+    return;
+  }
   const auto &[song, row, pl] = control.prev();
   if (row < 0)
     return;
@@ -435,6 +529,9 @@ void MainWindow::prev() {
 }
 
 void MainWindow::play() {
+  if (!playlistReady_) {
+    return;
+  }
   if (control.getStatus() == PlaybackQueue::PlaybackStatus::None) {
     Playlist *pl = playlistTabs->currentPlaylist();
     int lastPlayedPk = pl->getLastPlayed();
@@ -450,6 +547,9 @@ void MainWindow::play() {
 }
 
 void MainWindow::pause() {
+  if (!playlistReady_) {
+    return;
+  }
   if (control.getStatus() == PlaybackQueue::PlaybackStatus::None)
     return;
   backendManager->player()->pause();
@@ -459,6 +559,9 @@ void MainWindow::pause() {
 }
 
 void MainWindow::toggle() {
+  if (!playlistReady_) {
+    return;
+  }
   if (control.getStatus() == PlaybackQueue::PlaybackStatus::Playing)
     pause();
   else
@@ -466,6 +569,9 @@ void MainWindow::toggle() {
 }
 
 void MainWindow::stop() {
+  if (!playlistReady_) {
+    return;
+  }
   backendManager->player()->stop();
   control.stop();
   currentBitrateBps_ = 0;
@@ -542,6 +648,9 @@ void MainWindow::updateImageSize() {
 }
 
 void MainWindow::addEntry() {
+  if (!playlistReady_) {
+    return;
+  }
   AddEntryDialog *addEntryDialog = new AddEntryDialog(this);
   addEntryDialog->show();
   addEntryDialog->setAttribute(Qt::WA_DeleteOnClose);
@@ -698,6 +807,9 @@ void MainWindow::updatePlaybackTimeStatus() {
 }
 
 void MainWindow::seek(int mseconds) {
+  if (!playlistReady_) {
+    return;
+  }
   lastPositionSampleMs_ = -1;
   sysMedia->setPosition(mseconds);
   backendManager->player()->setPosition(mseconds);
@@ -731,6 +843,9 @@ void MainWindow::statusChanged(QMediaPlayer::MediaStatus status) {
 }
 
 void MainWindow::open() {
+  if (!playlistReady_) {
+    return;
+  }
   const QList<QString> fileName = QFileDialog::getOpenFileNames(
       this, "Open the file",
       QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
@@ -742,6 +857,9 @@ void MainWindow::open() {
 }
 
 void MainWindow::openFolder() {
+  if (!playlistReady_) {
+    return;
+  }
   QString dirPath = QFileDialog::getExistingDirectory(
       this, "Select Folder",
       QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
@@ -823,10 +941,13 @@ qint64 MainWindow::unixNowSeconds() {
 }
 
 void MainWindow::triggerManualCloudRebase() {
+  if (!playlistReady_) {
+    return;
+  }
   cloudPlayStatsSyncCoordinator_.triggerManualRebase();
 }
 
 void MainWindow::refreshManualCloudRebaseActionEnabled() {
   ui->actionManual_cloud_rebase->setEnabled(
-      cloudPlayStatsSyncCoordinator_.hasValidUuid());
+      playlistReady_ && cloudPlayStatsSyncCoordinator_.hasValidUuid());
 }

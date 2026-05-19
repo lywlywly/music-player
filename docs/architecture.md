@@ -10,6 +10,8 @@ of `README.md`.
 * `MainWindow`
   * Wires the app’s major subsystems.
   * Owns playback actions, settings integration, and top-level UI flows.
+  * Starts file-backed library loading on a worker thread during startup and
+    hydrates UI state after the library snapshot is ready.
 
 ### Persistence and schema
 
@@ -39,6 +41,8 @@ of `README.md`.
   * Parses/imports files, refreshes metadata, evaluates computed fields, and
     evaluates library search expressions.
   * Maintains identity-based play stats using normalized `title|artist|album`.
+  * Exposes a plain-data `Snapshot` used to transfer worker-loaded library
+    state back to the main-thread instance.
 * `SongParser`
   * Parses file tags into built-in + dynamic fields and remaining raw tag fields.
   * Multi-value tag fields are displayed as comma-separated text (`", "`).
@@ -86,6 +90,8 @@ of `README.md`.
 * `PlaybackBackendManager`
   * Runtime backend owner/switcher (`QMediaPlayer` or `GStreamer`).
   * Manages GLib loop thread for GStreamer on macOS/Windows.
+  * `MainWindow` prewarms GStreamer startup when GStreamer is the saved backend:
+    `gst_init` on all platforms and default output device lookup on macOS.
 * `AudioPlayer` (+ concrete backends)
   * Transport + media events consumed by `MainWindow`.
   * Exposes `bitrateChanged(bitsPerSecond)` for playback-time bitrate updates.
@@ -116,11 +122,19 @@ of `README.md`.
 
 ### Cloud play-count sync
 
-* `CloudPlayStatsSyncService`
-  * Thin async HTTP client for Lambda APIs (pull/push/bulk-push + throttle retry).
+* `CloudPlayStatsSync`
+  * Stateless blocking HTTP functions for Lambda APIs (pull/push/bulk-push +
+    throttle retry). They are called from the cloud-sync worker thread, not the
+    UI thread.
 * `CloudPlayStatsSyncCoordinator`
   * Sync policy layer: startup incremental/rebase pull, `max(local, cloud)`
     merge, rebase delta push, and affected-song UI notifications.
+  * Owns a dedicated `QThread` plus a generic worker `QObject`; cloud tasks are
+    posted to that worker with `Qt::QueuedConnection` so UI calls return
+    immediately and cloud operations run serially.
+  * Marshals results that touch `SongLibrary`, settings cursors, or UI-facing
+    signals back to the main thread.
+  * Startup sync starts only after playlist/library hydration completes.
 
 ### System media and lyrics
 
@@ -167,6 +181,22 @@ of `README.md`.
     contexts; library-search parsing uses registry symbols only.
 
 ## Core Feature Implementation Notes
+
+### Startup loading
+
+* File-backed startup keeps library-dependent actions disabled until playlist
+  hydration finishes and shows `Loading library...` in the status bar.
+* The worker path creates its own `ColumnRegistry`, `DatabaseManager`, and
+  `SongLibrary` with a separate SQLite connection, then returns a
+  `SongLibrary::Snapshot`.
+* The main thread applies the snapshot to the app-owned `SongLibrary`, creates
+  playlist tabs/models, re-enables actions, restores the normal status-bar
+  message, and starts cloud sync.
+* Startup-sensitive handlers are guarded in addition to disabling actions, so
+  direct/system-media requests cannot play, seek, load songs, or manually rebase
+  before playlist hydration finishes.
+* `:memory:` databases keep the synchronous path for tests because separate
+  SQLite in-memory connections do not share state.
 
 ### Song ingest and metadata refresh
 
@@ -358,12 +388,17 @@ of `README.md`.
   * botocore retry mode `adaptive`, max attempts `10`
 * Throttle handling (client):
   * retry after `60s`
+  * request transfer timeout: `15s`
+  * max client retries for throttle/timeout: `3`
 
 ## Threading / Async Model
 
 * Qt UI/model code runs on the main thread.
-* Cloud sync HTTP is asynchronous via `QNetworkAccessManager` callbacks.
-* Cloud pull paging and rebase-push chunking are paced by `QTimer`.
+* Cloud sync HTTP functions run synchronously on a coordinator-owned worker
+  thread; results that touch `SongLibrary` or UI models are delivered back to
+  the main thread.
+* Cloud sync worker tasks are serialized through the worker thread event queue.
+* Cloud pull inter-page waits and rebase-push chunking are paced by `QTimer`.
 * GStreamer GLib loop uses a dedicated `std::thread` on macOS/Windows.
 * DB writes that can touch many songs are backgrounded. Current path:
   `SongStore::removePlaylistItemsInDb()` (bulk `playlist_items` delete) runs in

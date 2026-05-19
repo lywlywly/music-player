@@ -1,6 +1,8 @@
 #include "cloudplaystatssynccoordinator.h"
 #include <QDateTime>
 #include <QDebug>
+#include <QMetaObject>
+#include <QPointer>
 #include <QSettings>
 #include <QTimer>
 #include <QUuid>
@@ -15,9 +17,23 @@ constexpr int kRebaseBulkChunkGapMs = 1000;
 } // namespace
 
 CloudPlayStatsSyncCoordinator::CloudPlayStatsSyncCoordinator(
-    SongLibrary &songLibrary, CloudPlayStatsSyncService &syncService,
-    QObject *parent)
-    : QObject(parent), songLibrary_(songLibrary), syncService_(syncService) {}
+    SongLibrary &songLibrary, QObject *parent)
+    : QObject(parent), songLibrary_(songLibrary) {
+  syncWorker_.moveToThread(&syncThread_);
+  syncThread_.start();
+}
+
+CloudPlayStatsSyncCoordinator::~CloudPlayStatsSyncCoordinator() {
+  if (syncThread_.isRunning()) {
+    QThread *ownerThread = thread();
+    QMetaObject::invokeMethod(
+        &syncWorker_,
+        [this, ownerThread]() { syncWorker_.moveToThread(ownerThread); },
+        Qt::BlockingQueuedConnection);
+    syncThread_.quit();
+    syncThread_.wait();
+  }
+}
 
 void CloudPlayStatsSyncCoordinator::startSync() {
   const QString uuid = currentValidUuid();
@@ -56,7 +72,7 @@ void CloudPlayStatsSyncCoordinator::pushIncrementForSongPk(int songPk) {
   if (identityKey.empty()) {
     return;
   }
-  syncService_.pushIncrement(uuid, identityKey, 1);
+  pushIncrementOnWorker(uuid, identityKey, 1);
 }
 
 bool CloudPlayStatsSyncCoordinator::hasValidUuid() const {
@@ -70,7 +86,7 @@ void CloudPlayStatsSyncCoordinator::runIncrementalSync(const QString &uuid) {
   const qint64 updatedAfter = std::max<qint64>(0, lastSyncedAt - 60);
   qDebug() << "CloudSync incremental begin:" << "lastSyncedAt=" << lastSyncedAt
            << "updatedAfter=" << updatedAfter;
-  syncService_.pullDeltaPaged(
+  pullDeltaPagedOnWorker(
       uuid, updatedAfter, kPullPageLimit,
       [this](const std::vector<CloudPlayStatItem> &items) {
         applyCloudPullPage(items, nullptr,
@@ -92,7 +108,7 @@ void CloudPlayStatsSyncCoordinator::runIncrementalSync(const QString &uuid) {
 void CloudPlayStatsSyncCoordinator::runRebaseSync(const QString &uuid) {
   qDebug() << "CloudSync rebase begin";
   auto cloudCounts = std::make_shared<std::unordered_map<std::string, int>>();
-  syncService_.pullDeltaPaged(
+  pullDeltaPagedOnWorker(
       uuid, 0, kPullPageLimit,
       [this, cloudCounts](const std::vector<CloudPlayStatItem> &items) {
         applyCloudPullPage(items, cloudCounts.get(),
@@ -190,7 +206,7 @@ void CloudPlayStatsSyncCoordinator::pushRebaseDeltasSequentially(
     qDebug() << "CloudSync rebase bulk push:" << "begin=" << begin
              << "end=" << end << "count=" << chunk.size();
 
-    syncService_.pushBulkIncrement(
+    pushBulkIncrementOnWorker(
         uuid, chunk, [this, index, end, allOk, pushNext](bool ok) {
           if (!ok) {
             *allOk = false;
@@ -204,6 +220,70 @@ void CloudPlayStatsSyncCoordinator::pushRebaseDeltasSequentially(
         });
   };
   (*pushNext)();
+}
+
+void CloudPlayStatsSyncCoordinator::pushIncrementOnWorker(
+    const QString &uuid, const std::string &songIdentityKey, int delta) {
+  QMetaObject::invokeMethod(
+      &syncWorker_,
+      [uuid, songIdentityKey, delta]() {
+        CloudPlayStatsSync::pushIncrement(uuid, songIdentityKey, delta);
+      },
+      Qt::QueuedConnection);
+}
+
+void CloudPlayStatsSyncCoordinator::pushBulkIncrementOnWorker(
+    const QString &uuid,
+    const std::vector<std::pair<std::string, int>> &updates,
+    const std::function<void(bool ok)> &onFinished) {
+  QPointer<CloudPlayStatsSyncCoordinator> guard(this);
+  QMetaObject::invokeMethod(
+      &syncWorker_,
+      [uuid, updates, onFinished, guard]() {
+        const bool ok = CloudPlayStatsSync::pushBulkIncrement(uuid, updates);
+        if (!guard) {
+          return;
+        }
+        QMetaObject::invokeMethod(
+            guard.data(),
+            [onFinished, ok]() {
+              if (onFinished) {
+                onFinished(ok);
+              }
+            },
+            Qt::QueuedConnection);
+      },
+      Qt::QueuedConnection);
+}
+
+void CloudPlayStatsSyncCoordinator::pullDeltaPagedOnWorker(
+    const QString &uuid, qint64 updatedAfter, int pageLimit,
+    const std::function<void(const std::vector<CloudPlayStatItem> &)> &onPage,
+    const std::function<void(bool ok, qint64 maxUpdatedAt)> &onFinished) {
+  QPointer<CloudPlayStatsSyncCoordinator> guard(this);
+  QMetaObject::invokeMethod(
+      &syncWorker_,
+      [uuid, updatedAfter, pageLimit, onPage, onFinished, guard]() {
+        CloudPlayStatsPullResult result =
+            CloudPlayStatsSync::pullDeltaPaged(uuid, updatedAfter, pageLimit);
+        if (!guard) {
+          return;
+        }
+        QMetaObject::invokeMethod(
+            guard.data(),
+            [onPage, onFinished, result = std::move(result)]() {
+              if (onPage) {
+                for (const auto &page : result.pages) {
+                  onPage(page);
+                }
+              }
+              if (onFinished) {
+                onFinished(result.ok, result.maxUpdatedAt);
+              }
+            },
+            Qt::QueuedConnection);
+      },
+      Qt::QueuedConnection);
 }
 
 bool CloudPlayStatsSyncCoordinator::isValidUuid(const QString &uuid) {

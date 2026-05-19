@@ -3,7 +3,7 @@
 
 #include "../cloudplaystatssyncservice.h"
 
-class TestCloudPlayStatsSyncService : public QObject {
+class TestCloudPlayStatsSync : public QObject {
   Q_OBJECT
 
 private slots:
@@ -13,63 +13,47 @@ private slots:
   void pushIncrement_recordsDummyCall();
   void pushBulkIncrement_recordsAllDummyCallsAndResult();
   void pullDeltaPaged_streamsPagesAndComputesMaxUpdatedAt();
-
-private:
-  CloudPlayStatsSyncService *service_ = nullptr;
+  void retryPolicy_retriesThrottleAndSucceeds();
+  void retryPolicy_stopsAfterThrottleRetryLimit();
+  void retryPolicy_retriesTimeoutAndFails();
 };
 
-void TestCloudPlayStatsSyncService::init() {
+void TestCloudPlayStatsSync::init() {
   qputenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC", "1");
-  CloudPlayStatsSyncService::clearDummyPullPages();
-  CloudPlayStatsSyncService::clearDummyPushCalls();
-  service_ = new CloudPlayStatsSyncService();
+  CloudPlayStatsSync::clearDummyPullPages();
+  CloudPlayStatsSync::clearDummyPushCalls();
 }
 
-void TestCloudPlayStatsSyncService::cleanup() {
-  delete service_;
-  service_ = nullptr;
-  CloudPlayStatsSyncService::clearDummyPullPages();
-  CloudPlayStatsSyncService::clearDummyPushCalls();
+void TestCloudPlayStatsSync::cleanup() {
+  CloudPlayStatsSync::clearDummyPullPages();
+  CloudPlayStatsSync::clearDummyPushCalls();
+  qunsetenv("MYPLAYER_CLOUD_SYNC_RETRY_DELAY_MS");
   qunsetenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC");
 }
 
-void TestCloudPlayStatsSyncService::pushIncrement_recordsDummyCall() {
-  bool callbackCalled = false;
-  bool callbackOk = false;
+void TestCloudPlayStatsSync::pushIncrement_recordsDummyCall() {
+  const bool ok = CloudPlayStatsSync::pushIncrement(
+      "11111111-1111-1111-1111-111111111111", "song|artist|album", 2);
 
-  service_->pushIncrement("11111111-1111-1111-1111-111111111111",
-                          "song|artist|album", 2, [&](bool ok) {
-                            callbackCalled = true;
-                            callbackOk = ok;
-                          });
+  QVERIFY(ok);
 
-  QVERIFY(callbackCalled);
-  QVERIFY(callbackOk);
-
-  const auto calls = CloudPlayStatsSyncService::dummyPushCalls();
+  const auto calls = CloudPlayStatsSync::dummyPushCalls();
   QCOMPARE(calls.size(), size_t(1));
   QCOMPARE(calls[0].userUuid, QString("11111111-1111-1111-1111-111111111111"));
   QCOMPARE(calls[0].songIdentityKey, std::string("song|artist|album"));
   QCOMPARE(calls[0].delta, 2);
 }
 
-void TestCloudPlayStatsSyncService::
-    pushBulkIncrement_recordsAllDummyCallsAndResult() {
-  CloudPlayStatsSyncService::setDummyPushResults({false});
+void TestCloudPlayStatsSync::pushBulkIncrement_recordsAllDummyCallsAndResult() {
+  CloudPlayStatsSync::setDummyPushResults({false});
 
-  bool callbackCalled = false;
-  bool callbackOk = true;
-  service_->pushBulkIncrement(
+  const bool ok = CloudPlayStatsSync::pushBulkIncrement(
       "11111111-1111-1111-1111-111111111111",
-      {{"song-a|artist|album", 3}, {"song-b|artist|album", 1}}, [&](bool ok) {
-        callbackCalled = true;
-        callbackOk = ok;
-      });
+      {{"song-a|artist|album", 3}, {"song-b|artist|album", 1}});
 
-  QVERIFY(callbackCalled);
-  QVERIFY(!callbackOk);
+  QVERIFY(!ok);
 
-  const auto calls = CloudPlayStatsSyncService::dummyPushCalls();
+  const auto calls = CloudPlayStatsSync::dummyPushCalls();
   QCOMPARE(calls.size(), size_t(2));
   QCOMPARE(calls[0].songIdentityKey, std::string("song-a|artist|album"));
   QCOMPARE(calls[0].delta, 3);
@@ -77,7 +61,7 @@ void TestCloudPlayStatsSyncService::
   QCOMPARE(calls[1].delta, 1);
 }
 
-void TestCloudPlayStatsSyncService::
+void TestCloudPlayStatsSync::
     pullDeltaPaged_streamsPagesAndComputesMaxUpdatedAt() {
   CloudPlayStatItem item1{.songIdentityKey = "song-a|artist|album",
                           .playCount = 2,
@@ -85,32 +69,53 @@ void TestCloudPlayStatsSyncService::
   CloudPlayStatItem item2{.songIdentityKey = "song-b|artist|album",
                           .playCount = 4,
                           .updatedAt = 222};
-  CloudPlayStatsSyncService::setDummyPullPages({{item1}, {item2}}, true, 0);
+  CloudPlayStatsSync::setDummyPullPages({{item1}, {item2}}, true, 0);
 
-  int pageCount = 0;
-  int itemCount = 0;
-  bool finishedCalled = false;
-  bool finishedOk = false;
-  qint64 finishedMaxUpdatedAt = 0;
+  const CloudPlayStatsPullResult result = CloudPlayStatsSync::pullDeltaPaged(
+      "11111111-1111-1111-1111-111111111111", 100, 50);
 
-  service_->pullDeltaPaged(
-      "11111111-1111-1111-1111-111111111111", 100, 50,
-      [&](const std::vector<CloudPlayStatItem> &items) {
-        pageCount += 1;
-        itemCount += static_cast<int>(items.size());
-      },
-      [&](bool ok, qint64 maxUpdatedAt) {
-        finishedCalled = true;
-        finishedOk = ok;
-        finishedMaxUpdatedAt = maxUpdatedAt;
-      });
-
-  QCOMPARE(pageCount, 2);
-  QCOMPARE(itemCount, 2);
-  QVERIFY(finishedCalled);
-  QVERIFY(finishedOk);
-  QCOMPARE(finishedMaxUpdatedAt, 222);
+  QCOMPARE(result.pages.size(), size_t(2));
+  QCOMPARE(result.pages[0].size() + result.pages[1].size(), size_t(2));
+  QVERIFY(result.ok);
+  QCOMPARE(result.maxUpdatedAt, 222);
 }
 
-QTEST_MAIN(TestCloudPlayStatsSyncService)
+void TestCloudPlayStatsSync::retryPolicy_retriesThrottleAndSucceeds() {
+  qputenv("MYPLAYER_CLOUD_SYNC_RETRY_DELAY_MS", "0");
+
+  const auto result = CloudPlayStatsSync::testingRunRetrySequence(
+      {{.throttled = true}, {.ok = true}});
+
+  QVERIFY(result.ok);
+  QCOMPARE(result.attempts, 2);
+}
+
+void TestCloudPlayStatsSync::retryPolicy_stopsAfterThrottleRetryLimit() {
+  qputenv("MYPLAYER_CLOUD_SYNC_RETRY_DELAY_MS", "0");
+
+  const auto result =
+      CloudPlayStatsSync::testingRunRetrySequence({{.throttled = true},
+                                                   {.throttled = true},
+                                                   {.throttled = true},
+                                                   {.throttled = true},
+                                                   {.ok = true}});
+
+  QVERIFY(!result.ok);
+  QCOMPARE(result.attempts, 4);
+}
+
+void TestCloudPlayStatsSync::retryPolicy_retriesTimeoutAndFails() {
+  qputenv("MYPLAYER_CLOUD_SYNC_RETRY_DELAY_MS", "0");
+
+  const auto result =
+      CloudPlayStatsSync::testingRunRetrySequence({{.timedOut = true},
+                                                   {.timedOut = true},
+                                                   {.timedOut = true},
+                                                   {.timedOut = true}});
+
+  QVERIFY(!result.ok);
+  QCOMPARE(result.attempts, 4);
+}
+
+QTEST_MAIN(TestCloudPlayStatsSync)
 #include "tst_cloudplaystatssyncservice.moc"

@@ -36,6 +36,20 @@ void SongLibrary::loadFromDatabase() {
   loadPlayStats();
 }
 
+SongLibrary::Snapshot SongLibrary::snapshot() const {
+  return Snapshot{.songs = songs,
+                  .paths = paths,
+                  .songIdsByIdentityId = songIdsByIdentityId_};
+}
+
+void SongLibrary::replaceWithSnapshot(Snapshot &&snapshot) {
+  songs = std::move(snapshot.songs);
+  paths = std::move(snapshot.paths);
+  songIdsByIdentityId_ = std::move(snapshot.songIdsByIdentityId);
+  registeredQueryFields.clear();
+  registeredQueries.clear();
+}
+
 namespace {
 class SongLibraryExprEvalContext final : public LibraryExprEvalContext {
 public:

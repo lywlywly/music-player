@@ -40,6 +40,12 @@ using SongParseFn =
 // time.
 class SongLibrary {
 public:
+  struct Snapshot {
+    std::vector<MSong> songs;
+    std::unordered_map<std::string, int> paths;
+    std::unordered_map<int, std::vector<int>> songIdsByIdentityId;
+  };
+
 #ifdef MYPLAYER_TESTING
   explicit SongLibrary(const ColumnRegistry &columnRegistry,
                        DatabaseManager &databaseManager,
@@ -67,6 +73,8 @@ public:
   // Loads the full song set (built-in columns + dynamic attributes) from DB
   // into memory. This can take noticeable time on large libraries.
   void loadFromDatabase();
+  Snapshot snapshot() const;
+  void replaceWithSnapshot(Snapshot &&snapshot);
   // Re-parses one song by filepath, updates DB + in-memory fields, and returns
   // the refreshed in-memory song. When remainingFields is provided, parser
   // leftovers (unbound tags) are written there for caller-side use.

@@ -2,7 +2,6 @@
 #define MAINWINDOW_H
 
 #include "cloudplaystatssynccoordinator.h"
-#include "cloudplaystatssyncservice.h"
 #include "columnregistry.h"
 #include "databasemanager.h"
 #include "globalcolumnlayoutmanager.h"
@@ -81,6 +80,8 @@ private:
   void setUpPlaybackBackend();
   void setUpPlaybackActions();
   void setUpPlaylist();
+  void finishSetUpPlaylist(SongLibrary::Snapshot &&snapshot);
+  void setPlaylistDependentActionsEnabled(bool enabled);
   void initCloudSync();
   void setUpMenuBar();
   void openLibrarySearchDialog();
@@ -120,7 +121,7 @@ private:
   qint64 sessionListenedMs_ = 0;
   qint64 lastPositionSampleMs_ = -1;
   bool completionCounted_ = false;
-  CloudPlayStatsSyncService cloudPlayStatsSyncService_;
   CloudPlayStatsSyncCoordinator cloudPlayStatsSyncCoordinator_;
+  bool playlistReady_ = false;
 };
 #endif // MAINWINDOW_H
