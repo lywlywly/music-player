@@ -60,6 +60,7 @@ endif()
 
 set(PROJECT_SOURCES
   mainwindow.ui
+  resources/resources.qrc
   mainwindow.h
   mainwindow.cpp
   addentrydialog.ui

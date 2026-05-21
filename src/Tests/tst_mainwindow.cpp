@@ -1,3 +1,4 @@
+#include <QAbstractButton>
 #include <QAction>
 #include <QDataStream>
 #include <QDir>
@@ -247,9 +248,12 @@ void TestMainWindow::playbackButtons_areWired() {
   const int statusCol = statusColumn(playlist);
   QVERIFY(statusCol >= 0);
 
-  QPushButton *playButton = window_->findChild<QPushButton *>("play_button");
-  QPushButton *pauseButton = window_->findChild<QPushButton *>("pause_button");
-  QPushButton *stopButton = window_->findChild<QPushButton *>("stop_button");
+  QAbstractButton *playButton =
+      window_->findChild<QAbstractButton *>("play_button");
+  QAbstractButton *pauseButton =
+      window_->findChild<QAbstractButton *>("pause_button");
+  QAbstractButton *stopButton =
+      window_->findChild<QAbstractButton *>("stop_button");
   QVERIFY(playButton != nullptr);
   QVERIFY(pauseButton != nullptr);
   QVERIFY(stopButton != nullptr);

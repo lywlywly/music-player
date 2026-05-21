@@ -35,52 +35,56 @@
       <item>
        <layout class="QHBoxLayout" name="horizontalLayout">
         <property name="spacing">
-         <number>-1</number>
-        </property>
-        <property name="bottomMargin">
-         <number>0</number>
+         <number>10</number>
         </property>
         <item>
-         <widget class="QPushButton" name="play_button">
-          <property name="text">
-           <string>Play</string>
+         <layout class="QHBoxLayout" name="playbackButtonsLayout">
+          <property name="spacing">
+           <number>6</number>
           </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QPushButton" name="pause_button">
-          <property name="text">
-           <string>Pause</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QPushButton" name="stop_button">
-          <property name="text">
-           <string>Stop</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QPushButton" name="prev_button">
-          <property name="text">
-           <string>Previous</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QPushButton" name="next_button">
-          <property name="text">
-           <string>Next</string>
-          </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QPushButton" name="random_button">
-          <property name="text">
-           <string>Random</string>
-          </property>
-         </widget>
+          <item>
+           <widget class="QToolButton" name="play_button">
+            <property name="text">
+             <string>Play</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QToolButton" name="pause_button">
+            <property name="text">
+             <string>Pause</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QToolButton" name="stop_button">
+            <property name="text">
+             <string>Stop</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QToolButton" name="prev_button">
+            <property name="text">
+             <string>Previous</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QToolButton" name="next_button">
+            <property name="text">
+             <string>Next</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QToolButton" name="random_button">
+            <property name="text">
+             <string>Random</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
         </item>
         <item>
          <widget class="JumpSlider" name="horizontalSlider">

@@ -30,14 +30,19 @@
 #include <QEvent>
 #include <QFileDialog>
 #include <QFutureWatcher>
+#include <QIcon>
+#include <QPainter>
 #include <QProgressDialog>
+#include <QResource>
 #include <QSettings>
+#include <QSize>
 #include <QSqlDatabase>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QStyleHints>
 #include <QThread>
 #include <QTimer>
+#include <QToolButton>
 #include <QtConcurrent>
 #include <algorithm>
 #include <utility>
@@ -104,6 +109,54 @@ void prewarmSelectedPlaybackBackend() {
   }
 }
 
+QColor playbackIconColor() {
+  if (QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark) {
+    return QColor(QStringLiteral("#fcfcfc"));
+  }
+  return QColor(QStringLiteral("#232629"));
+}
+
+QIcon tintedIcon(const QString &iconPath, const QColor &color) {
+  QPixmap pixmap(QSize(18, 18));
+  pixmap.fill(Qt::transparent);
+
+  QPainter painter(&pixmap);
+  painter.drawPixmap(0, 0, QIcon(iconPath).pixmap(pixmap.size()));
+  painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
+  painter.fillRect(pixmap.rect(), color);
+  return QIcon(pixmap);
+}
+
+void setIconOnlyButton(QToolButton *button, const QString &iconPath,
+                       const QColor &color) {
+  const QString label =
+      button->text().isEmpty() ? button->toolTip() : button->text();
+  button->setIcon(tintedIcon(iconPath, color));
+  button->setText(QString());
+  button->setToolTip(label);
+  button->setAccessibleName(label);
+  button->setIconSize(QSize(18, 18));
+  button->setFixedSize(24, 24);
+  button->setAutoRaise(false);
+  button->setToolButtonStyle(Qt::ToolButtonIconOnly);
+}
+
+void setUpPlaybackButtonIcons(Ui::MainWindow *ui) {
+  const QColor color = playbackIconColor();
+  setIconOnlyButton(ui->play_button,
+                    QStringLiteral(":/icons/media-playback-start.svg"), color);
+  setIconOnlyButton(ui->pause_button,
+                    QStringLiteral(":/icons/media-playback-pause.svg"), color);
+  setIconOnlyButton(ui->stop_button,
+                    QStringLiteral(":/icons/media-playback-stop.svg"), color);
+  setIconOnlyButton(ui->prev_button,
+                    QStringLiteral(":/icons/media-skip-backward.svg"), color);
+  setIconOnlyButton(ui->next_button,
+                    QStringLiteral(":/icons/media-skip-forward.svg"), color);
+  setIconOnlyButton(ui->random_button,
+                    QStringLiteral(":/icons/media-playback-random.svg"), color);
+}
+
 } // namespace
 
 MainWindow::MainWindow(QWidget *parent)
@@ -118,8 +171,10 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
       songLibrary(columnRegistry_, databaseManager_), lyricsManager{this},
       cloudPlayStatsSyncCoordinator_(songLibrary, this) {
   prewarmSelectedPlaybackBackend();
+  Q_INIT_RESOURCE(resources);
   ui->setupUi(this);
   applyDisplayThemeFromSettings();
+  setUpPlaybackButtonIcons(ui);
   defaultWindowTitle_ = windowTitle();
   initStatusBarExpression();
   initWindowTitleExpression();
@@ -439,13 +494,16 @@ void MainWindow::applyDisplayThemeMode(const QString &mode) {
   QStyleHints *styleHints = QGuiApplication::styleHints();
   if (mode == QStringLiteral("dark")) {
     styleHints->setColorScheme(Qt::ColorScheme::Dark);
+    setUpPlaybackButtonIcons(ui);
     return;
   }
   if (mode == QStringLiteral("light")) {
     styleHints->setColorScheme(Qt::ColorScheme::Light);
+    setUpPlaybackButtonIcons(ui);
     return;
   }
   styleHints->setColorScheme(Qt::ColorScheme::Unknown);
+  setUpPlaybackButtonIcons(ui);
 }
 
 void MainWindow::setUpSplitter() {
