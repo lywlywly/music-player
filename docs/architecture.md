@@ -140,6 +140,20 @@ of `README.md`.
 
 * `ISystemMediaInterface` (+ platform impls)
   * Bridge to OS media controls/metadata.
+* Playback toolbar icons
+  * `mainwindow.ui` keeps playback controls in a nested
+    `playbackButtonsLayout` so the button group has its own compact spacing
+    before the seek slider.
+  * SVG assets live in `src/resources/icons` and are registered through
+    `src/resources/resources.qrc`; third-party attribution is tracked in
+    `THIRD_PARTY_NOTICES.md`.
+  * `media-playback-random.svg` is a custom composite icon: play triangle on
+    the left and question mark on the right.
+  * `MainWindow` initializes the resource collection with
+    `Q_INIT_RESOURCE(resources)` because the qrc is compiled into static
+    library target `MYLib`.
+  * Playback buttons render these icons as fixed-size `QToolButton` controls
+    and tint them at runtime (`#fcfcfc` in dark mode, `#232629` otherwise).
 * `LyricsLoader` / `LyricsManager`
   * Lyrics fetch + timed line updates from playback position.
   * On play, `MainWindow` refreshes song metadata once and prefers embedded
