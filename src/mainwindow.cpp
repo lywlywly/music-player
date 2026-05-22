@@ -167,6 +167,22 @@ void setUpPlaybackButtonIcons(Ui::MainWindow *ui) {
                     QStringLiteral(":/icons/media-playback-random.svg"), color);
 }
 
+QPixmap scaledCoverPixmap(const QPixmap &source, const QSize &logicalMaxSize,
+                          qreal devicePixelRatio) {
+  if (source.isNull() || logicalMaxSize.isEmpty()) {
+    return {};
+  }
+
+  const qreal renderScale = std::max<qreal>(1.0, devicePixelRatio);
+  const QSize physicalMaxSize = logicalMaxSize * renderScale;
+  const QSize physicalTargetSize =
+      source.size().scaled(physicalMaxSize, Qt::KeepAspectRatio);
+  QPixmap scaled = source.scaled(physicalTargetSize, Qt::KeepAspectRatio,
+                                 Qt::SmoothTransformation);
+  scaled.setDevicePixelRatio(renderScale);
+  return scaled;
+}
+
 } // namespace
 
 MainWindow::MainWindow(QWidget *parent)
@@ -703,12 +719,13 @@ void MainWindow::setUpImageAndLyrics(
   auto [data, size] = SongParser::extractCoverImage(song.at("filepath").text);
   if (size > 0) {
     pixmap.loadFromData(data.data(), size);
-    ui->label->setPixmap(pixmap.scaled(ui->splitter->sizes().first() - 10,
-                                       ui->splitter_2->sizes().last() - 10,
-                                       Qt::KeepAspectRatio));
+    ui->label->clear();
+    updateImageSize();
     sysMedia->setArtwork(QByteArray(reinterpret_cast<const char *>(data.data()),
                                     static_cast<int>(size)));
   } else {
+    pixmap = QPixmap();
+    ui->label->clear();
     ui->label->setText("No cover");
   }
   ui->lyricsPanel->setLyricsPanel(lyricsManager.getCurrentLyricsMap());
@@ -727,10 +744,14 @@ void MainWindow::resizeEvent(QResizeEvent *event) {
 }
 
 void MainWindow::updateImageSize() {
-  int newSize = ui->splitter->sizes().first() - 10;
-  int newHeight = ui->splitter_2->sizes().last() - 10;
-  QPixmap scaledPixmap = pixmap.scaled(newSize, newHeight, Qt::KeepAspectRatio);
-  ui->label->setPixmap(scaledPixmap);
+  if (pixmap.isNull()) {
+    return;
+  }
+
+  const QSize logicalMaxSize = ui->label->contentsRect().size();
+  const qreal devicePixelRatio = ui->label->devicePixelRatioF();
+  ui->label->setPixmap(
+      scaledCoverPixmap(pixmap, logicalMaxSize, devicePixelRatio));
 }
 
 void MainWindow::addEntry() {
