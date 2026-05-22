@@ -154,6 +154,10 @@ of `README.md`.
     library target `MYLib`.
   * Playback buttons render these icons as fixed-size `QToolButton` controls
     and tint them at runtime (`#fcfcfc` in dark mode, `#232629` otherwise).
+  * Tinted icon pixmaps are rendered at the displaying widget's device pixel ratio for
+    sharp high-DPI output, but button/icon sizing stays in Qt logical pixels.
+    The tint fill uses the logical icon rect after `setDevicePixelRatio(...)`
+    so painting remains in the same coordinate space as the displayed icon.
 * `LyricsLoader` / `LyricsManager`
   * Lyrics fetch + timed line updates from playback position.
   * On play, `MainWindow` refreshes song metadata once and prefers embedded

@@ -48,6 +48,8 @@
 #include <utility>
 
 namespace {
+constexpr int kPlaybackIconSize = 18;
+
 ExprSymbolResolver makeDisplayExprResolver(const ColumnRegistry &registry) {
   return ExprSymbolResolver(
       mergeExprSymbols(std::vector<ExprSymbolInfo>(
@@ -116,14 +118,20 @@ QColor playbackIconColor() {
   return QColor(QStringLiteral("#232629"));
 }
 
-QIcon tintedIcon(const QString &iconPath, const QColor &color) {
-  QPixmap pixmap(QSize(18, 18));
+QIcon tintedIcon(const QString &iconPath, const QColor &color,
+                 qreal iconRenderScale) {
+  const QSize iconSize(kPlaybackIconSize, kPlaybackIconSize);
+  const qreal renderScale = std::max<qreal>(1.0, iconRenderScale);
+  const QRect logicalRect(QPoint(0, 0), iconSize);
+  QPixmap pixmap(iconSize * renderScale);
+  pixmap.setDevicePixelRatio(renderScale);
   pixmap.fill(Qt::transparent);
 
   QPainter painter(&pixmap);
-  painter.drawPixmap(0, 0, QIcon(iconPath).pixmap(pixmap.size()));
+  painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+  painter.drawPixmap(logicalRect, QIcon(iconPath).pixmap(pixmap.size()));
   painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
-  painter.fillRect(pixmap.rect(), color);
+  painter.fillRect(logicalRect, color);
   return QIcon(pixmap);
 }
 
@@ -131,11 +139,12 @@ void setIconOnlyButton(QToolButton *button, const QString &iconPath,
                        const QColor &color) {
   const QString label =
       button->text().isEmpty() ? button->toolTip() : button->text();
-  button->setIcon(tintedIcon(iconPath, color));
+  const qreal iconRenderScale = button->devicePixelRatioF();
+  button->setIcon(tintedIcon(iconPath, color, iconRenderScale));
   button->setText(QString());
   button->setToolTip(label);
   button->setAccessibleName(label);
-  button->setIconSize(QSize(18, 18));
+  button->setIconSize(QSize(kPlaybackIconSize, kPlaybackIconSize));
   button->setFixedSize(24, 24);
   button->setAutoRaise(false);
   button->setToolButtonStyle(Qt::ToolButtonIconOnly);
