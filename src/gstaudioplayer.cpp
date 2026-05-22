@@ -31,8 +31,8 @@ void ensureGstInitialized() {
 namespace {
 const char *platformSinkFactoryName() { return "osxaudiosink"; }
 
-std::mutex defaultOutputDeviceMutex;
-std::shared_future<AudioDeviceID> defaultOutputDeviceFuture;
+std::mutex startupDefaultOutputDeviceMutex;
+std::shared_future<AudioDeviceID> startupDefaultOutputDeviceFuture;
 
 AudioDeviceID queryDefaultOutputDeviceId() {
   AudioDeviceID deviceId = kAudioObjectUnknown;
@@ -54,8 +54,9 @@ AudioDeviceID queryDefaultOutputDeviceId() {
 AudioDeviceID defaultOutputDeviceId() {
   std::shared_future<AudioDeviceID> future;
   {
-    std::lock_guard<std::mutex> lock(defaultOutputDeviceMutex);
-    future = defaultOutputDeviceFuture;
+    std::lock_guard<std::mutex> lock(startupDefaultOutputDeviceMutex);
+    future = startupDefaultOutputDeviceFuture;
+    startupDefaultOutputDeviceFuture = {};
   }
   if (future.valid()) {
     return future.get();
@@ -145,11 +146,11 @@ void GstAudioPlayer::prewarmStartup() {
   }
 #if defined(Q_OS_MACOS)
   {
-    std::lock_guard<std::mutex> lock(defaultOutputDeviceMutex);
-    if (!defaultOutputDeviceFuture.valid()) {
-      defaultOutputDeviceFuture = std::async(std::launch::async, []() {
-                                    return queryDefaultOutputDeviceId();
-                                  }).share();
+    std::lock_guard<std::mutex> lock(startupDefaultOutputDeviceMutex);
+    if (!startupDefaultOutputDeviceFuture.valid()) {
+      startupDefaultOutputDeviceFuture = std::async(std::launch::async, []() {
+                                           return queryDefaultOutputDeviceId();
+                                         }).share();
     }
   }
 #endif

@@ -94,7 +94,9 @@ of `README.md`.
   * Runtime backend owner/switcher (`QMediaPlayer` or `GStreamer`).
   * Manages GLib loop thread for GStreamer on macOS/Windows.
   * `MainWindow` prewarms GStreamer startup when GStreamer is the saved backend:
-    `gst_init` on all platforms and default output device lookup on macOS.
+    `gst_init` on all platforms and default output device lookup on macOS. The
+    macOS output-device result is startup-only; later output refreshes query
+    CoreAudio directly.
 * `AudioPlayer` (+ concrete backends)
   * Transport + media events consumed by `MainWindow`.
   * Exposes `bitrateChanged(bitsPerSecond)` for playback-time bitrate updates.

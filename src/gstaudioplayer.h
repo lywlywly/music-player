@@ -23,7 +23,8 @@ class GstAudioPlayer : public AudioPlayer {
 public:
   explicit GstAudioPlayer(QObject *parent = nullptr);
   ~GstAudioPlayer() override;
-  // Starts expensive process-wide GStreamer startup work early.
+  // Starts expensive GStreamer startup work early. On macOS, the prewarmed
+  // default output device is consumed only by initial sink setup.
   static void prewarmStartup();
 
   // AudioPlayer interface
