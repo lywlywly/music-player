@@ -60,6 +60,7 @@ private:
   void addEntry();
   void next();
   void prev();
+  void playRandom();
   void play();
   void pause();
   void toggle();

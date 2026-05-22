@@ -33,6 +33,7 @@
 #include <QIcon>
 #include <QPainter>
 #include <QProgressDialog>
+#include <QRandomGenerator>
 #include <QResource>
 #include <QSettings>
 #include <QSize>
@@ -435,6 +436,8 @@ void MainWindow::setUpPlaybackActions() {
   connect(ui->stop_button, &QAbstractButton::clicked, this, &MainWindow::stop);
   connect(ui->next_button, &QAbstractButton::clicked, this, &MainWindow::next);
   connect(ui->prev_button, &QAbstractButton::clicked, this, &MainWindow::prev);
+  connect(ui->random_button, &QAbstractButton::clicked, this,
+          &MainWindow::playRandom);
   connect(ui->horizontalSlider, &QSlider::sliderReleased, this,
           [this]() { seek(ui->horizontalSlider->value()); });
 }
@@ -591,6 +594,22 @@ void MainWindow::prev() {
   if (row < 0)
     return;
 
+  playSong(song, row, pl);
+  navigateIndex(row, pl);
+}
+
+void MainWindow::playRandom() {
+  if (!playlistReady_) {
+    return;
+  }
+
+  Playlist *pl = playlistTabs->currentPlaylist();
+  if (pl == nullptr || pl->empty()) {
+    return;
+  }
+
+  const int row = QRandomGenerator::global()->bounded(pl->songCount());
+  MSong song = control.playIndex(row);
   playSong(song, row, pl);
   navigateIndex(row, pl);
 }

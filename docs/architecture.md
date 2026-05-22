@@ -87,6 +87,9 @@ of `README.md`.
 * `PlaybackManager`
   * Playback policy orchestration (`next/prev/play/pause/stop`) on top of `PlaybackQueue` + active `Playlist`.
   * Requires `setView(Playlist&)` with a valid playlist before playback/policy operations.
+  * The toolbar random button is a one-shot random jump within the current
+    playlist: it picks a random row directly, calls `playIndex(...)`, and does
+    not use shuffle policy history or guarantee non-duplicate selections.
 * `PlaybackBackendManager`
   * Runtime backend owner/switcher (`QMediaPlayer` or `GStreamer`).
   * Manages GLib loop thread for GStreamer on macOS/Windows.
