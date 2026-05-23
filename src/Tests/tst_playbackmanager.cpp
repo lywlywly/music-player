@@ -45,6 +45,9 @@ private slots:
 
   void playIndex_setsCurrentAndLastPlayed();
   void next_prefersQueuedSongsThenFallsBackToPolicy();
+  void next_preferredRowPlaysOnceThenFallsBackToPolicy();
+  void next_currentPreferredRowDoesNotPullPlaybackBackLater();
+  void next_queuePreemptsPreferredRow();
   void prev_wrapsToLastInSequentialPolicy();
   void playPauseStop_updatesPlaybackQueueState();
   void clearPlaylist_inShufflePolicy_doesNotCrash();
@@ -146,6 +149,74 @@ void TestPlaybackManager::next_prefersQueuedSongsThenFallsBackToPolicy() {
   QCOMPARE(song3.at("title").text, std::string("S1"));
   QCOMPARE(row3, 0);
   QCOMPARE(pl3, &playlist);
+}
+
+void TestPlaybackManager::next_preferredRowPlaysOnceThenFallsBackToPolicy() {
+  SongStore store(*library_, *databaseManager_, -1);
+  store.addSong(makeSong("S1", "Artist", "/tmp/pm-pref-1.mp3", "1"));
+  store.addSong(makeSong("S2", "Artist", "/tmp/pm-pref-2.mp3", "2"));
+  store.addSong(makeSong("S3", "Artist", "/tmp/pm-pref-3.mp3", "3"));
+  Playlist playlist(std::move(store), *queue_, 1, *layout_);
+
+  manager_->setView(playlist);
+  manager_->setPolicy(Sequential);
+  manager_->playIndex(0);
+
+  const auto &[preferredSong, preferredRow, preferredPl] = manager_->next(2);
+  QCOMPARE(preferredSong.at("title").text, std::string("S3"));
+  QCOMPARE(preferredRow, 2);
+  QCOMPARE(preferredPl, &playlist);
+
+  const auto &[nextSong, nextRow, nextPl] = manager_->next(2);
+  QCOMPARE(nextSong.at("title").text, std::string("S1"));
+  QCOMPARE(nextRow, 0);
+  QCOMPARE(nextPl, &playlist);
+}
+
+void TestPlaybackManager::
+    next_currentPreferredRowDoesNotPullPlaybackBackLater() {
+  SongStore store(*library_, *databaseManager_, -1);
+  store.addSong(makeSong("S1", "Artist", "/tmp/pm-current-pref-1.mp3", "1"));
+  store.addSong(makeSong("S2", "Artist", "/tmp/pm-current-pref-2.mp3", "2"));
+  store.addSong(makeSong("S3", "Artist", "/tmp/pm-current-pref-3.mp3", "3"));
+  Playlist playlist(std::move(store), *queue_, 1, *layout_);
+
+  manager_->setView(playlist);
+  manager_->setPolicy(Sequential);
+  manager_->playIndex(0);
+
+  const auto &[song1, row1, pl1] = manager_->next(0);
+  QCOMPARE(song1.at("title").text, std::string("S2"));
+  QCOMPARE(row1, 1);
+  QCOMPARE(pl1, &playlist);
+
+  const auto &[song2, row2, pl2] = manager_->next(0);
+  QCOMPARE(song2.at("title").text, std::string("S3"));
+  QCOMPARE(row2, 2);
+  QCOMPARE(pl2, &playlist);
+}
+
+void TestPlaybackManager::next_queuePreemptsPreferredRow() {
+  SongStore store(*library_, *databaseManager_, -1);
+  store.addSong(makeSong("S1", "Artist", "/tmp/pm-queue-pref-1.mp3", "1"));
+  store.addSong(makeSong("S2", "Artist", "/tmp/pm-queue-pref-2.mp3", "2"));
+  store.addSong(makeSong("S3", "Artist", "/tmp/pm-queue-pref-3.mp3", "3"));
+  Playlist playlist(std::move(store), *queue_, 1, *layout_);
+
+  manager_->setView(playlist);
+  manager_->setPolicy(Sequential);
+  manager_->playIndex(0);
+  manager_->queueStart(1);
+
+  const auto &[queuedSong, queuedRow, queuedPl] = manager_->next(2);
+  QCOMPARE(queuedSong.at("title").text, std::string("S2"));
+  QCOMPARE(queuedRow, 1);
+  QCOMPARE(queuedPl, &playlist);
+
+  const auto &[preferredSong, preferredRow, preferredPl] = manager_->next(2);
+  QCOMPARE(preferredSong.at("title").text, std::string("S3"));
+  QCOMPARE(preferredRow, 2);
+  QCOMPARE(preferredPl, &playlist);
 }
 
 void TestPlaybackManager::prev_wrapsToLastInSequentialPolicy() {

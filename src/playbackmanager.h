@@ -18,9 +18,10 @@ public:
   explicit PlaybackManager(PlaybackQueue &q, QObject *parent = nullptr);
   // PlayByIndex a song, make it current song, do not change queue
   const MSong &playIndex(int);
-  // return const reference to a song, its index in playlist, and the playlist
-  // that the song is in.
-  std::tuple<const MSong &, int, Playlist *> next();
+  // Returns the next song, its row, and its playlist. If preferredRow is valid,
+  // queue is empty, and the row has not already been consumed, it wins over the
+  // playback policy.
+  std::tuple<const MSong &, int, Playlist *> next(int preferredRow = -1);
   // return const reference to a song, its index in playlist, and the playlist
   // that the song is in.
   std::tuple<const MSong &, int, Playlist *> prev();
@@ -38,6 +39,7 @@ public:
   PlaybackQueue::PlaybackStatus getStatus();
 
 private:
+  std::tuple<const MSong &, int, Playlist *> activatePk(int pk, Playlist *pl);
   void syncPolicyContext();
   // const Playlist *playlist;
   Playlist *playlist = nullptr;
@@ -45,6 +47,7 @@ private:
   std::unique_ptr<PlaybackPolicy> policy;
   Policy currentPolicy_ = Sequential;
   int candidateWeak = -1;
+  int consumedPreferredPk_ = -1;
 };
 
 #endif // PLAYBACKMANAGER_H

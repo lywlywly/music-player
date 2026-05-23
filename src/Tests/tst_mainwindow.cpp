@@ -129,6 +129,13 @@ private slots:
   void playbackOrderMenuActions_areExclusive();
   void playbackOrderMenuActions_persistToSettings();
   void playbackOrderMenuActions_restoreFromSettingsOnStartup();
+  void cursorFollowsPlaybackAction_persistsToSettings();
+  void cursorFollowsPlaybackAction_controlsSelectionOnSongSwitch();
+  void playbackFollowsCursorAction_persistsToSettings();
+  void playbackFollowsCursorAction_playsSelectedRowWhenQueueEmpty();
+  void playbackFollowsCursorAction_ignoresCurrentSongSelection();
+  void playbackFollowsCursorAction_queuePreemptsSelectionAndCursorFollows();
+  void playbackFollowsCursorAction_queuePreemptsSelectionWithoutCursorFollow();
   void librarySearchAction_opensDialog();
   void librarySearchDialog_canCreateNewPlaylistTabFromResults();
   void playStats_seekToEndWithoutListenDoesNotCount();
@@ -697,6 +704,330 @@ void TestMainWindow::playbackOrderMenuActions_restoreFromSettingsOnStartup() {
   QVERIFY(shuffleAction != nullptr);
   QVERIFY(shuffleAction->isChecked());
   QVERIFY(!defaultAction->isChecked());
+}
+
+void TestMainWindow::cursorFollowsPlaybackAction_persistsToSettings() {
+  QAction *cursorAction =
+      window_->findChild<QAction *>("actionCursor_follows_playback");
+  QVERIFY(cursorAction != nullptr);
+  QVERIFY(cursorAction->isCheckable());
+  QVERIFY(cursorAction->isChecked());
+
+  cursorAction->trigger();
+  QVERIFY(!cursorAction->isChecked());
+  {
+    QSettings settings;
+    QCOMPARE(settings.value("playback/cursor_follows_playback").toBool(),
+             false);
+  }
+
+  recreateWindow();
+  cursorAction = window_->findChild<QAction *>("actionCursor_follows_playback");
+  QVERIFY(cursorAction != nullptr);
+  QVERIFY(!cursorAction->isChecked());
+
+  cursorAction->trigger();
+  QVERIFY(cursorAction->isChecked());
+  {
+    QSettings settings;
+    QCOMPARE(settings.value("playback/cursor_follows_playback").toBool(), true);
+  }
+}
+
+void TestMainWindow::
+    cursorFollowsPlaybackAction_controlsSelectionOnSongSwitch() {
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(tabs != nullptr);
+  Playlist *playlist = tabs->currentPlaylist();
+  QVERIFY(playlist != nullptr);
+  QTableView *table =
+      tabs->tabWidget()->currentWidget()->findChild<QTableView *>();
+  QVERIFY(table != nullptr);
+
+  const QString wav1 = workDir_->filePath("cursor-follow-1.wav");
+  const QString wav2 = workDir_->filePath("cursor-follow-2.wav");
+  const QString wav3 = workDir_->filePath("cursor-follow-3.wav");
+  QVERIFY(writeSilentWav(wav1));
+  QVERIFY(writeSilentWav(wav2));
+  QVERIFY(writeSilentWav(wav3));
+  playlist->addSong(makeSong("Song1", "Artist", wav1));
+  playlist->addSong(makeSong("Song2", "Artist", wav2));
+  playlist->addSong(makeSong("Song3", "Artist", wav3));
+  playlist->setLastPlayed(playlist->getPkByIndex(0));
+
+  QAction *playAction = window_->findChild<QAction *>("actionPlay");
+  QAction *nextAction = window_->findChild<QAction *>("actionNext");
+  QAction *cursorAction =
+      window_->findChild<QAction *>("actionCursor_follows_playback");
+  QVERIFY(playAction != nullptr);
+  QVERIFY(nextAction != nullptr);
+  QVERIFY(cursorAction != nullptr);
+
+  table->setCurrentIndex(table->model()->index(0, 0));
+  playAction->trigger();
+  nextAction->trigger();
+  QTRY_COMPARE(table->currentIndex().row(), 1);
+
+  cursorAction->setChecked(false);
+  table->setCurrentIndex(table->model()->index(0, 0));
+  nextAction->trigger();
+  QTRY_COMPARE(table->currentIndex().row(), 0);
+}
+
+void TestMainWindow::playbackFollowsCursorAction_persistsToSettings() {
+  QAction *playbackAction =
+      window_->findChild<QAction *>("actionPlayback_follows_cursor");
+  QVERIFY(playbackAction != nullptr);
+  QVERIFY(playbackAction->isCheckable());
+  QVERIFY(!playbackAction->isChecked());
+
+  playbackAction->trigger();
+  QVERIFY(playbackAction->isChecked());
+  {
+    QSettings settings;
+    QCOMPARE(settings.value("playback/playback_follows_cursor").toBool(), true);
+  }
+
+  recreateWindow();
+  playbackAction =
+      window_->findChild<QAction *>("actionPlayback_follows_cursor");
+  QVERIFY(playbackAction != nullptr);
+  QVERIFY(playbackAction->isChecked());
+
+  playbackAction->trigger();
+  QVERIFY(!playbackAction->isChecked());
+  {
+    QSettings settings;
+    QCOMPARE(settings.value("playback/playback_follows_cursor").toBool(),
+             false);
+  }
+}
+
+void TestMainWindow::
+    playbackFollowsCursorAction_playsSelectedRowWhenQueueEmpty() {
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(tabs != nullptr);
+  Playlist *playlist = tabs->currentPlaylist();
+  QVERIFY(playlist != nullptr);
+  QTableView *table =
+      tabs->tabWidget()->currentWidget()->findChild<QTableView *>();
+  QVERIFY(table != nullptr);
+
+  const QString wav1 = workDir_->filePath("playback-follow-1.wav");
+  const QString wav2 = workDir_->filePath("playback-follow-2.wav");
+  const QString wav3 = workDir_->filePath("playback-follow-3.wav");
+  QVERIFY(writeSilentWav(wav1));
+  QVERIFY(writeSilentWav(wav2));
+  QVERIFY(writeSilentWav(wav3));
+  playlist->addSong(makeSong("Song1", "Artist", wav1));
+  playlist->addSong(makeSong("Song2", "Artist", wav2));
+  playlist->addSong(makeSong("Song3", "Artist", wav3));
+  playlist->setLastPlayed(playlist->getPkByIndex(0));
+
+  const int statusCol = statusColumn(playlist);
+  QVERIFY(statusCol >= 0);
+
+  QAction *playAction = window_->findChild<QAction *>("actionPlay");
+  QAction *nextAction = window_->findChild<QAction *>("actionNext");
+  QAction *playbackFollowAction =
+      window_->findChild<QAction *>("actionPlayback_follows_cursor");
+  QVERIFY(playAction != nullptr);
+  QVERIFY(nextAction != nullptr);
+  QVERIFY(playbackFollowAction != nullptr);
+
+  playbackFollowAction->setChecked(true);
+  playAction->trigger();
+  table->selectionModel()->select(table->model()->index(2, 0),
+                                  QItemSelectionModel::ClearAndSelect |
+                                      QItemSelectionModel::Rows);
+  table->setCurrentIndex(table->model()->index(2, 0));
+
+  nextAction->trigger();
+  QTRY_COMPARE(statusAt(playlist, 2, statusCol), QString::fromUtf8("\u25B6"));
+
+  nextAction->trigger();
+  QTRY_COMPARE(statusAt(playlist, 0, statusCol), QString::fromUtf8("\u25B6"));
+  QTRY_COMPARE(table->currentIndex().row(), 0);
+
+  nextAction->trigger();
+  QTRY_COMPARE(statusAt(playlist, 1, statusCol), QString::fromUtf8("\u25B6"));
+  QTRY_COMPARE(table->currentIndex().row(), 1);
+}
+
+void TestMainWindow::playbackFollowsCursorAction_ignoresCurrentSongSelection() {
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(tabs != nullptr);
+  Playlist *playlist = tabs->currentPlaylist();
+  QVERIFY(playlist != nullptr);
+  QTableView *table =
+      tabs->tabWidget()->currentWidget()->findChild<QTableView *>();
+  QVERIFY(table != nullptr);
+
+  const QString wav1 = workDir_->filePath("playback-current-1.wav");
+  const QString wav2 = workDir_->filePath("playback-current-2.wav");
+  const QString wav3 = workDir_->filePath("playback-current-3.wav");
+  QVERIFY(writeSilentWav(wav1));
+  QVERIFY(writeSilentWav(wav2));
+  QVERIFY(writeSilentWav(wav3));
+  playlist->addSong(makeSong("Song1", "Artist", wav1));
+  playlist->addSong(makeSong("Song2", "Artist", wav2));
+  playlist->addSong(makeSong("Song3", "Artist", wav3));
+  playlist->setLastPlayed(playlist->getPkByIndex(0));
+
+  const int statusCol = statusColumn(playlist);
+  QVERIFY(statusCol >= 0);
+
+  QAction *playAction = window_->findChild<QAction *>("actionPlay");
+  QAction *nextAction = window_->findChild<QAction *>("actionNext");
+  QAction *playbackFollowAction =
+      window_->findChild<QAction *>("actionPlayback_follows_cursor");
+  QAction *cursorFollowAction =
+      window_->findChild<QAction *>("actionCursor_follows_playback");
+  QVERIFY(playAction != nullptr);
+  QVERIFY(nextAction != nullptr);
+  QVERIFY(playbackFollowAction != nullptr);
+  QVERIFY(cursorFollowAction != nullptr);
+
+  playbackFollowAction->setChecked(true);
+  cursorFollowAction->setChecked(false);
+  playAction->trigger();
+  table->selectionModel()->select(table->model()->index(0, 0),
+                                  QItemSelectionModel::ClearAndSelect |
+                                      QItemSelectionModel::Rows);
+  table->setCurrentIndex(table->model()->index(0, 0));
+
+  nextAction->trigger();
+  QTRY_COMPARE(statusAt(playlist, 1, statusCol), QString::fromUtf8("\u25B6"));
+
+  nextAction->trigger();
+  QTRY_COMPARE(statusAt(playlist, 2, statusCol), QString::fromUtf8("\u25B6"));
+  QTRY_COMPARE(table->currentIndex().row(), 0);
+}
+
+void TestMainWindow::
+    playbackFollowsCursorAction_queuePreemptsSelectionAndCursorFollows() {
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(tabs != nullptr);
+  Playlist *playlist = tabs->currentPlaylist();
+  QVERIFY(playlist != nullptr);
+  QTableView *table =
+      tabs->tabWidget()->currentWidget()->findChild<QTableView *>();
+  QVERIFY(table != nullptr);
+
+  const QString wav1 = workDir_->filePath("playback-queue-both-1.wav");
+  const QString wav2 = workDir_->filePath("playback-queue-both-2.wav");
+  const QString wav3 = workDir_->filePath("playback-queue-both-3.wav");
+  QVERIFY(writeSilentWav(wav1));
+  QVERIFY(writeSilentWav(wav2));
+  QVERIFY(writeSilentWav(wav3));
+  playlist->addSong(makeSong("Song1", "Artist", wav1));
+  playlist->addSong(makeSong("Song2", "Artist", wav2));
+  playlist->addSong(makeSong("Song3", "Artist", wav3));
+  playlist->setLastPlayed(playlist->getPkByIndex(0));
+
+  const int statusCol = statusColumn(playlist);
+  QVERIFY(statusCol >= 0);
+
+  QAction *playAction = window_->findChild<QAction *>("actionPlay");
+  QAction *nextAction = window_->findChild<QAction *>("actionNext");
+  QAction *playbackFollowAction =
+      window_->findChild<QAction *>("actionPlayback_follows_cursor");
+  QAction *cursorFollowAction =
+      window_->findChild<QAction *>("actionCursor_follows_playback");
+  QVERIFY(playAction != nullptr);
+  QVERIFY(nextAction != nullptr);
+  QVERIFY(playbackFollowAction != nullptr);
+  QVERIFY(cursorFollowAction != nullptr);
+  QVERIFY(tabs->playNextAction() != nullptr);
+
+  playbackFollowAction->setChecked(true);
+  cursorFollowAction->setChecked(true);
+  playAction->trigger();
+  table->selectionModel()->select(table->model()->index(2, 0),
+                                  QItemSelectionModel::ClearAndSelect |
+                                      QItemSelectionModel::Rows);
+  table->setCurrentIndex(table->model()->index(2, 0));
+  tabs->playNextAction()->setData(
+      QVariant::fromValue(table->model()->index(1, 0)));
+  tabs->playNextAction()->trigger();
+
+  nextAction->trigger();
+  QTRY_COMPARE(statusAt(playlist, 1, statusCol), QString::fromUtf8("\u25B6"));
+  QTRY_COMPARE(table->currentIndex().row(), 1);
+
+  nextAction->trigger();
+  QTRY_COMPARE(statusAt(playlist, 2, statusCol), QString::fromUtf8("\u25B6"));
+
+  nextAction->trigger();
+  QTRY_COMPARE(statusAt(playlist, 0, statusCol), QString::fromUtf8("\u25B6"));
+  QTRY_COMPARE(table->currentIndex().row(), 0);
+
+  nextAction->trigger();
+  QTRY_COMPARE(statusAt(playlist, 1, statusCol), QString::fromUtf8("\u25B6"));
+  QTRY_COMPARE(table->currentIndex().row(), 1);
+}
+
+void TestMainWindow::
+    playbackFollowsCursorAction_queuePreemptsSelectionWithoutCursorFollow() {
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(tabs != nullptr);
+  Playlist *playlist = tabs->currentPlaylist();
+  QVERIFY(playlist != nullptr);
+  QTableView *table =
+      tabs->tabWidget()->currentWidget()->findChild<QTableView *>();
+  QVERIFY(table != nullptr);
+
+  const QString wav1 = workDir_->filePath("playback-queue-playback-1.wav");
+  const QString wav2 = workDir_->filePath("playback-queue-playback-2.wav");
+  const QString wav3 = workDir_->filePath("playback-queue-playback-3.wav");
+  QVERIFY(writeSilentWav(wav1));
+  QVERIFY(writeSilentWav(wav2));
+  QVERIFY(writeSilentWav(wav3));
+  playlist->addSong(makeSong("Song1", "Artist", wav1));
+  playlist->addSong(makeSong("Song2", "Artist", wav2));
+  playlist->addSong(makeSong("Song3", "Artist", wav3));
+  playlist->setLastPlayed(playlist->getPkByIndex(0));
+
+  const int statusCol = statusColumn(playlist);
+  QVERIFY(statusCol >= 0);
+
+  QAction *playAction = window_->findChild<QAction *>("actionPlay");
+  QAction *nextAction = window_->findChild<QAction *>("actionNext");
+  QAction *playbackFollowAction =
+      window_->findChild<QAction *>("actionPlayback_follows_cursor");
+  QAction *cursorFollowAction =
+      window_->findChild<QAction *>("actionCursor_follows_playback");
+  QVERIFY(playAction != nullptr);
+  QVERIFY(nextAction != nullptr);
+  QVERIFY(playbackFollowAction != nullptr);
+  QVERIFY(cursorFollowAction != nullptr);
+  QVERIFY(tabs->playNextAction() != nullptr);
+
+  playbackFollowAction->setChecked(true);
+  cursorFollowAction->setChecked(false);
+  playAction->trigger();
+  table->selectionModel()->select(table->model()->index(2, 0),
+                                  QItemSelectionModel::ClearAndSelect |
+                                      QItemSelectionModel::Rows);
+  table->setCurrentIndex(table->model()->index(2, 0));
+  tabs->playNextAction()->setData(
+      QVariant::fromValue(table->model()->index(1, 0)));
+  tabs->playNextAction()->trigger();
+
+  nextAction->trigger();
+  QTRY_COMPARE(statusAt(playlist, 1, statusCol), QString::fromUtf8("\u25B6"));
+  QTRY_COMPARE(table->currentIndex().row(), 2);
+
+  nextAction->trigger();
+  QTRY_COMPARE(statusAt(playlist, 2, statusCol), QString::fromUtf8("\u25B6"));
+
+  nextAction->trigger();
+  QTRY_COMPARE(statusAt(playlist, 0, statusCol), QString::fromUtf8("\u25B6"));
+  QTRY_COMPARE(table->currentIndex().row(), 2);
+
+  nextAction->trigger();
+  QTRY_COMPARE(statusAt(playlist, 1, statusCol), QString::fromUtf8("\u25B6"));
+  QTRY_COMPARE(table->currentIndex().row(), 2);
 }
 
 void TestMainWindow::librarySearchAction_opensDialog() {

@@ -12,6 +12,7 @@
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QtGlobal>
+#include <algorithm>
 
 PlaylistTabs::PlaylistTabs(QWidget *parent)
     : QWidget(parent), ui(new Ui::PlaylistTabs) {
@@ -85,6 +86,25 @@ void PlaylistTabs::navigateIndex(int row, Playlist *pl) {
       index, QItemSelectionModel::Select | QItemSelectionModel::Rows);
   currentTableView->setCurrentIndex(index);
   currentTableView->scrollTo(index);
+}
+
+int PlaylistTabs::firstSelectedRow() const {
+  if (currentTableView == nullptr ||
+      currentTableView->selectionModel() == nullptr) {
+    return -1;
+  }
+
+  const QModelIndexList selectedRows =
+      currentTableView->selectionModel()->selectedRows();
+  if (selectedRows.isEmpty()) {
+    return -1;
+  }
+
+  int firstRow = selectedRows.front().row();
+  for (const QModelIndex &index : selectedRows) {
+    firstRow = std::min(firstRow, index.row());
+  }
+  return firstRow;
 }
 
 Playlist *PlaylistTabs::currentPlaylist() const { return currentPlaylist_; }

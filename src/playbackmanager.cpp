@@ -25,32 +25,45 @@ const MSong &PlaybackManager::playIndex(int currentIndex) {
   return playlist->getSongByPk(pk);
 }
 
-std::tuple<const MSong &, int, Playlist *> PlaybackManager::next() {
-  Q_ASSERT(playlist != nullptr);
-  int pk;
-  Playlist *pl;
-
-  if (!queue.empty()) {
-    std::tie(pk, pl) = queue.pop();
-    if (pl == playlist) {
-      // if queued song not in current playlist, don't notify PlaybackPolicy
-      policy->setCurrentPk(pk);
-    }
-  } else {
-    pl = playlist;
-    pk = policy->nextPk();
-  }
-
+std::tuple<const MSong &, int, Playlist *>
+PlaybackManager::activatePk(int pk, Playlist *pl) {
   if (pk < 0) {
     queue.setCurrentId(-1, nullptr);
     return {emptySongRef(), -1, pl};
   }
 
-  int row = pk < 0 ? -1 : pl->getIndexByPk(pk);
+  const int row = pl->getIndexByPk(pk);
   queue.setCurrentId(pk, pl);
   playlist->setLastPlayed(pk);
-
   return {pl->getSongByPk(pk), row, pl};
+}
+
+std::tuple<const MSong &, int, Playlist *>
+PlaybackManager::next(int preferredRow) {
+  Q_ASSERT(playlist != nullptr);
+  if (!queue.empty()) {
+    auto [pk, pl] = queue.pop();
+    // If queued song is not in current playlist, don't notify PlaybackPolicy.
+    if (pl == playlist)
+      policy->setCurrentPk(pk);
+    return activatePk(pk, pl);
+  }
+
+  const bool preferredRowValid =
+      preferredRow >= 0 && preferredRow < playlist->songCount();
+  const int preferredPk =
+      preferredRowValid ? playlist->getPkByIndex(preferredRow) : -1;
+  const auto &[currentPk, currentPl] = queue.getCurrentPk();
+  const bool preferredIsCurrent =
+      preferredPk == currentPk && playlist == currentPl;
+  if (preferredRowValid && preferredIsCurrent) {
+    consumedPreferredPk_ = preferredPk;
+  } else if (preferredRowValid && preferredPk != consumedPreferredPk_) {
+    consumedPreferredPk_ = preferredPk;
+    return {playIndex(preferredRow), preferredRow, playlist};
+  }
+
+  return activatePk(policy->nextPk(), playlist);
 }
 
 std::tuple<const MSong &, int, Playlist *> PlaybackManager::prev() {

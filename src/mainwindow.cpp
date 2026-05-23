@@ -54,6 +54,10 @@ constexpr int kMinVolumePercent = 0;
 constexpr int kMaxVolumePercent = 100;
 constexpr int kDefaultVolumePercent = 100;
 constexpr const char *kVolumeSettingsKey = "playback/volume_percent";
+constexpr const char *kPlaybackFollowsCursorSettingsKey =
+    "playback/playback_follows_cursor";
+constexpr const char *kCursorFollowsPlaybackSettingsKey =
+    "playback/cursor_follows_playback";
 
 int clampVolumePercent(int volumePercent) {
   return std::clamp(volumePercent, kMinVolumePercent, kMaxVolumePercent);
@@ -295,6 +299,24 @@ void MainWindow::setUpMenuBar() {
           [](QAction *action) {
             QSettings settings;
             settings.setValue("playback/order_action", action->objectName());
+          });
+
+  ui->actionPlayback_follows_cursor->setCheckable(true);
+  ui->actionPlayback_follows_cursor->setChecked(
+      settings.value(kPlaybackFollowsCursorSettingsKey, false).toBool());
+  connect(ui->actionPlayback_follows_cursor, &QAction::toggled, this,
+          [](bool checked) {
+            QSettings settings;
+            settings.setValue(kPlaybackFollowsCursorSettingsKey, checked);
+          });
+
+  ui->actionCursor_follows_playback->setCheckable(true);
+  ui->actionCursor_follows_playback->setChecked(
+      settings.value(kCursorFollowsPlaybackSettingsKey, true).toBool());
+  connect(ui->actionCursor_follows_playback, &QAction::toggled, this,
+          [](bool checked) {
+            QSettings settings;
+            settings.setValue(kCursorFollowsPlaybackSettingsKey, checked);
           });
 
   connect(ui->actionSearch, &QAction::triggered, this,
@@ -629,7 +651,11 @@ void MainWindow::next() {
   if (!playlistReady_) {
     return;
   }
-  const auto &[song, row, pl] = control.next();
+
+  const int preferredRow = ui->actionPlayback_follows_cursor->isChecked()
+                               ? playlistTabs->firstSelectedRow()
+                               : -1;
+  const auto &[song, row, pl] = control.next(preferredRow);
   if (row < 0)
     return;
 
@@ -719,6 +745,9 @@ void MainWindow::stop() {
 }
 
 void MainWindow::navigateIndex(int row, Playlist *pl) {
+  if (!ui->actionCursor_follows_playback->isChecked()) {
+    return;
+  }
   playlistTabs->navigateIndex(row, pl);
 }
 

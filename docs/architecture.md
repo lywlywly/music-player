@@ -87,6 +87,13 @@ of `README.md`.
 * `PlaybackManager`
   * Playback policy orchestration (`next/prev/play/pause/stop`) on top of `PlaybackQueue` + active `Playlist`.
   * Requires `setView(Playlist&)` with a valid playlist before playback/policy operations.
+  * `Playback -> Playback follows cursor` passes the first selected row from
+    `MainWindow` into `PlaybackManager::next(...)`: queued songs still take
+    priority, then the selected row may be played once if it is not already
+    current.
+  * `Playback -> Cursor follows playback` gates whether playback-driven song
+    changes call `PlaylistTabs::navigateIndex(...)` to select and scroll to the
+    new row.
   * The toolbar random button is a one-shot random jump within the current
     playlist: it picks a random row directly, calls `playIndex(...)`, and does
     not use shuffle policy history or guarantee non-duplicate selections.
