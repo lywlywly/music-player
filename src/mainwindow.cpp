@@ -50,6 +50,14 @@
 
 namespace {
 constexpr int kPlaybackIconSize = 18;
+constexpr int kMinVolumePercent = 0;
+constexpr int kMaxVolumePercent = 100;
+constexpr int kDefaultVolumePercent = 100;
+constexpr const char *kVolumeSettingsKey = "playback/volume_percent";
+
+int clampVolumePercent(int volumePercent) {
+  return std::clamp(volumePercent, kMinVolumePercent, kMaxVolumePercent);
+}
 
 ExprSymbolResolver makeDisplayExprResolver(const ColumnRegistry &registry) {
   return ExprSymbolResolver(
@@ -210,6 +218,7 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
   setUpPlaylist();
   initSettings();
   initPlaybackBackend();
+  initVolumeControl();
   setUpPlaybackActions();
   setUpLyricsPanel();
   setUpSplitter();
@@ -381,6 +390,7 @@ void MainWindow::initSettings() {
                 backendManager->setBackend(backend);
                 control.stop();
                 setUpPlaybackBackend();
+                applyVolumeToCurrentBackend();
               }
             });
     connect(dialog, &SettingsDialog::customFieldsChanged, this, [this]() {
@@ -550,6 +560,31 @@ void MainWindow::setUpPlaybackBackend() {
           &MainWindow::positionChanged);
   connect(backendManager->player(), &AudioPlayer::bitrateChanged, this,
           &MainWindow::bitrateChanged);
+}
+
+void MainWindow::initVolumeControl() {
+  QSettings settings;
+  const int savedVolume = clampVolumePercent(
+      settings.value(kVolumeSettingsKey, kDefaultVolumePercent).toInt());
+  ui->volumeSlider->setValue(savedVolume);
+  applyVolumeToCurrentBackend();
+
+  connect(ui->volumeSlider, &QSlider::valueChanged, this, [this](int volume) {
+    const int clampedVolume = clampVolumePercent(volume);
+    QSettings settings;
+    settings.setValue(kVolumeSettingsKey, clampedVolume);
+    if (backendManager && backendManager->player()) {
+      backendManager->player()->setVolume(clampedVolume);
+    }
+  });
+}
+
+void MainWindow::applyVolumeToCurrentBackend() {
+  if (!backendManager || !backendManager->player()) {
+    return;
+  }
+  backendManager->player()->setVolume(
+      clampVolumePercent(ui->volumeSlider->value()));
 }
 
 void MainWindow::playSong(const MSong &song, int row, Playlist *pl) {

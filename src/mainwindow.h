@@ -79,6 +79,8 @@ private:
   void initSettings();
   void initPlaybackBackend();
   void setUpPlaybackBackend();
+  void initVolumeControl();
+  void applyVolumeToCurrentBackend();
   void setUpPlaybackActions();
   void setUpPlaylist();
   void finishSetUpPlaylist(SongLibrary::Snapshot &&snapshot);

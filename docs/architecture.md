@@ -98,8 +98,11 @@ of `README.md`.
     macOS output-device result is startup-only; later output refreshes query
     CoreAudio directly.
 * `AudioPlayer` (+ concrete backends)
-  * Transport + media events consumed by `MainWindow`.
+  * Transport and volume control consumed by `MainWindow`.
   * Exposes `bitrateChanged(bitsPerSecond)` for playback-time bitrate updates.
+  * `AudioPlayer` stores clamped volume as an integer percentage (`0..100`);
+    `QtAudioPlayer` maps it to `QAudioOutput::setVolume(...)`, and
+    `GstAudioPlayer` maps it to the GStreamer `playbin` `volume` property.
 
 ### Search expression domain
 
@@ -148,7 +151,10 @@ of `README.md`.
 * Playback toolbar icons
   * `mainwindow.ui` keeps playback controls in a nested
     `playbackButtonsLayout` so the button group has its own compact spacing
-    before the seek slider.
+    before the volume and seek sliders.
+  * `volumeSlider` sits between `playbackButtonsLayout` and the seek slider,
+    persists to `playback/volume_percent`, defaults to `100`, and is reapplied
+    when the active playback backend changes.
   * SVG assets live in `src/resources/icons` and are registered through
     `src/resources/resources.qrc`; third-party attribution is tracked in
     `THIRD_PARTY_NOTICES.md`.

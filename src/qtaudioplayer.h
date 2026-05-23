@@ -19,6 +19,7 @@ public:
   void stop() override;
   void setSource(const QUrl &) override;
   void setPosition(qint64 position) override;
+  void setVolume(int volumePercent) override;
 
 private:
   void createPlaybackObjects();

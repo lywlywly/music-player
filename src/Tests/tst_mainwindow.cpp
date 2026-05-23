@@ -123,6 +123,7 @@ private slots:
   void windowTitleExpression_updatesOnPlaybackAndResetsOnStop();
   void settingsDisplayPreview_usesCurrentSongContext();
   void sliderReleased_invokesSeekFlow();
+  void volumeSlider_defaultsPropagatesAndPersists();
   void playlistTableBackspace_removesSelectedRow();
   void queueActions_fromContextMenu_areWired();
   void playbackOrderMenuActions_areExclusive();
@@ -537,6 +538,41 @@ void TestMainWindow::sliderReleased_invokesSeekFlow() {
   QVERIFY(QMetaObject::invokeMethod(slider, "sliderReleased",
                                     Qt::DirectConnection));
   QTRY_COMPARE(media->stateForTest().positionMs, 222LL);
+}
+
+void TestMainWindow::volumeSlider_defaultsPropagatesAndPersists() {
+  QSlider *volumeSlider = window_->findChild<QSlider *>("volumeSlider");
+  QVERIFY(volumeSlider != nullptr);
+  QCOMPARE(volumeSlider->minimum(), 0);
+  QCOMPARE(volumeSlider->maximum(), 100);
+  QCOMPARE(volumeSlider->value(), 100);
+
+  PlaybackBackendManager *backend =
+      window_->findChild<PlaybackBackendManager *>();
+  QVERIFY(backend != nullptr);
+  DummyAudioPlayer *dummyPlayer =
+      qobject_cast<DummyAudioPlayer *>(backend->player());
+  QVERIFY(dummyPlayer != nullptr);
+  QCOMPARE(dummyPlayer->volumeForTest(), 100);
+
+  volumeSlider->setValue(37);
+  QCOMPARE(dummyPlayer->volumeForTest(), 37);
+
+  {
+    QSettings settings;
+    QCOMPARE(settings.value("playback/volume_percent").toInt(), 37);
+  }
+
+  recreateWindow();
+  volumeSlider = window_->findChild<QSlider *>("volumeSlider");
+  QVERIFY(volumeSlider != nullptr);
+  QCOMPARE(volumeSlider->value(), 37);
+
+  backend = window_->findChild<PlaybackBackendManager *>();
+  QVERIFY(backend != nullptr);
+  dummyPlayer = qobject_cast<DummyAudioPlayer *>(backend->player());
+  QVERIFY(dummyPlayer != nullptr);
+  QCOMPARE(dummyPlayer->volumeForTest(), 37);
 }
 
 void TestMainWindow::playlistTableBackspace_removesSelectedRow() {

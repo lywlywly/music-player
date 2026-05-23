@@ -14,12 +14,19 @@ public:
   virtual void stop() = 0;
   virtual void setSource(const QUrl &) = 0;
   virtual void setPosition(qint64 position) = 0;
+  virtual void setVolume(int volumePercent);
+
+protected:
+  int volumePercent() const;
 
 signals:
   void durationChanged(qint64 duration);
   void positionChanged(qint64 milliseconds);
   void bitrateChanged(qint64 bitsPerSecond);
   void mediaStatusChanged(QMediaPlayer::MediaStatus status);
+
+private:
+  int volumePercent_ = 100;
 };
 
 #endif // AUDIOPLAYER_H

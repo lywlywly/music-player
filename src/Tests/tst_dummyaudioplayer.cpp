@@ -16,6 +16,8 @@ private slots:
   void stop_emitsPositionResetAndNoMedia();
   void play_emitsExpectedStatus_data();
   void play_emitsExpectedStatus();
+  void setVolume_clampsAndStoresValue_data();
+  void setVolume_clampsAndStoresValue();
 };
 
 void TestDummyAudioPlayer::initTestCase() {
@@ -106,6 +108,27 @@ void TestDummyAudioPlayer::play_emitsExpectedStatus() {
   QCOMPARE(statusSpy.count(), 1);
   QCOMPARE(qvariant_cast<QMediaPlayer::MediaStatus>(statusSpy.first().at(0)),
            expectedStatus);
+}
+
+void TestDummyAudioPlayer::setVolume_clampsAndStoresValue_data() {
+  QTest::addColumn<int>("input");
+  QTest::addColumn<int>("expected");
+
+  QTest::newRow("below-range") << -10 << 0;
+  QTest::newRow("zero") << 0 << 0;
+  QTest::newRow("middle") << 42 << 42;
+  QTest::newRow("hundred") << 100 << 100;
+  QTest::newRow("above-range") << 150 << 100;
+}
+
+void TestDummyAudioPlayer::setVolume_clampsAndStoresValue() {
+  QFETCH(int, input);
+  QFETCH(int, expected);
+
+  DummyAudioPlayer player;
+  player.setVolume(input);
+
+  QCOMPARE(player.volumeForTest(), expected);
 }
 
 QTEST_MAIN(TestDummyAudioPlayer)

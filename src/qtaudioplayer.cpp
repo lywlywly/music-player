@@ -38,13 +38,20 @@ void QtAudioPlayer::setPosition(qint64 position) {
   }
 }
 
+void QtAudioPlayer::setVolume(int volumePercent) {
+  AudioPlayer::setVolume(volumePercent);
+  if (audioOutput_) {
+    audioOutput_->setVolume(static_cast<float>(this->volumePercent()) / 100.0f);
+  }
+}
+
 void QtAudioPlayer::createPlaybackObjects() {
   player_ = std::make_unique<QMediaPlayer>();
   player_->setParent(this);
 
   audioOutput_ = new QAudioOutput(this);
   audioOutput_->setDevice(QMediaDevices::defaultAudioOutput());
-  audioOutput_->setVolume(1.0);
+  audioOutput_->setVolume(static_cast<float>(this->volumePercent()) / 100.0f);
   player_->setAudioOutput(audioOutput_);
 
   connect(player_.get(), &QMediaPlayer::durationChanged, this,

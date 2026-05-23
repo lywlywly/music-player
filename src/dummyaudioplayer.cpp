@@ -38,3 +38,5 @@ void DummyAudioPlayer::setPosition(qint64 position) {
 void DummyAudioPlayer::setDurationForTest(qint64 durationMs) {
   durationMs_ = durationMs;
 }
+
+int DummyAudioPlayer::volumeForTest() const { return volumePercent(); }

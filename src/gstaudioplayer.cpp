@@ -214,6 +214,14 @@ void GstAudioPlayer::setPosition(qint64 milliseconds) {
       position_ns);
 }
 
+void GstAudioPlayer::setVolume(int volumePercent) {
+  AudioPlayer::setVolume(volumePercent);
+  if (playbin_) {
+    g_object_set(playbin_, "volume",
+                 static_cast<gdouble>(this->volumePercent()) / 100.0, NULL);
+  }
+}
+
 void GstAudioPlayer::emitDurationIfAvailable() {
   if (!playbin_) {
     return;
@@ -313,6 +321,8 @@ void GstAudioPlayer::initializePipeline() {
     qFatal("GstAudioPlayer: failed to create GStreamer elements");
   }
   gst_object_ref(rgvolume_);
+  g_object_set(playbin_, "volume",
+               static_cast<gdouble>(this->volumePercent()) / 100.0, NULL);
 
   g_object_set(rgvolume_, "album-mode", FALSE, "pre-amp", 0.0, "fallback-gain",
                0.0, "headroom", 0.0, NULL);

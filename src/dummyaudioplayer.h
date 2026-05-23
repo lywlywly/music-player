@@ -15,6 +15,7 @@ public:
   void setSource(const QUrl &source) override;
   void setPosition(qint64 position) override;
   void setDurationForTest(qint64 durationMs);
+  int volumeForTest() const;
 
 private:
   QUrl source_;
