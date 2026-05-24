@@ -94,6 +94,9 @@ private:
   void showHeaderColumnsMenu(QTableView *tbv, const QPoint &pos);
   void refreshPlaylistMetadata(Playlist *playlist);
   void openPropertiesForCurrentContextRow();
+  void openPropertiesForRow(int row);
+  void openContainingFolderForCurrentContextRow();
+  void openContainingFolderForRow(int row);
   bool eventFilter(QObject *obj, QEvent *event) override;
   Ui::PlaylistTabs *ui;
   QTableView *currentTableView;
@@ -102,6 +105,7 @@ private:
   QAction *playEndAction_;
   QAction *clearPlaylistAction_ = nullptr;
   QAction *propertiesAction_ = nullptr;
+  QAction *openContainingFolderAction_ = nullptr;
   SongLibrary *songLibrary;
   DatabaseManager *databaseManager_ = nullptr;
   PlaybackQueue *playbackQueue_;

@@ -59,6 +59,13 @@ of `README.md`.
   * Owns playlist metadata behavior (`playlists` table): create/delete playlist rows, restore/reorder tabs, repair invalid `tab_order`.
   * Creates one `Playlist` per tab and connects UI interactions.
   * Opens per-song Properties dialog from row context menu and refreshes playlist rows after successful save.
+  * The Properties context-menu action carries shortcut metadata so the menu can
+    display the platform binding (`Command+I` on macOS, `Alt+Enter` elsewhere),
+    but the actual keyboard handling is registered with `QShortcut` on each
+    playlist table. Qt does not reliably dispatch arbitrary `QAction`
+    shortcuts from a transient popup `QMenu`, and keyboard activation must use
+    the selected/current row rather than the right-click row stored on the
+    context-menu action.
 * `Playlist`
   * `QAbstractTableModel` adapter for one playlist.
   * Delegates storage/order to `SongStore` and renders status column from `PlaybackQueue`.

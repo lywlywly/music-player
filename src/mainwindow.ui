@@ -88,12 +88,6 @@
         </item>
         <item>
          <widget class="QSlider" name="volumeSlider">
-          <property name="toolTip">
-           <string>Volume</string>
-          </property>
-          <property name="accessibleName">
-           <string>Volume</string>
-          </property>
           <property name="minimumSize">
            <size>
             <width>84</width>
@@ -105,6 +99,12 @@
             <width>110</width>
             <height>16777215</height>
            </size>
+          </property>
+          <property name="toolTip">
+           <string>Volume</string>
+          </property>
+          <property name="accessibleName">
+           <string>Volume</string>
           </property>
           <property name="maximum">
            <number>100</number>
@@ -287,7 +287,7 @@
     <addaction name="actionLoad_playlist"/>
     <addaction name="actionClear_Playlist"/>
     <addaction name="separator"/>
-    <addaction name="actionSettings"/>
+    <addaction name="actionPreferences"/>
    </widget>
    <widget class="QMenu" name="menuEdit">
     <property name="title">
@@ -324,7 +324,7 @@
     <addaction name="actionCursor_follows_playback"/>
    </widget>
    <widget class="QMenu" name="menuLibrary">
-   <property name="title">
+    <property name="title">
      <string>Library</string>
     </property>
     <addaction name="actionSearch"/>
@@ -425,9 +425,9 @@
     <string>Shuffle (tracks)</string>
    </property>
   </action>
-  <action name="actionSettings">
+  <action name="actionPreferences">
    <property name="text">
-    <string>Settings</string>
+    <string>Preferences</string>
    </property>
    <property name="menuRole">
     <enum>QAction::MenuRole::PreferencesRole</enum>

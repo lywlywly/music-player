@@ -3,6 +3,7 @@
 #include <QDataStream>
 #include <QDir>
 #include <QFile>
+#include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMainWindow>
@@ -113,6 +114,8 @@ private slots:
   void init();
   void cleanup();
 
+  void fileOpenAction_usesStandardShortcut();
+  void preferencesAction_usesNonMacShortcut();
   void menuPlaybackActions_areWired();
   void playbackButtons_areWired();
   void clearPlaylistAction_clearsCurrentPlaylist();
@@ -191,6 +194,23 @@ void TestMainWindow::cleanup() {
   qunsetenv("MYPLAYER_USE_DUMMY_AUDIO_PLAYER");
   qunsetenv("MYPLAYER_USE_DUMMY_MEDIA_INTERFACE");
   qunsetenv("MYPLAYER_TEST_LIBRARY_LOAD_DELAY_MS");
+}
+
+void TestMainWindow::fileOpenAction_usesStandardShortcut() {
+  QAction *openAction = window_->findChild<QAction *>("actionOpen");
+  QVERIFY(openAction != nullptr);
+  QCOMPARE(openAction->shortcut(), QKeySequence(QKeySequence::Open));
+}
+
+void TestMainWindow::preferencesAction_usesNonMacShortcut() {
+  QAction *preferencesAction =
+      window_->findChild<QAction *>("actionPreferences");
+  QVERIFY(preferencesAction != nullptr);
+#ifdef Q_OS_MACOS
+  QVERIFY(preferencesAction->shortcut().isEmpty());
+#else
+  QCOMPARE(preferencesAction->shortcut(), QKeySequence(Qt::CTRL | Qt::Key_P));
+#endif
 }
 
 void TestMainWindow::menuPlaybackActions_areWired() {
@@ -506,7 +526,7 @@ void TestMainWindow::settingsDisplayPreview_usesCurrentSongContext() {
   QVERIFY(playAction != nullptr);
   playAction->trigger();
 
-  QAction *settingsAction = window_->findChild<QAction *>("actionSettings");
+  QAction *settingsAction = window_->findChild<QAction *>("actionPreferences");
   QVERIFY(settingsAction != nullptr);
   settingsAction->trigger();
 

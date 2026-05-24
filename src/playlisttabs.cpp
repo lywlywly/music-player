@@ -1,18 +1,49 @@
 #include "playlisttabs.h"
 #include "databasemanager.h"
+#include "filemanagerutils.h"
 #include "songpropertiesdialog.h"
 #include "ui_playlisttabs.h"
 #include <QActionGroup>
 #include <QApplication>
+#include <QFileInfo>
 #include <QHeaderView>
 #include <QKeyEvent>
+#include <QMessageBox>
 #include <QProgressDialog>
 #include <QSettings>
+#include <QShortcut>
 #include <QSignalBlocker>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QtGlobal>
 #include <algorithm>
+
+namespace {
+constexpr const char *kOpenContainingFolderTitle = "Open Containing Folder";
+
+QList<QKeySequence> openPropertiesShortcuts() {
+#ifdef Q_OS_MACOS
+  return {QKeySequence(Qt::CTRL | Qt::Key_I)};
+#else
+  return {QKeySequence(Qt::ALT | Qt::Key_Return),
+          QKeySequence(Qt::ALT | Qt::Key_Enter)};
+#endif
+}
+
+int selectedOrCurrentRow(QTableView *tableView) {
+  const QModelIndexList selectedRows =
+      tableView->selectionModel()->selectedRows();
+  if (selectedRows.isEmpty()) {
+    return tableView->currentIndex().row();
+  }
+
+  int row = selectedRows.front().row();
+  for (const QModelIndex &index : selectedRows) {
+    row = std::min(row, index.row());
+  }
+  return row;
+}
+} // namespace
 
 PlaylistTabs::PlaylistTabs(QWidget *parent)
     : QWidget(parent), ui(new Ui::PlaylistTabs) {
@@ -47,7 +78,11 @@ void PlaylistTabs::setUpPlaylist() {
   playlistContextMenu.addSeparator();
   clearPlaylistAction_ = playlistContextMenu.addAction("Clear Playlist");
   playlistContextMenu.addSeparator();
+  openContainingFolderAction_ =
+      playlistContextMenu.addAction("Open Containing Folder");
   propertiesAction_ = playlistContextMenu.addAction("Properties");
+  propertiesAction_->setShortcuts(openPropertiesShortcuts());
+  propertiesAction_->setShortcutVisibleInContextMenu(true);
   // tabs
   QTabBar *tabBar = ui->tabWidget->tabBar();
   tabBar->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -146,6 +181,8 @@ void PlaylistTabs::setUpPlaybackManager() {
   });
   connect(clearPlaylistAction_, &QAction::triggered, this,
           [this]() { currentPlaylist_->clear(); });
+  connect(openContainingFolderAction_, &QAction::triggered, this,
+          &PlaylistTabs::openContainingFolderForCurrentContextRow);
   connect(propertiesAction_, &QAction::triggered, this,
           &PlaylistTabs::openPropertiesForCurrentContextRow);
 }
@@ -155,10 +192,12 @@ void PlaylistTabs::onCustomContextMenuRequested(const QPoint &pos) {
   const bool hasRow = index.isValid();
   playNextAction_->setEnabled(hasRow);
   playEndAction_->setEnabled(hasRow);
+  openContainingFolderAction_->setEnabled(hasRow);
   propertiesAction_->setEnabled(hasRow);
   if (hasRow) {
     playNextAction_->setData(QVariant::fromValue(index));
     playEndAction_->setData(QVariant::fromValue(index));
+    openContainingFolderAction_->setData(QVariant::fromValue(index));
     propertiesAction_->setData(QVariant::fromValue(index));
   }
 
@@ -264,6 +303,15 @@ void PlaylistTabs::setUpTableView(Playlist *pl, QTableView *tbv) {
   tbv->setContextMenuPolicy(Qt::CustomContextMenu);
   connect(tbv, &QTableView::customContextMenuRequested, this,
           &PlaylistTabs::onCustomContextMenuRequested);
+  // QAction shortcuts on the popup context menu are metadata/display only here:
+  // Qt does not dispatch them reliably from a transient QMenu. Register the
+  // real shortcut on each table so Properties works while browsing rows.
+  for (const QKeySequence &shortcutSequence : openPropertiesShortcuts()) {
+    auto *shortcut = new QShortcut(shortcutSequence, tbv);
+    shortcut->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(shortcut, &QShortcut::activated, this,
+            [this, tbv]() { openPropertiesForRow(selectedOrCurrentRow(tbv)); });
+  }
 
   QHeaderView *header = tbv->horizontalHeader();
   header->setSortIndicatorShown(false);
@@ -488,14 +536,14 @@ QAction *PlaylistTabs::propertiesAction() const { return propertiesAction_; }
 QTabWidget *PlaylistTabs::tabWidget() const { return ui->tabWidget; }
 
 void PlaylistTabs::openPropertiesForCurrentContextRow() {
+  const QModelIndex index = propertiesAction_->data().value<QModelIndex>();
+  openPropertiesForRow(index.row());
+}
+
+void PlaylistTabs::openPropertiesForRow(int row) {
   Q_ASSERT(currentPlaylist_ != nullptr);
   Q_ASSERT(songLibrary != nullptr);
   Q_ASSERT(columnRegistry_ != nullptr);
-  const QModelIndex index = propertiesAction_->data().value<QModelIndex>();
-  if (!index.isValid()) {
-    return;
-  }
-  const int row = index.row();
   if (row < 0 || row >= currentPlaylist_->songCount()) {
     return;
   }
@@ -520,6 +568,40 @@ void PlaylistTabs::openPropertiesForCurrentContextRow() {
             notifySongDataChangedInAllPlaylists(updatedSongPk);
           });
   dialog->show();
+}
+
+void PlaylistTabs::openContainingFolderForCurrentContextRow() {
+  const QModelIndex index =
+      openContainingFolderAction_->data().value<QModelIndex>();
+  openContainingFolderForRow(index.row());
+}
+
+void PlaylistTabs::openContainingFolderForRow(int row) {
+  Q_ASSERT(currentPlaylist_ != nullptr);
+  if (row < 0 || row >= currentPlaylist_->songCount()) {
+    return;
+  }
+
+  const MSong &song = currentPlaylist_->getSongByIndex(row);
+  const auto filepathIt = song.find("filepath");
+  const QString filepath =
+      filepathIt == song.end()
+          ? QString()
+          : QString::fromStdString(filepathIt->second.text).trimmed();
+  const QFileInfo fileInfo(filepath);
+  if (filepath.isEmpty() || !fileInfo.exists() || !fileInfo.isFile()) {
+    QMessageBox::warning(
+        this, kOpenContainingFolderTitle,
+        QStringLiteral("The selected file does not exist:\n%1").arg(filepath));
+    return;
+  }
+
+  if (!FileManagerUtils::revealFile(fileInfo.absoluteFilePath())) {
+    QMessageBox::warning(
+        this, kOpenContainingFolderTitle,
+        QStringLiteral("Could not open the containing folder for:\n%1")
+            .arg(fileInfo.absoluteFilePath()));
+  }
 }
 
 Playlist *PlaylistTabs::playlistForTabIndex(int index) {

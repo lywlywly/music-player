@@ -90,6 +90,8 @@ set(PROJECT_SOURCES
   fieldtypepool.cpp
   fieldvalue.h
   fieldvalue.cpp
+  filemanagerutils.h
+  filemanagerutils.cpp
   fieldeditdialog.ui
   fieldeditdialog.h
   fieldeditdialog.cpp

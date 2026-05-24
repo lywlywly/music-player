@@ -9,6 +9,7 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
+#include <QShortcut>
 #include <QSignalSpy>
 #include <QSqlDatabase>
 #include <QSqlQuery>
@@ -17,6 +18,7 @@
 #include <QTest>
 #include <QTimer>
 #include <QUuid>
+#include <QtGlobal>
 #include <unordered_map>
 
 #include "../columnregistry.h"
@@ -112,6 +114,7 @@ bool updatePlaylistTabOrder(QSqlDatabase &db, const QList<int> &playlistIds) {
   }
   return true;
 }
+
 } // namespace
 
 class TestPlaylistTabs : public QObject {
@@ -127,6 +130,7 @@ private slots:
   void navigateIndex_selectsTargetRow();
   void notifySongDataChangedInAllPlaylists_notifiesMatchingRows();
   void customContextMenu_bindsRowIntoQueueActions();
+  void propertiesShortcut_isInstalledOnTable();
   void propertiesDialog_showsRefreshedAndRemainingFields();
   void propertiesDialog_editSave_writesDirtyFieldAndEmitsSongUpdated();
   void propertiesDialog_cancel_discardsBufferedEdits();
@@ -323,6 +327,33 @@ void TestPlaylistTabs::customContextMenu_bindsRowIntoQueueActions() {
   QVERIFY(!tabs_->playNextAction()->isEnabled());
   QVERIFY(!tabs_->playEndAction()->isEnabled());
   QVERIFY(!tabs_->propertiesAction()->isEnabled());
+}
+
+void TestPlaylistTabs::propertiesShortcut_isInstalledOnTable() {
+  Playlist *pl = tabs_->currentPlaylist();
+  QVERIFY(pl != nullptr);
+
+  QTableView *table =
+      tabs_->tabWidget()->currentWidget()->findChild<QTableView *>();
+  QVERIFY(table != nullptr);
+
+  const QList<QKeySequence> actionShortcuts =
+      tabs_->propertiesAction()->shortcuts();
+  QVERIFY(tabs_->propertiesAction()->isShortcutVisibleInContextMenu());
+  QList<QKeySequence> shortcutSequences;
+  for (QShortcut *shortcut : table->findChildren<QShortcut *>()) {
+    shortcutSequences.push_back(shortcut->key());
+    QCOMPARE(shortcut->context(), Qt::WidgetWithChildrenShortcut);
+  }
+#ifdef Q_OS_MACOS
+  QVERIFY(actionShortcuts.contains(QKeySequence(Qt::CTRL | Qt::Key_I)));
+  QVERIFY(shortcutSequences.contains(QKeySequence(Qt::CTRL | Qt::Key_I)));
+#else
+  QVERIFY(actionShortcuts.contains(QKeySequence(Qt::ALT | Qt::Key_Return)));
+  QVERIFY(actionShortcuts.contains(QKeySequence(Qt::ALT | Qt::Key_Enter)));
+  QVERIFY(shortcutSequences.contains(QKeySequence(Qt::ALT | Qt::Key_Return)));
+  QVERIFY(shortcutSequences.contains(QKeySequence(Qt::ALT | Qt::Key_Enter)));
+#endif
 }
 
 void TestPlaylistTabs::propertiesDialog_showsRefreshedAndRemainingFields() {

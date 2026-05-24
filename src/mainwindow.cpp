@@ -31,6 +31,7 @@
 #include <QFileDialog>
 #include <QFutureWatcher>
 #include <QIcon>
+#include <QKeySequence>
 #include <QPainter>
 #include <QProgressDialog>
 #include <QRandomGenerator>
@@ -271,6 +272,11 @@ void MainWindow::setupSystemMediaInterface() {
 }
 
 void MainWindow::setUpMenuBar() {
+  ui->actionOpen->setShortcut(QKeySequence::Open);
+#ifndef Q_OS_MACOS
+  ui->actionPreferences->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_P));
+#endif
+
   playbackOrderMenuActionGroup = new QActionGroup(this);
   playbackOrderMenuActionGroup->setExclusive(true);
   ui->actionDefault->setData(Sequential);
@@ -401,7 +407,7 @@ void MainWindow::setPlaylistDependentActionsEnabled(bool enabled) {
 }
 
 void MainWindow::initSettings() {
-  connect(ui->actionSettings, &QAction::triggered, this, [this]() {
+  connect(ui->actionPreferences, &QAction::triggered, this, [this]() {
     SettingsDialog *dialog =
         new SettingsDialog(columnRegistry_, databaseManager_, this);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
