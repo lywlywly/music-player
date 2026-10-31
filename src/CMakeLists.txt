@@ -137,6 +137,10 @@ set(PROJECT_SOURCES
   playbackqueue.cpp
   playlist.h
   playlist.cpp
+  playlistcollection.h
+  playlistcollection.cpp
+  playlisttablemodel.h
+  playlisttablemodel.cpp
   playlisttabs.ui
   playlisttabs.h
   playlisttabs.cpp
@@ -156,8 +160,6 @@ set(PROJECT_SOURCES
   songparser.cpp
   statusruntimesymboltable.h
   statusruntimesymboltable.cpp
-  songstore.h
-  songstore.cpp
   utils.h
 )
 

@@ -3,6 +3,7 @@
 
 #include "globalcolumnlayoutmanager.h"
 #include "playbackmanager.h"
+#include "playlistcollection.h"
 #include <QLineEdit>
 #include <QMenu>
 #include <QTableView>
@@ -11,13 +12,12 @@
 namespace Ui {
 class PlaylistTabs;
 }
-class DatabaseManager;
 
-// UI coordinator for playlist tabs and table views. It creates playlist models
-// per tab, wires header/table interactions, handles tab context actions, and
-// keeps the active playlist synchronized with playback control.
-// It also owns playlist metadata DB operations (`playlists` table):
-// load/repair order, create, delete, and persist tab order.
+// UI coordinator for playlist tabs and table views. It creates one
+// PlaylistTableModel per tab, wires header/table interactions, handles tab
+// context actions, and keeps the active playlist synchronized with playback
+// control. Playlist lifecycle and `playlists` table writes are delegated to
+// PlaylistCollection; tabs follow its signals.
 // Tab identity:
 // each tab stores its DB `playlist_id` in QTabBar::tabData(index), and all
 // playlist lookup/removal/reorder persistence uses that id (not tab
@@ -28,8 +28,10 @@ class PlaylistTabs : public QWidget {
 public:
   explicit PlaylistTabs(QWidget *parent = nullptr);
   ~PlaylistTabs();
+  // collection must already be loaded (PlaylistCollection::loadAll).
   void init(SongLibrary *, PlaybackQueue *, PlaybackManager *, QActionGroup *,
-            ColumnRegistry *, GlobalColumnLayoutManager *, DatabaseManager *);
+            ColumnRegistry *, GlobalColumnLayoutManager *,
+            PlaylistCollection *);
   void setUpPlaylist();
   void onCustomContextMenuRequested(const QPoint &pos);
   void onTabContextMenuRequested(const QPoint &pos);
@@ -56,31 +58,17 @@ signals:
   void doubleClicked(const QModelIndex &index);
 
 private:
-  struct PlaylistDefinition {
-    int playlistId = -1;
-    QString name;
-    int tabOrder = -1;
-  };
-  void createPlaylist(int playlistId, QTableView *tbv);
   void addPlaylistTab(const QString &playlistName, int playlistId);
-  void addNewPlaylistTab(const QString &playlistName);
-  int insertPlaylistRow(const QString &playlistName, int tabOrder);
+  void removePlaylistTab(int playlistId);
   Playlist *playlistForTabIndex(int index);
   // Reads QTabBar::tabData(index) and returns the DB playlist_id for that tab.
   // Returns -1 for invalid index.
   int playlistIdForTabIndex(int index) const;
+  // Returns -1 when no tab has this playlist_id.
+  int tabIndexForPlaylistId(int playlistId) const;
   // Persists current tab visual order by reading playlist_id from each tab's
-  // tabData and writing contiguous tab_order values to DB.
+  // tabData and passing it to PlaylistCollection::setPlaylistOrder.
   void persistPlaylistTabOrder();
-  // Loads playlists ordered by tab_order (then playlist_id). If DB has no
-  // playlist rows, creates the default playlist row (id=1). If tab_order is
-  // corrupted (not 0..N-1), repairs order using playlist_id ascending.
-  QList<PlaylistDefinition> loadPlaylistsInDisplayOrder() const;
-  // Writes contiguous tab_order (0..N-1) for the given playlist_id order.
-  bool updatePlaylistTabOrder(const QList<int> &playlistIdsInOrder) const;
-  // Deletes one playlist metadata row; playlist_items rows cascade by FK.
-  bool deletePlaylistById(int playlistId) const;
-  bool updatePlaylistNameById(int playlistId, const QString &name) const;
   void onTabChanged(int index);
   void setUpCurrentPlaylist();
   void setUpPlaybackManager();
@@ -107,7 +95,7 @@ private:
   QAction *propertiesAction_ = nullptr;
   QAction *openContainingFolderAction_ = nullptr;
   SongLibrary *songLibrary;
-  DatabaseManager *databaseManager_ = nullptr;
+  PlaylistCollection *collection_ = nullptr;
   PlaybackQueue *playbackQueue_;
   PlaybackManager *control;
   Playlist *currentPlaylist_;
@@ -117,8 +105,6 @@ private:
   bool applyingColumnLayout_ = false;
   QLineEdit *tabRenameEditor_ = nullptr;
   int renamingTabIndex_ = -1;
-  // TODO: separate playlist manager class
-  std::map<int, Playlist> playlistMap;
 };
 
 #endif // PLAYLISTTABS_H

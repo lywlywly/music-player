@@ -1,5 +1,6 @@
 #include <QAbstractButton>
 #include <QAction>
+#include <QApplication>
 #include <QDataStream>
 #include <QDir>
 #include <QFile>
@@ -29,6 +30,7 @@
 #include "../librarysearchdialog.h"
 #include "../mainwindow.h"
 #include "../playbackbackendmanager.h"
+#include "../playlisttablemodel.h"
 #include "../playlisttabs.h"
 #include "../settingsdialog.h"
 #include "../utils.h"
@@ -91,9 +93,27 @@ MSong makeSong(const QString &title, const QString &artist,
   return song;
 }
 
+const QAbstractItemModel *modelFor(const Playlist *playlist) {
+  for (QWidget *widget : QApplication::allWidgets()) {
+    auto *view = qobject_cast<QTableView *>(widget);
+    if (view == nullptr) {
+      continue;
+    }
+    auto *model = qobject_cast<PlaylistTableModel *>(view->model());
+    if (model != nullptr && model->playlist() == playlist) {
+      return model;
+    }
+  }
+  return nullptr;
+}
+
 int statusColumn(const Playlist *playlist) {
-  for (int col = 0; col < playlist->columnCount(); ++col) {
-    if (playlist->headerData(col, Qt::Horizontal, Qt::DisplayRole).toString() ==
+  const QAbstractItemModel *model = modelFor(playlist);
+  if (model == nullptr) {
+    return -1;
+  }
+  for (int col = 0; col < model->columnCount(); ++col) {
+    if (model->headerData(col, Qt::Horizontal, Qt::DisplayRole).toString() ==
         "Status") {
       return col;
     }
@@ -102,8 +122,11 @@ int statusColumn(const Playlist *playlist) {
 }
 
 QString statusAt(const Playlist *playlist, int row, int statusCol) {
-  return playlist->data(playlist->index(row, statusCol), Qt::DisplayRole)
-      .toString();
+  const QAbstractItemModel *model = modelFor(playlist);
+  if (model == nullptr) {
+    return {};
+  }
+  return model->data(model->index(row, statusCol), Qt::DisplayRole).toString();
 }
 } // namespace
 

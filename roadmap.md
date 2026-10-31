@@ -41,6 +41,25 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
 - ⬜ Media library folder monitoring
 - ⬜ CLI tool and headless mode
 
+## Architecture
+
+See `docs/architecture.md` (Design Principles).
+
+- ✅ Playlist backend/frontend split (`Playlist`, `PlaylistCollection`,
+  `PlaylistTableModel`; playback status owned by `PlaybackQueue`)
+- ⬜ Framework-neutral `Event<Args...>` with RAII `Connection` replacing
+  backend Qt signals (emit method named `notify`; Qt defines `emit` as a macro)
+- ⬜ Playlist ids instead of `Playlist *` in the playback layer
+  (`PlaybackManager`, policies, `PlaybackQueue`)
+- ⬜ Build split: `MYCore` (Qt6::Core, Qt6::Sql, TagLib) and `MYWidgets`
+- ⬜ Qt-free backend internals
+- ⬜ Persist row removal and sort order in `playlist_items`
+- ⬜ Batched `playlist_items` writes in one transaction
+- ⬜ Pk-based row removal
+- ⬜ Move `getNewPlaylistName` from `PlaylistTabs` to `PlaylistCollection`
+- ⬜ `SongLibrary` field-existence check without `ColumnDefinition`
+  (`ColumnRegistry::findColumn` in song import)
+
 ## Known Issues
 
 - `QMediaPlayer` seek accuracy on macOS:

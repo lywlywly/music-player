@@ -1,9 +1,7 @@
 #include "playbackqueue.h"
 #include <QDebug>
 
-PlaybackQueue::PlaybackQueue(QObject *parent) : QObject{parent} {
-  cbs.reserve(5);
-}
+PlaybackQueue::PlaybackQueue(QObject *parent) : QObject{parent} {}
 
 void PlaybackQueue::setCurrentId(int curPk, Playlist *pl) {
   int oldPk = this->currentPk;
@@ -40,10 +38,30 @@ std::pair<int, Playlist *> PlaybackQueue::getOrder(int pk) {
   return {orders[pk]};
 }
 
-void PlaybackQueue::notifyAll(int pk, Playlist *pl) {
-  for (auto &cb : cbs) {
-    cb(pk, pl);
+PlaybackQueue::SongStatus
+PlaybackQueue::statusOf(int songPk, const Playlist *playlist) const {
+  if (songPk == currentPk && playlist == currentPlaylist) {
+    switch (playbackStatus) {
+    case PlaybackStatus::Playing:
+      return {SongPlaybackState::Playing};
+    case PlaybackStatus::Paused:
+      return {SongPlaybackState::Paused};
+    default:
+      return {};
+    }
   }
+
+  if (songPk >= 0 && songPk < static_cast<int>(orders.size())) {
+    const auto &[order, pl] = orders[songPk];
+    if (order >= 0 && pl == playlist) {
+      return {SongPlaybackState::Queued, order};
+    }
+  }
+  return {};
+}
+
+void PlaybackQueue::notifyAll(int pk, Playlist *pl) {
+  emit statusChanged(pk, pl);
 }
 
 const std::deque<int> &PlaybackQueue::getQueue() { return queue; }
@@ -82,7 +100,3 @@ std::pair<int, Playlist *> PlaybackQueue::pop() {
 }
 
 bool PlaybackQueue::empty() const { return queue.empty(); }
-
-void PlaybackQueue::setStatusUpdateCallback(StatusUpdateCallback &&cb) {
-  cbs.push_back(std::move(cb));
-}

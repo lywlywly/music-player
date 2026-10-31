@@ -3,6 +3,67 @@
 This file contains implementation-level details that are intentionally kept out
 of `README.md`.
 
+## Design Principles
+
+### Backend classes do not leak UI
+
+Backend classes hold app state and operations; frontend classes present them.
+The backend must not depend on how (or whether) it is displayed.
+
+* Backend: `SongLibrary`, `DatabaseManager`, `Playlist`, `PlaylistCollection`,
+  `PlaybackQueue`, `PlaybackManager`, playback policies.
+* Frontend (Qt view adapters and widgets): `PlaylistTableModel`,
+  `PlaylistTabs`, `LibrarySearchResultsModel`, dialogs, `MainWindow`.
+
+| Backend classes may use | Backend classes must not use |
+|---|---|
+| `QObject`, `Q_OBJECT`, signals, `connect` | `QAbstractItemModel` / `QAbstractTableModel` and model signals |
+| QtCore and QtSql types, std types | `QModelIndex`, `QVariant` display data, item roles, `headerData` |
+| | column layout (`GlobalColumnLayoutManager`, column titles/widths) |
+| | presentation: status glyphs, icons, colors |
+| | QtWidgets, QtGui |
+
+Rules that follow from this:
+
+* Backend state changes are reported through backend signals; a frontend
+  adapter translates them into its own notifications. For example,
+  `Playlist::aboutToInsertSongs` / `songsInserted` become
+  `beginInsertRows` / `endInsertRows` in `PlaylistTableModel`.
+* Backend signals are emitted synchronously on the calling thread (direct
+  connections). Insert, remove and reset use before/after pairs (state is old
+  at the "about to" signal and new at the "after" signal); reorder and
+  song-data changes are after-only. Handlers may read the sender but must not
+  mutate it.
+* Data that combines several backend sources for display is joined in the
+  frontend. Playback status is owned by `PlaybackQueue` (`statusOf`,
+  `statusChanged`); `Playlist` does not know about it, and
+  `PlaylistTableModel` joins status with rows.
+* Backend classes are tested without any view (`tst_playlist`,
+  `tst_playlistcollection`, `tst_playbackqueue`, `tst_playbackmanager`).
+* Qt signals are the notification mechanism for now. Because no view types
+  cross the boundary, they could later be replaced by a framework-neutral
+  event type without changing class responsibilities.
+
+Known exception: `SongLibrary` uses `ColumnRegistry::findColumn(...)` (which
+returns a `ColumnDefinition` carrying title/width) to check that a field
+exists when importing a song.
+
+### Playlist call chain
+
+```
+per-playlist:     caller -> Playlist -> SongLibrary
+lifecycle/cross:  caller -> PlaylistCollection -> Playlist -> SongLibrary
+view updates:     Playlist / PlaybackQueue / layout signals -> PlaylistTableModel -> QTableView
+```
+
+* Callers (`MainWindow`, `PlaylistTabs`, dialogs) perform playlist operations
+  through `Playlist` or `PlaylistCollection`, not by writing `SongLibrary`
+  directly.
+* Song changes outside playlist operations (Song Properties save, play stats,
+  cloud sync) write `SongLibrary` directly, then call
+  `PlaylistCollection::notifySongChanged(songPk)` so every playlist refreshes
+  that song's rows.
+
 ## Main Classes and Responsibilities
 
 ### App composition
@@ -10,6 +71,9 @@ of `README.md`.
 * `MainWindow`
   * Wires the app’s major subsystems.
   * Owns playback actions, settings integration, and top-level UI flows.
+  * Owns `PlaylistCollection`, created as a child `QObject` right after
+    `ui->setupUi(...)`. Children are destroyed in creation order, so the UI
+    (tabs, views, models) is destroyed before the playlists it shows.
   * Starts file-backed library loading on a worker thread during startup and
     hydrates UI state after the library snapshot is ready.
 
@@ -55,9 +119,18 @@ of `README.md`.
 
 ### Playlist domain
 
-* `PlaylistTabs`
-  * Owns playlist metadata behavior (`playlists` table): create/delete playlist rows, restore/reorder tabs, repair invalid `tab_order`.
-  * Creates one `Playlist` per tab and connects UI interactions.
+`Playlist` and `PlaylistCollection` are backend classes (see "Backend classes
+do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
+
+* `PlaylistCollection` (backend, owned by `MainWindow`)
+  * Owns all `Playlist`s (`std::map<int, std::unique_ptr<Playlist>>`; each is
+    created and loaded before insertion, and its address stays stable).
+  * Owns playlist metadata behavior (`playlists` table): load, create/delete playlist rows, rename, persist/repair `tab_order`. Refuses to remove the last playlist.
+  * `loadAll()` emits no signals; after it, `playlistCreated` / `playlistAboutToBeRemoved` / `playlistRemoved` / `playlistRenamed` report changes. `playlistAboutToBeRemoved` is sent while the `Playlist` still exists.
+  * `notifySongChanged(songPk)` refreshes a song's rows in every playlist after non-playlist song writes (play stats, cloud sync, Song Properties).
+* `PlaylistTabs` (frontend)
+  * Builds tabs from a loaded `PlaylistCollection` and follows its signals; delegates create/remove/rename/reorder to it.
+  * Creates one `PlaylistTableModel` per tab (parented to the tab's table view) and connects UI interactions.
   * Opens per-song Properties dialog from row context menu and refreshes playlist rows after successful save.
   * The Properties context-menu action carries shortcut metadata so the menu can
     display the platform binding (`Command+I` on macOS, `Alt+Enter` elsewhere),
@@ -66,12 +139,14 @@ of `README.md`.
     shortcuts from a transient popup `QMenu`, and keyboard activation must use
     the selected/current row rather than the right-click row stored on the
     context-menu action.
-* `Playlist`
-  * `QAbstractTableModel` adapter for one playlist.
-  * Delegates storage/order to `SongStore` and renders status column from `PlaybackQueue`.
-* `SongStore`
-  * Per-playlist song-id ordering and sorting.
-  * Owns `playlist_items` persistence.
+* `Playlist` (backend)
+  * One playlist: song-id ordering, sorting, `last_played`, and per-playlist operations (`addFiles`, `addSong`, `addSongByPk`, `removeSong`, `clear`, `sortByField`, `refreshMetadataFromFiles`).
+  * Ingests/refreshes songs through `SongLibrary`; owns `playlist_items` and `playlists.last_played` persistence. `playlistId <= 0` is non-persistent (used by tests).
+  * Sends before/after signals for insert, remove and reset, and after-only signals for reorder and song-data changes. `addFiles` parses and ingests all paths first, then sends one insert pair for the batch. Does not know playback status.
+* `PlaylistTableModel` (frontend)
+  * `QAbstractTableModel` adapter for one `Playlist`: columns, header, cell text, sortable-column check (`sortByColumnId`).
+  * Renders the status column from `PlaybackQueue::statusOf` and refreshes only the status cell on `PlaybackQueue::statusChanged` for its own playlist.
+  * Holds the `Playlist` through a `QPointer`, so it reports no rows if the playlist is destroyed first.
 
 ### Song Properties UI
 
@@ -89,11 +164,19 @@ of `README.md`.
 
 ### Playback domain
 
-* `PlaybackQueue`
-  * Current song pointer + explicit queued songs.
-* `PlaybackManager`
+* `PlaybackQueue` (backend)
+  * Current song pointer + explicit queued songs + playback status.
+  * Owns per-song status: `statusOf(songPk, playlist)` returns Playing/Paused/None
+    for the current song (queue position not consulted), otherwise Queued with
+    its position for a song queued from the same playlist. `statusChanged(songPk,
+    playlist)` reports changes.
+* `PlaybackManager` (backend)
   * Playback policy orchestration (`next/prev/play/pause/stop`) on top of `PlaybackQueue` + active `Playlist`.
   * Requires `setView(Playlist&)` with a valid playlist before playback/policy operations.
+* Playback policies (`PlaybackPolicySequential`, `PlaybackPolicyShuffle`)
+  * `PlaybackPolicyShuffle` sizes its history to half the playlist and follows
+    size changes through `Playlist` insert/remove/reset signals; it
+    disconnects when switched to another playlist or destroyed.
   * `Playback -> Playback follows cursor` passes the first selected row from
     `MainWindow` into `PlaybackManager::next(...)`: queued songs still take
     priority, then the selected row may be played once if it is not already
@@ -232,9 +315,10 @@ of `README.md`.
 * The worker path creates its own `ColumnRegistry`, `DatabaseManager`, and
   `SongLibrary` with a separate SQLite connection, then returns a
   `SongLibrary::Snapshot`.
-* The main thread applies the snapshot to the app-owned `SongLibrary`, creates
-  playlist tabs/models, re-enables actions, restores the normal status-bar
-  message, and starts cloud sync.
+* The main thread applies the snapshot to the app-owned `SongLibrary`, loads
+  playlists (`PlaylistCollection::loadAll()`), creates playlist tabs/models,
+  re-enables actions, restores the normal status-bar message, and starts cloud
+  sync.
 * Startup-sensitive handlers are guarded in addition to disabling actions, so
   direct/system-media requests cannot play, seek, load songs, or manually rebase
   before playlist hydration finishes.
@@ -244,14 +328,18 @@ of `README.md`.
 ### Song ingest and metadata refresh
 
 * Ingest path: parse file -> evaluate computed fields -> generate identity key -> upsert song -> sync dynamic/computed attributes.
+  Adding files to a playlist (open, add entry, add folder) goes through
+  `Playlist::addFiles(...)`, which runs this path for each file and then
+  appends the rows.
 * Refresh path re-parses file and syncs built-in/dynamic/computed fields to DB + memory.
 * Computed values are namespaced in memory (`computed:<key>`) but persisted in
   DB with plain keys (`<key>`) in `song_computed_attributes`.
 * Properties save path:
-  * collect dirty/removed rows -> `SongParser::writeTags(...)` -> `SongLibrary::refreshSongFromFile(...)` -> emit song-updated signal for playlist model refresh.
+  * collect dirty/removed rows -> `SongParser::writeTags(...)` -> `SongLibrary::refreshSongFromFile(...)` -> emit song-updated signal -> `PlaylistCollection::notifySongChanged(...)` refreshes the song's rows.
 * Two bulk user-triggered flows are intentionally blocking with progress UI:
-  * `PlaylistTabs::refreshPlaylistMetadata(...)` (playlist-wide metadata refresh)
-  * `MainWindow::openFolder()` (folder import)
+  * `PlaylistTabs::refreshPlaylistMetadata(...)` (playlist-wide metadata refresh
+    via `Playlist::refreshMetadataFromFiles(...)`)
+  * `MainWindow::openFolder()` (folder import via `Playlist::addFiles(...)`)
   Both use modal progress dialogs and process events while work runs, instead of
   moving those operations to background threads.
 
@@ -368,7 +456,11 @@ of `README.md`.
 * Playlist membership is persisted in `playlist_items(position)`.
 * Playlist tab name edits are done inline on the tab bar and persisted to
   `playlists.name`.
+* Writers: `PlaylistCollection` owns `playlists` rows (insert, delete, `name`,
+  `tab_order`); `Playlist` owns `playlist_items` and `playlists.last_played`.
 * Playlist metadata writes (`playlists` row create/update/delete) stay synchronous.
+* Removing a row from a playlist changes memory only (`playlist_items` is not
+  updated), and sort order is not persisted.
 
 ## Cloud Sync Design
 
@@ -436,7 +528,8 @@ of `README.md`.
 
 ## Threading / Async Model
 
-* Qt UI/model code runs on the main thread.
+* Qt UI/model code runs on the main thread, and so do backend playlist and
+  playback operations; their signals use direct connections.
 * Cloud sync HTTP functions run synchronously on a coordinator-owned worker
   thread; results that touch `SongLibrary` or UI models are delivered back to
   the main thread.
@@ -444,5 +537,5 @@ of `README.md`.
 * Cloud pull inter-page waits and rebase-push chunking are paced by `QTimer`.
 * GStreamer GLib loop uses a dedicated `std::thread` on macOS/Windows.
 * DB writes that can touch many songs are backgrounded. Current path:
-  `SongStore::removePlaylistItemsInDb()` (bulk `playlist_items` delete) runs in
+  `Playlist::removePlaylistItemsInDb()` (bulk `playlist_items` delete) runs in
   a worker thread for file-backed DBs and synchronously for in-memory DB tests.

@@ -3,13 +3,22 @@
 
 #include "../playbackqueue.h"
 
+namespace {
+// Distinct fake addresses; statusOf only compares pointers.
+Playlist *fakePlaylist(std::uintptr_t n) {
+  return reinterpret_cast<Playlist *>(n * alignof(Playlist));
+}
+} // namespace
+
 class TestPlaybackQueue : public QObject {
   Q_OBJECT
 
 private slots:
   void addNextAndAddLast_maintainsQueueAndOrder();
   void pop_updatesOrderAndReturnsFront();
-  void setCurrentIdAndStatus_notifiesCallbacks();
+  void setCurrentIdAndStatus_notifiesStatusChanged();
+  void statusOf_currentSongIgnoresQueuePosition();
+  void statusOf_queuedSongInSamePlaylistOnly();
   void pop_empty_throws();
 };
 
@@ -40,11 +49,11 @@ void TestPlaybackQueue::pop_updatesOrderAndReturnsFront() {
   QCOMPARE(queue.getOrder(2).first, 1);
 }
 
-void TestPlaybackQueue::setCurrentIdAndStatus_notifiesCallbacks() {
+void TestPlaybackQueue::setCurrentIdAndStatus_notifiesStatusChanged() {
   PlaybackQueue queue;
   std::vector<int> notified;
-  queue.setStatusUpdateCallback(
-      [&](int pk, Playlist *) { notified.push_back(pk); });
+  connect(&queue, &PlaybackQueue::statusChanged, this,
+          [&](int pk, Playlist *) { notified.push_back(pk); });
 
   queue.setCurrentId(4, nullptr);
   queue.setPlaybackStatus(PlaybackQueue::PlaybackStatus::Playing);
@@ -54,6 +63,40 @@ void TestPlaybackQueue::setCurrentIdAndStatus_notifiesCallbacks() {
   QCOMPARE(notified, expected);
   QCOMPARE(queue.getCurrentPk().first, 7);
   QCOMPARE(queue.getStatus(), PlaybackQueue::PlaybackStatus::Playing);
+}
+
+void TestPlaybackQueue::statusOf_currentSongIgnoresQueuePosition() {
+  PlaybackQueue queue;
+  Playlist *pl = fakePlaylist(1);
+  queue.addLast(3, pl);
+  queue.setCurrentId(3, pl);
+
+  QCOMPARE(queue.statusOf(3, pl).state,
+           PlaybackQueue::SongPlaybackState::None);
+  queue.setPlaybackStatus(PlaybackQueue::PlaybackStatus::Playing);
+  QCOMPARE(queue.statusOf(3, pl).state,
+           PlaybackQueue::SongPlaybackState::Playing);
+  queue.setPlaybackStatus(PlaybackQueue::PlaybackStatus::Paused);
+  QCOMPARE(queue.statusOf(3, pl).state,
+           PlaybackQueue::SongPlaybackState::Paused);
+  QCOMPARE(queue.statusOf(3, pl).queuePosition, -1);
+}
+
+void TestPlaybackQueue::statusOf_queuedSongInSamePlaylistOnly() {
+  PlaybackQueue queue;
+  Playlist *plA = fakePlaylist(1);
+  Playlist *plB = fakePlaylist(2);
+  queue.setCurrentId(-1, nullptr);
+  queue.addLast(2, plA);
+  queue.addLast(5, plA);
+
+  const PlaybackQueue::SongStatus queued = queue.statusOf(5, plA);
+  QCOMPARE(queued.state, PlaybackQueue::SongPlaybackState::Queued);
+  QCOMPARE(queued.queuePosition, 2);
+  QCOMPARE(queue.statusOf(5, plB).state,
+           PlaybackQueue::SongPlaybackState::None);
+  QCOMPARE(queue.statusOf(9, plA).state,
+           PlaybackQueue::SongPlaybackState::None);
 }
 
 void TestPlaybackQueue::pop_empty_throws() {

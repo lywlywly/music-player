@@ -51,6 +51,7 @@ private slots:
   void prev_wrapsToLastInSequentialPolicy();
   void playPauseStop_updatesPlaybackQueueState();
   void clearPlaylist_inShufflePolicy_doesNotCrash();
+  void shuffle_historyFollowsPlaylistSize();
   void boundedSetWithHistory_basicInsertNavigationAndResize();
   void sequential_next_wrapsToFirst();
   void shuffle_singleSong_nextPrevAreStable();
@@ -104,10 +105,9 @@ void TestPlaybackManager::cleanup() {
 }
 
 void TestPlaybackManager::playIndex_setsCurrentAndLastPlayed() {
-  SongStore store(*library_, *databaseManager_, -1);
-  store.addSong(makeSong("S1", "Artist", "/tmp/pm-playindex-1.mp3", "1"));
-  store.addSong(makeSong("S2", "Artist", "/tmp/pm-playindex-2.mp3", "2"));
-  Playlist playlist(std::move(store), *queue_, 1, *layout_);
+  Playlist playlist(-1, *library_, *databaseManager_);
+  playlist.addSong(makeSong("S1", "Artist", "/tmp/pm-playindex-1.mp3", "1"));
+  playlist.addSong(makeSong("S2", "Artist", "/tmp/pm-playindex-2.mp3", "2"));
 
   manager_->setView(playlist);
   manager_->setPolicy(Sequential);
@@ -122,11 +122,10 @@ void TestPlaybackManager::playIndex_setsCurrentAndLastPlayed() {
 }
 
 void TestPlaybackManager::next_prefersQueuedSongsThenFallsBackToPolicy() {
-  SongStore store(*library_, *databaseManager_, -1);
-  store.addSong(makeSong("S1", "Artist", "/tmp/pm-next-1.mp3", "1"));
-  store.addSong(makeSong("S2", "Artist", "/tmp/pm-next-2.mp3", "2"));
-  store.addSong(makeSong("S3", "Artist", "/tmp/pm-next-3.mp3", "3"));
-  Playlist playlist(std::move(store), *queue_, 1, *layout_);
+  Playlist playlist(-1, *library_, *databaseManager_);
+  playlist.addSong(makeSong("S1", "Artist", "/tmp/pm-next-1.mp3", "1"));
+  playlist.addSong(makeSong("S2", "Artist", "/tmp/pm-next-2.mp3", "2"));
+  playlist.addSong(makeSong("S3", "Artist", "/tmp/pm-next-3.mp3", "3"));
 
   manager_->setView(playlist);
   manager_->setPolicy(Sequential);
@@ -152,11 +151,10 @@ void TestPlaybackManager::next_prefersQueuedSongsThenFallsBackToPolicy() {
 }
 
 void TestPlaybackManager::next_preferredRowPlaysOnceThenFallsBackToPolicy() {
-  SongStore store(*library_, *databaseManager_, -1);
-  store.addSong(makeSong("S1", "Artist", "/tmp/pm-pref-1.mp3", "1"));
-  store.addSong(makeSong("S2", "Artist", "/tmp/pm-pref-2.mp3", "2"));
-  store.addSong(makeSong("S3", "Artist", "/tmp/pm-pref-3.mp3", "3"));
-  Playlist playlist(std::move(store), *queue_, 1, *layout_);
+  Playlist playlist(-1, *library_, *databaseManager_);
+  playlist.addSong(makeSong("S1", "Artist", "/tmp/pm-pref-1.mp3", "1"));
+  playlist.addSong(makeSong("S2", "Artist", "/tmp/pm-pref-2.mp3", "2"));
+  playlist.addSong(makeSong("S3", "Artist", "/tmp/pm-pref-3.mp3", "3"));
 
   manager_->setView(playlist);
   manager_->setPolicy(Sequential);
@@ -175,11 +173,10 @@ void TestPlaybackManager::next_preferredRowPlaysOnceThenFallsBackToPolicy() {
 
 void TestPlaybackManager::
     next_currentPreferredRowDoesNotPullPlaybackBackLater() {
-  SongStore store(*library_, *databaseManager_, -1);
-  store.addSong(makeSong("S1", "Artist", "/tmp/pm-current-pref-1.mp3", "1"));
-  store.addSong(makeSong("S2", "Artist", "/tmp/pm-current-pref-2.mp3", "2"));
-  store.addSong(makeSong("S3", "Artist", "/tmp/pm-current-pref-3.mp3", "3"));
-  Playlist playlist(std::move(store), *queue_, 1, *layout_);
+  Playlist playlist(-1, *library_, *databaseManager_);
+  playlist.addSong(makeSong("S1", "Artist", "/tmp/pm-current-pref-1.mp3", "1"));
+  playlist.addSong(makeSong("S2", "Artist", "/tmp/pm-current-pref-2.mp3", "2"));
+  playlist.addSong(makeSong("S3", "Artist", "/tmp/pm-current-pref-3.mp3", "3"));
 
   manager_->setView(playlist);
   manager_->setPolicy(Sequential);
@@ -197,11 +194,10 @@ void TestPlaybackManager::
 }
 
 void TestPlaybackManager::next_queuePreemptsPreferredRow() {
-  SongStore store(*library_, *databaseManager_, -1);
-  store.addSong(makeSong("S1", "Artist", "/tmp/pm-queue-pref-1.mp3", "1"));
-  store.addSong(makeSong("S2", "Artist", "/tmp/pm-queue-pref-2.mp3", "2"));
-  store.addSong(makeSong("S3", "Artist", "/tmp/pm-queue-pref-3.mp3", "3"));
-  Playlist playlist(std::move(store), *queue_, 1, *layout_);
+  Playlist playlist(-1, *library_, *databaseManager_);
+  playlist.addSong(makeSong("S1", "Artist", "/tmp/pm-queue-pref-1.mp3", "1"));
+  playlist.addSong(makeSong("S2", "Artist", "/tmp/pm-queue-pref-2.mp3", "2"));
+  playlist.addSong(makeSong("S3", "Artist", "/tmp/pm-queue-pref-3.mp3", "3"));
 
   manager_->setView(playlist);
   manager_->setPolicy(Sequential);
@@ -220,11 +216,10 @@ void TestPlaybackManager::next_queuePreemptsPreferredRow() {
 }
 
 void TestPlaybackManager::prev_wrapsToLastInSequentialPolicy() {
-  SongStore store(*library_, *databaseManager_, -1);
-  store.addSong(makeSong("S1", "Artist", "/tmp/pm-prev-1.mp3", "1"));
-  store.addSong(makeSong("S2", "Artist", "/tmp/pm-prev-2.mp3", "2"));
-  store.addSong(makeSong("S3", "Artist", "/tmp/pm-prev-3.mp3", "3"));
-  Playlist playlist(std::move(store), *queue_, 1, *layout_);
+  Playlist playlist(-1, *library_, *databaseManager_);
+  playlist.addSong(makeSong("S1", "Artist", "/tmp/pm-prev-1.mp3", "1"));
+  playlist.addSong(makeSong("S2", "Artist", "/tmp/pm-prev-2.mp3", "2"));
+  playlist.addSong(makeSong("S3", "Artist", "/tmp/pm-prev-3.mp3", "3"));
 
   manager_->setView(playlist);
   manager_->setPolicy(Sequential);
@@ -237,9 +232,8 @@ void TestPlaybackManager::prev_wrapsToLastInSequentialPolicy() {
 }
 
 void TestPlaybackManager::playPauseStop_updatesPlaybackQueueState() {
-  SongStore store(*library_, *databaseManager_, -1);
-  store.addSong(makeSong("S1", "Artist", "/tmp/pm-state-1.mp3", "1"));
-  Playlist playlist(std::move(store), *queue_, 1, *layout_);
+  Playlist playlist(-1, *library_, *databaseManager_);
+  playlist.addSong(makeSong("S1", "Artist", "/tmp/pm-state-1.mp3", "1"));
 
   manager_->setView(playlist);
   manager_->setPolicy(Sequential);
@@ -258,16 +252,41 @@ void TestPlaybackManager::playPauseStop_updatesPlaybackQueueState() {
 }
 
 void TestPlaybackManager::clearPlaylist_inShufflePolicy_doesNotCrash() {
-  SongStore store(*library_, *databaseManager_, -1);
-  store.addSong(makeSong("S1", "Artist", "/tmp/pm-clear-1.mp3", "1"));
-  store.addSong(makeSong("S2", "Artist", "/tmp/pm-clear-2.mp3", "2"));
-  Playlist playlist(std::move(store), *queue_, 1, *layout_);
+  Playlist playlist(-1, *library_, *databaseManager_);
+  playlist.addSong(makeSong("S1", "Artist", "/tmp/pm-clear-1.mp3", "1"));
+  playlist.addSong(makeSong("S2", "Artist", "/tmp/pm-clear-2.mp3", "2"));
 
   manager_->setView(playlist);
   manager_->setPolicy(Shuffle);
 
   playlist.clear();
   QCOMPARE(playlist.songCount(), 0);
+}
+
+void TestPlaybackManager::shuffle_historyFollowsPlaylistSize() {
+  auto *playlist = new Playlist(-1, *library_, *databaseManager_);
+  auto *policy = new PlaybackPolicyShuffle();
+  // Empty playlist: history capacity starts at 0.
+  policy->setPlaylist(playlist);
+
+  for (int i = 0; i < 20; ++i) {
+    const QString n = QString::number(i);
+    playlist->addSong(makeSong("S" + n, "Artist",
+                               "/tmp/pm-shuffle-size-" + n + ".mp3", n));
+  }
+  // Capacity is now 10 only if songsInserted resized the history.
+  std::vector<int> played;
+  for (int i = 0; i < 5; ++i) {
+    played.push_back(playlist->getPkByIndex(i));
+    policy->setCurrentPk(played.back());
+  }
+  for (int i = 3; i >= 0; --i) {
+    QCOMPARE(policy->prevPk(), played[i]);
+  }
+
+  // The policy must not touch its playlist after the playlist is destroyed.
+  delete playlist;
+  delete policy;
 }
 
 void TestPlaybackManager::
@@ -305,10 +324,9 @@ void TestPlaybackManager::
 }
 
 void TestPlaybackManager::sequential_next_wrapsToFirst() {
-  SongStore store(*library_, *databaseManager_, -1);
-  store.addSong(makeSong("S1", "Artist", "/tmp/pm-seq-wrap-1.mp3", "1"));
-  store.addSong(makeSong("S2", "Artist", "/tmp/pm-seq-wrap-2.mp3", "2"));
-  Playlist playlist(std::move(store), *queue_, 1, *layout_);
+  Playlist playlist(-1, *library_, *databaseManager_);
+  playlist.addSong(makeSong("S1", "Artist", "/tmp/pm-seq-wrap-1.mp3", "1"));
+  playlist.addSong(makeSong("S2", "Artist", "/tmp/pm-seq-wrap-2.mp3", "2"));
 
   manager_->setView(playlist);
   manager_->setPolicy(Sequential);
@@ -321,9 +339,8 @@ void TestPlaybackManager::sequential_next_wrapsToFirst() {
 }
 
 void TestPlaybackManager::shuffle_singleSong_nextPrevAreStable() {
-  SongStore store(*library_, *databaseManager_, -1);
-  store.addSong(makeSong("Only", "Artist", "/tmp/pm-shuffle-single.mp3", "1"));
-  Playlist playlist(std::move(store), *queue_, 1, *layout_);
+  Playlist playlist(-1, *library_, *databaseManager_);
+  playlist.addSong(makeSong("Only", "Artist", "/tmp/pm-shuffle-single.mp3", "1"));
 
   manager_->setView(playlist);
   manager_->setPolicy(Shuffle);
@@ -340,8 +357,7 @@ void TestPlaybackManager::shuffle_singleSong_nextPrevAreStable() {
 }
 
 void TestPlaybackManager::next_onEmptyPlaylist_returnsInvalid() {
-  SongStore store(*library_, *databaseManager_, -1);
-  Playlist playlist(std::move(store), *queue_, -1, *layout_);
+  Playlist playlist(-1, *library_, *databaseManager_);
 
   manager_->setView(playlist);
   manager_->setPolicy(Sequential);
@@ -356,14 +372,12 @@ void TestPlaybackManager::next_onEmptyPlaylist_returnsInvalid() {
 
 void TestPlaybackManager::
     next_withQueuedSongFromOtherPlaylist_keepsCurrentPolicyProgress() {
-  SongStore storeA(*library_, *databaseManager_, -1);
-  storeA.addSong(makeSong("A1", "Artist", "/tmp/pm-q-other-a1.mp3", "1"));
-  storeA.addSong(makeSong("A2", "Artist", "/tmp/pm-q-other-a2.mp3", "2"));
-  Playlist playlistA(std::move(storeA), *queue_, 1, *layout_);
+  Playlist playlistA(-1, *library_, *databaseManager_);
+  playlistA.addSong(makeSong("A1", "Artist", "/tmp/pm-q-other-a1.mp3", "1"));
+  playlistA.addSong(makeSong("A2", "Artist", "/tmp/pm-q-other-a2.mp3", "2"));
 
-  SongStore storeB(*library_, *databaseManager_, -1);
-  storeB.addSong(makeSong("B1", "Artist", "/tmp/pm-q-other-b1.mp3", "1"));
-  Playlist playlistB(std::move(storeB), *queue_, 1, *layout_);
+  Playlist playlistB(-1, *library_, *databaseManager_);
+  playlistB.addSong(makeSong("B1", "Artist", "/tmp/pm-q-other-b1.mp3", "1"));
 
   manager_->setView(playlistA);
   manager_->setPolicy(Sequential);
@@ -390,18 +404,15 @@ void TestPlaybackManager::
 }
 
 void TestPlaybackManager::queue_multiplePlaylists_consumesInExpectedOrder() {
-  SongStore storeA(*library_, *databaseManager_, -1);
-  storeA.addSong(makeSong("A1", "Artist", "/tmp/pm-mp-order-a1.mp3", "1"));
-  storeA.addSong(makeSong("A2", "Artist", "/tmp/pm-mp-order-a2.mp3", "2"));
-  Playlist playlistA(std::move(storeA), *queue_, 1, *layout_);
+  Playlist playlistA(-1, *library_, *databaseManager_);
+  playlistA.addSong(makeSong("A1", "Artist", "/tmp/pm-mp-order-a1.mp3", "1"));
+  playlistA.addSong(makeSong("A2", "Artist", "/tmp/pm-mp-order-a2.mp3", "2"));
 
-  SongStore storeB(*library_, *databaseManager_, -1);
-  storeB.addSong(makeSong("B1", "Artist", "/tmp/pm-mp-order-b1.mp3", "1"));
-  Playlist playlistB(std::move(storeB), *queue_, 1, *layout_);
+  Playlist playlistB(-1, *library_, *databaseManager_);
+  playlistB.addSong(makeSong("B1", "Artist", "/tmp/pm-mp-order-b1.mp3", "1"));
 
-  SongStore storeC(*library_, *databaseManager_, -1);
-  storeC.addSong(makeSong("C1", "Artist", "/tmp/pm-mp-order-c1.mp3", "1"));
-  Playlist playlistC(std::move(storeC), *queue_, 1, *layout_);
+  Playlist playlistC(-1, *library_, *databaseManager_);
+  playlistC.addSong(makeSong("C1", "Artist", "/tmp/pm-mp-order-c1.mp3", "1"));
 
   manager_->setView(playlistA);
   manager_->setPolicy(Sequential);
@@ -427,18 +438,15 @@ void TestPlaybackManager::queue_multiplePlaylists_consumesInExpectedOrder() {
 }
 
 void TestPlaybackManager::queue_multiplePlaylists_queueStartPreemptsQueueEnd() {
-  SongStore storeA(*library_, *databaseManager_, -1);
-  storeA.addSong(makeSong("A1", "Artist", "/tmp/pm-mp-preempt-a1.mp3", "1"));
-  storeA.addSong(makeSong("A2", "Artist", "/tmp/pm-mp-preempt-a2.mp3", "2"));
-  Playlist playlistA(std::move(storeA), *queue_, 1, *layout_);
+  Playlist playlistA(-1, *library_, *databaseManager_);
+  playlistA.addSong(makeSong("A1", "Artist", "/tmp/pm-mp-preempt-a1.mp3", "1"));
+  playlistA.addSong(makeSong("A2", "Artist", "/tmp/pm-mp-preempt-a2.mp3", "2"));
 
-  SongStore storeB(*library_, *databaseManager_, -1);
-  storeB.addSong(makeSong("B1", "Artist", "/tmp/pm-mp-preempt-b1.mp3", "1"));
-  Playlist playlistB(std::move(storeB), *queue_, 1, *layout_);
+  Playlist playlistB(-1, *library_, *databaseManager_);
+  playlistB.addSong(makeSong("B1", "Artist", "/tmp/pm-mp-preempt-b1.mp3", "1"));
 
-  SongStore storeC(*library_, *databaseManager_, -1);
-  storeC.addSong(makeSong("C1", "Artist", "/tmp/pm-mp-preempt-c1.mp3", "1"));
-  Playlist playlistC(std::move(storeC), *queue_, 1, *layout_);
+  Playlist playlistC(-1, *library_, *databaseManager_);
+  playlistC.addSong(makeSong("C1", "Artist", "/tmp/pm-mp-preempt-c1.mp3", "1"));
 
   manager_->setView(playlistA);
   manager_->setPolicy(Sequential);

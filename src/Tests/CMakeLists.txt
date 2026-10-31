@@ -30,8 +30,9 @@ set(TEST_NAMES
     mainwindow
     playbackqueue
     settingsdialog_ui
-    songstore
     playlist
+    playlisttablemodel
+    playlistcollection
     playlisttabs
 )
 

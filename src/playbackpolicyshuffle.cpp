@@ -3,18 +3,28 @@
 
 PlaybackPolicyShuffle::PlaybackPolicyShuffle() {}
 
-PlaybackPolicyShuffle::~PlaybackPolicyShuffle() {
-  playlist->unsetSizeChangeCallback();
-}
+PlaybackPolicyShuffle::~PlaybackPolicyShuffle() { disconnectPlaylist(); }
 
 void PlaybackPolicyShuffle::setPlaylist(const Playlist *playlist) {
+  disconnectPlaylist();
   this->playlist = playlist;
   recentPks =
       std::make_unique<BoundedSetWithHistory<int>>(playlist->songCount() / 2);
-  std::function<void(int)> statusUpdate = [this](int s) {
-    this->recentPks->resize(s / 2);
+  const auto resizeHistory = [this]() {
+    this->recentPks->resize(this->playlist->songCount() / 2);
   };
-  playlist->setSizeChangeCallback(std::move(statusUpdate));
+  playlistConnections_ = {
+      QObject::connect(playlist, &Playlist::songsInserted, resizeHistory),
+      QObject::connect(playlist, &Playlist::songsRemoved, resizeHistory),
+      QObject::connect(playlist, &Playlist::songsReset, resizeHistory),
+  };
+}
+
+void PlaybackPolicyShuffle::disconnectPlaylist() {
+  for (const QMetaObject::Connection &connection : playlistConnections_) {
+    QObject::disconnect(connection);
+  }
+  playlistConnections_.clear();
 }
 
 int PlaybackPolicyShuffle::nextPk() {

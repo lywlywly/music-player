@@ -1,16 +1,20 @@
 #ifndef PLAYBACKQUEUE_H
 #define PLAYBACKQUEUE_H
 
+#include "playlist.h"
 #include <QObject>
 #include <deque>
 
-class Playlist;
-
-// Current song and queued songs
+// Current song, queued songs, and per-song playback status
 class PlaybackQueue : public QObject {
   Q_OBJECT
 public:
   enum class PlaybackStatus { Playing, Paused, None };
+  enum class SongPlaybackState { None, Playing, Paused, Queued };
+  struct SongStatus {
+    SongPlaybackState state = SongPlaybackState::None;
+    int queuePosition = -1;
+  };
 
   explicit PlaybackQueue(QObject *parent = nullptr);
   void setCurrentId(int, Playlist *pl);
@@ -22,9 +26,14 @@ public:
   PlaybackStatus getStatus();
   std::pair<int, Playlist *> pop();
   bool empty() const;
-  using StatusUpdateCallback = std::function<void(int, Playlist *)>;
-  void setStatusUpdateCallback(StatusUpdateCallback &&);
   std::pair<int, Playlist *> getOrder(int);
+  // Status of songPk as an entry of playlist. The current song reports its
+  // playback status (queue position not consulted); otherwise a song queued
+  // from the same playlist reports Queued with its position.
+  SongStatus statusOf(int songPk, const Playlist *playlist) const;
+
+signals:
+  void statusChanged(int songPk, Playlist *playlist);
 
 private:
   void notifyAll(int, Playlist *);
@@ -33,9 +42,6 @@ private:
   int currentPk = -1;
   Playlist *currentPlaylist;
   PlaybackStatus playbackStatus = PlaybackStatus::None;
-  std::vector<StatusUpdateCallback> cbs;
-
-signals:
 };
 
 #endif // PLAYBACKQUEUE_H

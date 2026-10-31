@@ -140,8 +140,10 @@ public:
 
 private:
   void reset() override;
+  void disconnectPlaylist();
   int getRandom(int, int);
   std::unique_ptr<BoundedSetWithHistory<int>> recentPks;
+  std::vector<QMetaObject::Connection> playlistConnections_;
 };
 
 #endif // PLAYBACKPOLICYSEQUENTIAL_H

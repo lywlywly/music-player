@@ -212,6 +212,7 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
   prewarmSelectedPlaybackBackend();
   Q_INIT_RESOURCE(resources);
   ui->setupUi(this);
+  playlists_ = new PlaylistCollection(songLibrary, databaseManager_, this);
   applyDisplayThemeFromSettings();
   setUpPlaybackButtonIcons(ui);
   defaultWindowTitle_ = windowTitle();
@@ -233,9 +234,7 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
 void MainWindow::initCloudSync() {
   connect(&cloudPlayStatsSyncCoordinator_,
           &CloudPlayStatsSyncCoordinator::songDataChanged, this,
-          [this](int songPk) {
-            playlistTabs->notifySongDataChangedInAllPlaylists(songPk);
-          });
+          [this](int songPk) { playlists_->notifySongChanged(songPk); });
   refreshManualCloudRebaseActionEnabled();
 }
 
@@ -363,9 +362,10 @@ void MainWindow::finishSetUpPlaylist(SongLibrary::Snapshot &&snapshot) {
   }
   columnLayoutManager_.refreshFromRegistry();
   songLibrary.replaceWithSnapshot(std::move(snapshot));
+  playlists_->loadAll();
   playlistTabs->init(&songLibrary, &playbackQueue_, &control,
                      playbackOrderMenuActionGroup, &columnRegistry_,
-                     &columnLayoutManager_, &databaseManager_);
+                     &columnLayoutManager_, playlists_);
   connect(playlistTabs, &PlaylistTabs::doubleClicked, [this](QModelIndex i) {
     MSong song = control.playIndex(i.row());
     playSong(song, i.row(), playlistTabs->currentPlaylist());
@@ -640,7 +640,7 @@ void MainWindow::playSong(const MSong &song, int row, Playlist *pl) {
   }
   resetPlayStatsSession(songPk);
   songLibrary.markSongPlayedAtStart(songPk, unixNowSeconds());
-  playlistTabs->notifySongDataChangedInAllPlaylists(songPk);
+  playlists_->notifySongChanged(songPk);
 
   backendManager->player()->setSource(
       QString::fromStdString(activeSong.at("filepath").text));
@@ -833,8 +833,8 @@ void MainWindow::addEntry() {
   addEntryDialog->setAttribute(Qt::WA_DeleteOnClose);
   QObject::connect(addEntryDialog, &AddEntryDialog::entryStringEntered,
                    [this](const QString &text) {
-                     playlistTabs->currentPlaylist()->addSong(
-                         songLibrary.loadSongFromFile(text.toStdString()));
+                     playlistTabs->currentPlaylist()->addFiles(
+                         {text.toStdString()});
                    });
 }
 
@@ -1027,10 +1027,12 @@ void MainWindow::open() {
       this, "Open the file",
       QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
       R"(Audio Files (*.mp3 *.flac *.m4a *.wav *.ogg *.opus *.alac);;All Files (*.*))");
+  std::vector<std::string> paths;
+  paths.reserve(static_cast<size_t>(fileName.size()));
   for (const QString &s : fileName) {
-    playlistTabs->currentPlaylist()->addSong(
-        songLibrary.loadSongFromFile(s.toStdString()));
+    paths.push_back(s.toStdString());
   }
+  playlistTabs->currentPlaylist()->addFiles(paths);
 }
 
 void MainWindow::openFolder() {
@@ -1057,17 +1059,16 @@ void MainWindow::openFolder() {
   progressDialog.setMinimumDuration(0);
   progressDialog.setValue(0);
 
-  std::vector<MSong> songs;
-  songs.reserve(static_cast<size_t>(files.size()));
-  for (int i = 0; i < files.size(); ++i) {
-    const QString &s = files[i];
-    songs.push_back(
-        songLibrary.loadSongFromFile(dir.absoluteFilePath(s).toStdString()));
-    progressDialog.setValue(i + 1);
-    QApplication::processEvents();
+  std::vector<std::string> paths;
+  paths.reserve(static_cast<size_t>(files.size()));
+  for (const QString &s : files) {
+    paths.push_back(dir.absoluteFilePath(s).toStdString());
   }
+  playlistTabs->currentPlaylist()->addFiles(paths, [&](int current, int) {
+    progressDialog.setValue(current);
+    QApplication::processEvents();
+  });
   progressDialog.setValue(static_cast<int>(files.size()));
-  playlistTabs->currentPlaylist()->addSongs(std::move(songs));
 }
 
 void MainWindow::openLibrarySearchDialog() {
@@ -1109,7 +1110,7 @@ void MainWindow::maybeCountCompletedPlay() {
     return;
   }
   completionCounted_ = true;
-  playlistTabs->notifySongDataChangedInAllPlaylists(currentTrackPk_);
+  playlists_->notifySongChanged(currentTrackPk_);
   cloudPlayStatsSyncCoordinator_.pushIncrementForSongPk(currentTrackPk_);
 }
 

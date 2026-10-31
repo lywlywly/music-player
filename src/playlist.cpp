@@ -1,228 +1,221 @@
 #include "playlist.h"
-Playlist::Playlist(SongStore &&st, PlaybackQueue &queue, int initialLastPlayed,
-                   GlobalColumnLayoutManager &columnLayoutManager,
-                   QObject *parent)
-    : QAbstractTableModel(parent), store{std::move(st)}, playbackQueue{queue},
-      lastPlayed(initialLastPlayed), columnLayoutManager_{columnLayoutManager} {
-  connect(&columnLayoutManager_, &GlobalColumnLayoutManager::layoutChanged,
-          this, [this]() {
-            beginResetModel();
-            endResetModel();
-          });
+#include "databasemanager.h"
+#include "fieldformatter.h"
+#include <QSqlError>
+#include <QSqlQuery>
+#include <QUuid>
+#include <QtConcurrent>
+#include <optional>
+#include <stdexcept>
+#include <unicode/coll.h>
+#include <unicode/locid.h>
+
+UErrorCode status = U_ZERO_ERROR;
+icu::Locale loc = icu::Locale::forLanguageTag("zh-u-kr-latn-hani-hrkt", status);
+// ordering based on simplified chinese pinyin, default ordering for other
+// characters. Keep latin letters first, then Han (Hanzi, Kanji, Hanja), then
+// Hiragana and Katakana
+std::unique_ptr<icu::Collator> collator(icu::Collator::createInstance(loc,
+                                                                      status));
+
+namespace {
+struct SortValue {
+  bool missing = false;
+  FieldValue field;
+};
+
+bool compareText(const std::string &a, const std::string &b, bool ascending) {
+  icu::UnicodeString ua = icu::UnicodeString::fromUTF8(a);
+  icu::UnicodeString ub = icu::UnicodeString::fromUTF8(b);
+  const UCollationResult cmp =
+      static_cast<UCollationResult>(collator->compare(ua, ub));
+  return ascending ? (cmp == UCOL_LESS) : (cmp == UCOL_GREATER);
 }
 
-int Playlist::rowCount(const QModelIndex &) const { return songCount(); }
-
-int Playlist::columnCount(const QModelIndex &) const {
-  return columnLayoutManager_.visibleColumnIds().size();
+std::optional<bool> compareTyped(const SortValue &a, const SortValue &b,
+                                 ValueType valueType, bool ascending) {
+  bool ok = false;
+  const int cmp = compareFieldValues(a.field, b.field, valueType, ok);
+  if (ok) {
+    if (cmp == 0) {
+      return false;
+    }
+    return ascending ? (cmp < 0) : (cmp > 0);
+  }
+  return std::nullopt;
 }
 
-QVariant Playlist::data(const QModelIndex &index, int role) const {
-  if (!index.isValid() || role != Qt::DisplayRole) {
-    return {};
-  }
-
-  const QString columnId = columnIdAt(index.column());
-  if (columnId.isEmpty()) {
-    return {};
-  }
-
-  if (columnId == "status") {
-    const int pk = store.getPkByIndex(index.row());
-    const auto &[curPk, curPl] = playbackQueue.getCurrentPk();
-
-    if ((pk == curPk) && (curPl == this)) {
-      switch (playbackQueue.getStatus()) {
-      case PlaybackQueue::PlaybackStatus::Playing:
-        return QString{"\u25B6"};
-      case PlaybackQueue::PlaybackStatus::Paused:
-        return QString{"\u23F8"};
-      default:
-        return {};
-      }
-    }
-
-    auto [order, pl] = playbackQueue.getOrder(pk);
-    if ((order >= 0) && (pl == this)) {
-      return QVariant{order};
-    }
-
-    return {};
-  }
-
-  const MSong &song = getSongByIndex(index.row());
-  const std::string field = columnId.toStdString();
-  auto it = song.find(field);
+SortValue resolveSortValue(const SongLibrary &library, int songPk,
+                           const std::string &columnId) {
+  const MSong &song = library.getSongByPK(songPk);
+  auto it = song.find(columnId);
   if (it == song.end()) {
-    return {};
+    return {true, FieldValue("", columnId)};
   }
-  return it->second.display();
+
+  return {false, it->second};
+}
+} // namespace
+
+Playlist::Playlist(int playlistId, SongLibrary &lib,
+                   DatabaseManager &databaseManager, QObject *parent)
+    : QObject(parent), playlistId_{playlistId}, library_{lib},
+      databaseManager_{databaseManager} {}
+
+bool Playlist::loadState() {
+  if (playlistId_ <= 0) {
+    return false;
+  }
+
+  QSqlDatabase &db = databaseManager_.db();
+  QSqlQuery qPlaylist(db);
+  qPlaylist.prepare(R"(
+      SELECT last_played
+      FROM playlists
+      WHERE playlist_id=:playlist_id
+  )");
+  qPlaylist.bindValue(":playlist_id", playlistId_);
+  if (!qPlaylist.exec() || !qPlaylist.next()) {
+    return false;
+  }
+  lastPlayed_ = qPlaylist.value(0).toInt();
+
+  songPKs_.clear();
+  QSqlQuery qItems(db);
+  qItems.prepare(R"(
+      SELECT song_id
+      FROM playlist_items
+      WHERE playlist_id=:playlist_id
+      ORDER BY position ASC
+  )");
+  qItems.bindValue(":playlist_id", playlistId_);
+  if (!qItems.exec()) {
+    return false;
+  }
+  while (qItems.next()) {
+    songPKs_.push_back(qItems.value(0).toInt());
+  }
+
+  rebuildIndices();
+  return true;
 }
 
-QVariant Playlist::headerData(int section, Qt::Orientation orientation,
-                              int role) const {
-  if (role != Qt::DisplayRole) {
-    return {};
-  }
+int Playlist::id() const { return playlistId_; }
 
-  if (orientation == Qt::Orientation::Horizontal) {
-    const QString columnId = columnIdAt(section);
-    const ColumnDefinition *definition =
-        columnLayoutManager_.registry().findColumn(columnId);
-    return definition ? QVariant{definition->title} : QVariant{columnId};
-  }
-
-  return QString::number(section + 1);
-}
-
-void Playlist::sortByColumnId(const QString &columnId, int order) {
-  const ColumnDefinition *definition =
-      columnLayoutManager_.registry().findColumn(columnId);
-  if (!definition || !definition->sortable) {
-    return;
-  }
-
-  store.sortByField(columnId.toStdString(), order);
-  if (rowCount() == 0 || columnCount() == 0) {
-    return;
-  }
-
-  emit dataChanged(index(0, 0), index(rowCount() - 1, columnCount() - 1));
-}
-
-void Playlist::sortByField(std::string field, int order) {
-  sortByColumnId(QString::fromStdString(field), order);
-}
-
-QString Playlist::columnIdAt(int section) const {
-  if (section < 0) {
-    return {};
-  }
-
-  const QList<QString> ids = columnLayoutManager_.visibleColumnIds();
-
-  if (section >= ids.size()) {
-    return {};
-  }
-
-  return ids[section];
-}
-
-int Playlist::songCount() const { return store.songCount(); }
+int Playlist::songCount() const { return songPKs_.size(); }
 
 bool Playlist::empty() const { return songCount() == 0; }
 
-void Playlist::addSong(MSong &&s) {
-  const int row = songCount();
-  beginInsertRows(QModelIndex(), row, row);
-  store.addSong(std::move(s));
-  endInsertRows();
-
-  if (sizeChangeCallback)
-    sizeChangeCallback(songCount());
-}
-
-void Playlist::addSongByPk(int songPk) {
-  const int row = songCount();
-  beginInsertRows(QModelIndex(), row, row);
-  store.addSongByPk(songPk);
-  endInsertRows();
-
-  if (sizeChangeCallback)
-    sizeChangeCallback(songCount());
-}
-
-void Playlist::addSongs(std::vector<MSong> &&items) {
-  if (items.empty())
-    return;
-
-  for (auto &s : items) {
-    const int row = songCount();
-    beginInsertRows(QModelIndex(), row, row);
-    store.addSong(std::move(s));
-    endInsertRows();
-  }
-  items = {}; // clear consumed input
-
-  if (sizeChangeCallback)
-    sizeChangeCallback(songCount());
-}
-
-void Playlist::removeSong(int index) {
-  beginRemoveRows(QModelIndex(), index, index);
-  store.removeSongByIndex(index);
-  endRemoveRows();
-
-  if (sizeChangeCallback)
-    sizeChangeCallback(songCount());
-}
-
-void Playlist::clear() {
-  beginResetModel();
-  store.clear();
-  endResetModel();
-
-  if (sizeChangeCallback)
-    sizeChangeCallback(songCount());
+bool Playlist::containsPk(int pk) const {
+  return pk >= 0 && pk < static_cast<int>(indices_.size()) && indices_[pk] >= 0;
 }
 
 const MSong &Playlist::getSongByPk(int pk) const {
-  return store.getSongByPk(pk);
+  if (indices_[pk] == -1) {
+    throw std::logic_error("Key not in view");
+  }
+  return library_.getSongByPK(pk);
 }
 
 const MSong &Playlist::getSongByIndex(int i) const {
-  return store.getSongByIndex(i);
+  return library_.getSongByPK(songPKs_.at(i));
 }
 
-const int Playlist::getIndexByPk(int pk) const {
-  return store.getIndexByPk(pk);
-}
-
-const int Playlist::getPkByIndex(int i) const { return store.getPkByIndex(i); }
-
-void Playlist::registerStatusUpdateCallback() {
-  std::function<void(int, Playlist *)> statusUpdate = [this](int pk,
-                                                             Playlist *pl) {
-    if (pl != this) {
-      return;
-    }
-
-    const int row = this->getIndexByPk(pk);
-    const int statusColumn =
-        columnLayoutManager_.visibleColumnIds().indexOf("status");
-    if (statusColumn < 0) {
-      return;
-    }
-
-    emit dataChanged(index(row, statusColumn), index(row, statusColumn));
-  };
-  playbackQueue.setStatusUpdateCallback(std::move(statusUpdate));
-}
-
-void Playlist::unregisterStatusUpdateCallback() {
-  // TODO
-}
-
-void Playlist::setSizeChangeCallback(SizeChangeCallback &&cb_) const {
-  this->sizeChangeCallback = std::move(cb_);
-}
-
-void Playlist::unsetSizeChangeCallback() const {
-  this->sizeChangeCallback = nullptr;
-}
-
-void Playlist::setLastPlayed(int newLastPlayed) {
-  if (newLastPlayed < 0) {
-    return;
+int Playlist::getIndexByPk(int pk) const {
+  if (indices_[pk] == -1) {
+    throw std::logic_error("Key not in view");
   }
-  lastPlayed = newLastPlayed;
-  store.setLastPlayed(newLastPlayed);
+  return indices_.at(pk);
 }
 
-int Playlist::getLastPlayed() const { return lastPlayed; }
+int Playlist::getPkByIndex(int i) const { return songPKs_.at(i); }
 
-void Playlist::refreshMetadataFromFiles(
-    const std::function<void(int current, int total)> &progressCallback) {
+int Playlist::getLastPlayed() const { return lastPlayed_; }
+
+std::vector<int> Playlist::addFiles(const std::vector<std::string> &paths,
+                                    const ProgressFn &progress) {
+  std::vector<int> pks;
+  pks.reserve(paths.size());
+  const int total = static_cast<int>(paths.size());
+  for (int i = 0; i < total; ++i) {
+    pks.push_back(library_.addTolibrary(library_.loadSongFromFile(paths[i])));
+    if (progress) {
+      progress(i + 1, total);
+    }
+  }
+  if (pks.empty()) {
+    return pks;
+  }
+
+  const int first = songCount();
+  emit aboutToInsertSongs(first, first + static_cast<int>(pks.size()) - 1);
+  for (int pk : pks) {
+    appendSongPk(pk);
+  }
+  emit songsInserted(first, songCount() - 1);
+  return pks;
+}
+
+void Playlist::addSong(MSong &&s) {
+  const int songId = library_.addTolibrary(std::move(s));
+  addSongByPk(songId);
+}
+
+void Playlist::addSongByPk(int songId) {
+  const int row = songCount();
+  emit aboutToInsertSongs(row, row);
+  appendSongPk(songId);
+  emit songsInserted(row, row);
+}
+
+void Playlist::removeSong(int row) {
+  emit aboutToRemoveSongs(row, row);
+  songPKs_.erase(songPKs_.begin() + row);
+  rebuildIndices();
+  emit songsRemoved(row, row);
+}
+
+void Playlist::clear() {
+  emit aboutToResetSongs();
+  songPKs_.clear();
+  indices_.clear();
+  if (playlistId_ > 0) {
+    removePlaylistItemsInDb();
+  }
+  emit songsReset();
+}
+
+void Playlist::sortByField(const std::string &f, int order) {
+  const bool ascending = (order == 0);
+
+  std::stable_sort(songPKs_.begin(), songPKs_.end(), [&](int i, int j) {
+    const SortValue valueA = resolveSortValue(library_, i, f);
+    const SortValue valueB = resolveSortValue(library_, j, f);
+
+    if (valueA.missing != valueB.missing) {
+      // Missing values always last.
+      return !valueA.missing;
+    }
+    if (valueA.missing && valueB.missing) {
+      return false;
+    }
+
+    const ValueType valueType = valueA.field.valueType();
+    Q_ASSERT(valueType == valueB.field.valueType());
+    if (const std::optional<bool> typed =
+            compareTyped(valueA, valueB, valueType, ascending);
+        typed.has_value()) {
+      return typed.value();
+    }
+
+    return compareText(valueA.field.text, valueB.field.text, ascending);
+  });
+
+  rebuildIndices();
+  emit songsReordered();
+}
+
+void Playlist::refreshMetadataFromFiles(const ProgressFn &progress) {
   const int totalRows = songCount();
   std::vector<std::string> filepaths;
   filepaths.reserve(totalRows);
@@ -239,21 +232,142 @@ void Playlist::refreshMetadataFromFiles(
     filepaths.push_back(it->second.text);
   }
 
-  beginResetModel();
-  store.refreshSongsFromFilepaths(filepaths, progressCallback);
-  endResetModel();
+  emit aboutToResetSongs();
+  library_.refreshSongsFromFilepaths(filepaths, progress);
+  emit songsReset();
+}
+
+void Playlist::setLastPlayed(int songPk) {
+  if (songPk < 0) {
+    return;
+  }
+  lastPlayed_ = songPk;
+  if (playlistId_ <= 0) {
+    return;
+  }
+
+  QSqlDatabase &db = databaseManager_.db();
+  QSqlQuery q(db);
+  q.prepare(R"(
+      UPDATE playlists
+      SET last_played=:last_played
+      WHERE playlist_id=:playlist_id
+  )");
+  q.bindValue(":last_played", songPk);
+  q.bindValue(":playlist_id", playlistId_);
+  if (!q.exec()) {
+    qFatal("setLastPlayed failed: %s", q.lastError().text().toUtf8().data());
+  }
 }
 
 void Playlist::emitSongDataChangedBySongPk(int songPk) {
   if (songPk < 0) {
     return;
   }
-  if (rowCount() == 0 || columnCount() == 0) {
+  if (!containsPk(songPk)) {
     return;
   }
-  if (!store.containsPk(songPk)) {
+  emit songDataChanged(indices_[songPk]);
+}
+
+void Playlist::appendSongPk(int songId) {
+  if (songId < 0) {
+    qFatal("addSongByPk: invalid song id=%d", songId);
+  }
+  static_cast<void>(library_.getSongByPK(songId));
+  songPKs_.push_back(songId);
+  if (indices_.size() < songId + 1)
+    indices_.resize(songId + 1, -1);
+  indices_[songId] = songPKs_.size() - 1;
+  if (playlistId_ > 0) {
+    appendSongToPlaylistInDb(songId, songPKs_.size());
+  }
+}
+
+void Playlist::appendSongToPlaylistInDb(int songId, int position) {
+  QSqlDatabase &db = databaseManager_.db();
+  QSqlQuery q(db);
+  q.prepare(R"(
+      INSERT INTO playlist_items(playlist_id, song_id, position)
+      VALUES(:playlist_id, :song_id, :position)
+  )");
+  q.bindValue(":playlist_id", playlistId_);
+  q.bindValue(":song_id", songId);
+  q.bindValue(":position", position);
+  if (!q.exec()) {
+    qFatal("appendSongToPlaylistInDb failed: %s",
+           q.lastError().text().toUtf8().data());
+  }
+}
+
+void Playlist::removePlaylistItemsInDb() {
+  if (playlistId_ <= 0) {
     return;
   }
-  const int row = store.getIndexByPk(songPk);
-  emit dataChanged(index(row, 0), index(row, columnCount() - 1));
+
+  QSqlDatabase &mainDb = databaseManager_.db();
+  const QString dbPath = mainDb.databaseName();
+  if (dbPath.isEmpty() || dbPath == ":memory:") {
+    QSqlQuery q(mainDb);
+    q.prepare(R"(
+        DELETE FROM playlist_items
+        WHERE playlist_id=:playlist_id
+    )");
+    q.bindValue(":playlist_id", playlistId_);
+    if (!q.exec()) {
+      qFatal("removePlaylistItemsInDb failed: %s",
+             q.lastError().text().toUtf8().data());
+    }
+    return;
+  }
+
+  const int targetPlaylistId = playlistId_;
+  QtConcurrent::run([dbPath, targetPlaylistId]() {
+    const QString connectionName =
+        QStringLiteral("remove_playlist_items_%1")
+            .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
+    db.setDatabaseName(dbPath);
+    if (!db.open()) {
+      qWarning() << "removePlaylistItemsInDb worker open failed:"
+                 << db.lastError().text();
+      db = QSqlDatabase();
+      QSqlDatabase::removeDatabase(connectionName);
+      return;
+    }
+
+    QSqlQuery q(db);
+    q.prepare(R"(
+        DELETE FROM playlist_items
+        WHERE playlist_id=:playlist_id
+    )");
+    q.bindValue(":playlist_id", targetPlaylistId);
+    if (!q.exec()) {
+      qWarning() << "removePlaylistItemsInDb worker delete failed:"
+                 << q.lastError().text();
+    }
+
+    db.close();
+    db = QSqlDatabase();
+    QSqlDatabase::removeDatabase(connectionName);
+  });
+}
+
+void Playlist::rebuildIndices() {
+  if (songPKs_.empty()) {
+    indices_.clear();
+    return;
+  }
+
+  int maxPk = 0;
+  for (int pk : songPKs_)
+    if (pk > maxPk)
+      maxPk = pk;
+
+  indices_.assign(maxPk + 1, -1);
+
+  for (int row = 0; row < (int)songPKs_.size(); ++row) {
+    int pk = songPKs_[row];
+    indices_[pk] = row;
+  }
 }

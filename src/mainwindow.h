@@ -10,6 +10,7 @@
 #include "playbackbackendmanager.h"
 #include "playbackmanager.h"
 #include "playlist.h"
+#include "playlistcollection.h"
 #include "playlisttabs.h"
 #include "songlibrary.h"
 #include "statusruntimesymboltable.h"
@@ -104,6 +105,9 @@ private:
   GlobalColumnLayoutManager columnLayoutManager_;
   DatabaseManager databaseManager_;
   SongLibrary songLibrary;
+  // Child QObject created after ui->setupUi, so UI widgets (tabs, views,
+  // models) are destroyed before the playlists they show.
+  PlaylistCollection *playlists_ = nullptr;
   PlaylistTabs *playlistTabs;
   LyricsManager lyricsManager; // TODO: use value type
   QPixmap pixmap;

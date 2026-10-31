@@ -26,6 +26,7 @@
 #include "../globalcolumnlayoutmanager.h"
 #include "../playbackmanager.h"
 #include "../playbackqueue.h"
+#include "../playlistcollection.h"
 #include "../playlisttabs.h"
 #include "../songlibrary.h"
 #include "../songparser.h"
@@ -150,6 +151,8 @@ private slots:
   void renameTab_updatesTabTextAndDb();
 
 private:
+  void recreateTabs();
+
   ColumnRegistry *registry_ = nullptr;
   DatabaseManager *databaseManager_ = nullptr;
   SongLibrary *library_ = nullptr;
@@ -157,6 +160,7 @@ private:
   PlaybackQueue *queue_ = nullptr;
   PlaybackManager *manager_ = nullptr;
   QActionGroup *playbackOrderGroup_ = nullptr;
+  PlaylistCollection *collection_ = nullptr;
   PlaylistTabs *tabs_ = nullptr;
   QString connectionName_;
 };
@@ -194,14 +198,24 @@ void TestPlaylistTabs::init() {
   queue_ = new PlaybackQueue();
   manager_ = new PlaybackManager(*queue_);
   playbackOrderGroup_ = makePlaybackOrderGroup();
+  recreateTabs();
+}
+
+void TestPlaylistTabs::recreateTabs() {
+  delete tabs_;
+  delete collection_;
+  collection_ = new PlaylistCollection(*library_, *databaseManager_);
+  collection_->loadAll();
   tabs_ = new PlaylistTabs();
   tabs_->init(library_, queue_, manager_, playbackOrderGroup_, registry_,
-              layout_, databaseManager_);
+              layout_, collection_);
 }
 
 void TestPlaylistTabs::cleanup() {
   delete tabs_;
   tabs_ = nullptr;
+  delete collection_;
+  collection_ = nullptr;
   delete playbackOrderGroup_;
   playbackOrderGroup_ = nullptr;
   delete manager_;
@@ -270,7 +284,7 @@ void TestPlaylistTabs::
   pl->addSong(makeSong("A", "Artist", "/tmp/pt-notify-a.mp3", "1"));
   const int songPk = pl->getPkByIndex(0);
 
-  QSignalSpy spy(pl, &QAbstractItemModel::dataChanged);
+  QSignalSpy spy(pl, &Playlist::songDataChanged);
 
   tabs_->notifySongDataChangedInAllPlaylists(songPk);
   QCOMPARE(spy.count(), 1);
@@ -983,10 +997,7 @@ void TestPlaylistTabs::startupRestore_loadsAllPlaylistsInSavedOrder() {
   QVERIFY(updatePlaylistTabOrder(databaseManager_->db(),
                                  {1, playlistB, playlistA}));
 
-  delete tabs_;
-  tabs_ = new PlaylistTabs();
-  tabs_->init(library_, queue_, manager_, playbackOrderGroup_, registry_,
-              layout_, databaseManager_);
+  recreateTabs();
 
   QCOMPARE(tabs_->tabWidget()->count(), 3);
   QCOMPARE(tabs_->tabWidget()->tabText(0), QString("Default"));
@@ -1008,10 +1019,7 @@ void TestPlaylistTabs::startupRestore_restoresLastOpenedPlaylistTab() {
   QSettings settings;
   settings.setValue("playlist/last_opened_id", playlistB);
 
-  delete tabs_;
-  tabs_ = new PlaylistTabs();
-  tabs_->init(library_, queue_, manager_, playbackOrderGroup_, registry_,
-              layout_, databaseManager_);
+  recreateTabs();
 
   QCOMPARE(tabs_->tabWidget()->currentIndex(), 2);
   QCOMPARE(tabs_->tabWidget()->tabBar()->tabData(2).toInt(), playlistB);
@@ -1032,10 +1040,7 @@ void TestPlaylistTabs::startupRestore_recoversCorruptedTabOrder() {
       q.exec(QString("UPDATE playlists SET tab_order=3 WHERE playlist_id=%1")
                  .arg(playlistB)));
 
-  delete tabs_;
-  tabs_ = new PlaylistTabs();
-  tabs_->init(library_, queue_, manager_, playbackOrderGroup_, registry_,
-              layout_, databaseManager_);
+  recreateTabs();
 
   QCOMPARE(tabs_->tabWidget()->count(), 3);
   QCOMPARE(tabs_->tabWidget()->tabBar()->tabData(0).toInt(), 1);
@@ -1071,8 +1076,11 @@ void TestPlaylistTabs::removeTab_deletesNonDefaultPlaylist() {
   QVERIFY(q.next());
   QCOMPARE(q.value(0).toInt(), 1);
 
+  QCOMPARE(tabs_->tabWidget()->currentIndex(), 1);
   QVERIFY(tabs_->removePlaylistTabByIndex(1));
   QCOMPARE(tabs_->tabWidget()->count(), 1);
+  QVERIFY(collection_->playlist(removedPlaylistId) == nullptr);
+  QCOMPARE(tabs_->currentPlaylist(), collection_->playlist(1));
 
   QVERIFY(q.exec(QString("SELECT COUNT(*) FROM playlists WHERE playlist_id=%1")
                      .arg(removedPlaylistId)));
@@ -1153,10 +1161,7 @@ void TestPlaylistTabs::renameTab_updatesTabTextAndDb() {
   const int playlistId = insertPlaylistRow(databaseManager_->db(), "Old", 1);
   QVERIFY(playlistId > 0);
 
-  delete tabs_;
-  tabs_ = new PlaylistTabs();
-  tabs_->init(library_, queue_, manager_, playbackOrderGroup_, registry_,
-              layout_, databaseManager_);
+  recreateTabs();
 
   QCOMPARE(tabs_->tabWidget()->count(), 2);
   QCOMPARE(tabs_->tabWidget()->tabText(1), QString("Old"));

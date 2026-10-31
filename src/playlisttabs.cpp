@@ -1,6 +1,6 @@
 #include "playlisttabs.h"
-#include "databasemanager.h"
 #include "filemanagerutils.h"
+#include "playlisttablemodel.h"
 #include "songpropertiesdialog.h"
 #include "ui_playlisttabs.h"
 #include <QActionGroup>
@@ -13,8 +13,6 @@
 #include <QSettings>
 #include <QShortcut>
 #include <QSignalBlocker>
-#include <QSqlError>
-#include <QSqlQuery>
 #include <QtGlobal>
 #include <algorithm>
 
@@ -55,17 +53,30 @@ PlaylistTabs::~PlaylistTabs() { delete ui; }
 void PlaylistTabs::init(SongLibrary *s, PlaybackQueue *p, PlaybackManager *c,
                         QActionGroup *a, ColumnRegistry *registry,
                         GlobalColumnLayoutManager *layoutManager,
-                        DatabaseManager *databaseManager) {
+                        PlaylistCollection *collection) {
   songLibrary = s;
-  databaseManager_ = databaseManager;
+  collection_ = collection;
   playbackQueue_ = p;
   control = c;
   playbackOrderMenuActionGroup = a;
   Q_ASSERT(registry != nullptr);
   Q_ASSERT(layoutManager != nullptr);
-  Q_ASSERT(databaseManager_ != nullptr);
+  Q_ASSERT(collection_ != nullptr);
   columnRegistry_ = registry;
   columnLayoutManager_ = layoutManager;
+  connect(collection_, &PlaylistCollection::playlistCreated, this,
+          [this](int playlistId) {
+            addPlaylistTab(collection_->name(playlistId), playlistId);
+          });
+  connect(collection_, &PlaylistCollection::playlistAboutToBeRemoved, this,
+          &PlaylistTabs::removePlaylistTab);
+  connect(collection_, &PlaylistCollection::playlistRenamed, this,
+          [this](int playlistId, const QString &name) {
+            const int index = tabIndexForPlaylistId(playlistId);
+            if (index >= 0) {
+              ui->tabWidget->setTabText(index, name);
+            }
+          });
   setUpPlaylist();
   setUpPlaybackManager();
   setUpCurrentPlaylist();
@@ -149,21 +160,12 @@ void PlaylistTabs::createNewPlaylistTabFromSongIds(const QList<int> &songIds) {
     return;
   }
 
-  const QString playlistName = getNewPlaylistName();
-  addNewPlaylistTab(playlistName);
-  Playlist *playlist = currentPlaylist();
-  for (int songId : songIds) {
-    playlist->addSongByPk(songId);
-  }
+  collection_->createPlaylist(getNewPlaylistName(),
+                              std::vector<int>(songIds.begin(), songIds.end()));
 }
 
 void PlaylistTabs::notifySongDataChangedInAllPlaylists(int songPk) {
-  if (songPk < 0) {
-    return;
-  }
-  for (auto &entry : playlistMap) {
-    entry.second.emitSongDataChangedBySongPk(songPk);
-  }
+  collection_->notifySongChanged(songPk);
 }
 
 void PlaylistTabs::setUpPlaybackManager() {
@@ -226,7 +228,7 @@ void PlaylistTabs::onTabContextMenuRequested(const QPoint &pos) {
   QAction *selected = menu.exec(tabBar->mapToGlobal(pos));
 
   if (selected == addAction) {
-    addNewPlaylistTab(getNewPlaylistName());
+    collection_->createPlaylist(getNewPlaylistName());
   } else if (selected == refreshAction && index != -1) {
     if (Playlist *playlist = playlistForTabIndex(index)) {
       refreshPlaylistMetadata(playlist);
@@ -260,8 +262,8 @@ void PlaylistTabs::setUpCurrentPlaylist() {
 }
 
 void PlaylistTabs::initializePlaylists() {
-  const QList<PlaylistDefinition> definitions = loadPlaylistsInDisplayOrder();
-  if (definitions.isEmpty()) {
+  const std::vector<int> playlistIds = collection_->playlistIdsInOrder();
+  if (playlistIds.empty()) {
     qFatal("initializePlaylists: no playlist definitions");
   }
 
@@ -273,8 +275,8 @@ void PlaylistTabs::initializePlaylists() {
       delete tab;
     }
 
-    for (const PlaylistDefinition &definition : definitions) {
-      addPlaylistTab(definition.name, definition.playlistId);
+    for (int playlistId : playlistIds) {
+      addPlaylistTab(collection_->name(playlistId), playlistId);
     }
     QSettings settings;
     const int lastOpenedPlaylistId =
@@ -293,7 +295,9 @@ void PlaylistTabs::initializePlaylists() {
 }
 
 void PlaylistTabs::setUpTableView(Playlist *pl, QTableView *tbv) {
-  tbv->setModel(pl);
+  auto *model = new PlaylistTableModel(*pl, *playbackQueue_,
+                                       *columnLayoutManager_, tbv);
+  tbv->setModel(model);
   tbv->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
   tbv->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
   tbv->setSortingEnabled(true);
@@ -318,7 +322,8 @@ void PlaylistTabs::setUpTableView(Playlist *pl, QTableView *tbv) {
   header->setSectionsMovable(true);
   header->setContextMenuPolicy(Qt::CustomContextMenu);
 
-  connect(header, &QHeaderView::sectionClicked, this, [this, tbv, pl](int idx) {
+  connect(header, &QHeaderView::sectionClicked, this,
+          [this, tbv, model](int idx) {
     const QList<QString> visibleIds = columnLayoutManager_->visibleColumnIds();
     if (idx < 0 || idx >= visibleIds.size()) {
       tbv->horizontalHeader()->setSortIndicatorShown(false);
@@ -333,7 +338,8 @@ void PlaylistTabs::setUpTableView(Playlist *pl, QTableView *tbv) {
     }
 
     tbv->horizontalHeader()->setSortIndicatorShown(true);
-    pl->sortByColumnId(columnId, tbv->horizontalHeader()->sortIndicatorOrder());
+    model->sortByColumnId(columnId,
+                          tbv->horizontalHeader()->sortIndicatorOrder());
   });
 
   connect(header, &QHeaderView::sectionMoved, this, [this, tbv](int, int, int) {
@@ -368,32 +374,14 @@ void PlaylistTabs::setUpTableView(Playlist *pl, QTableView *tbv) {
   applyLayoutToTableView(tbv);
 }
 
-void PlaylistTabs::createPlaylist(int playlistId, QTableView *tbv) {
-  SongStore store{*songLibrary, *databaseManager_, playlistId};
-  int lastPlayed = 1;
-  if (!store.loadPlaylistState(lastPlayed)) {
-    qFatal("createPlaylist: failed to load playlist state");
-  }
-
-  auto [it, inserted] = playlistMap.emplace(
-      std::piecewise_construct, std::forward_as_tuple(playlistId),
-      std::forward_as_tuple(std::move(store), *playbackQueue_, lastPlayed,
-                            *columnLayoutManager_));
-  if (!inserted) {
-    qFatal("createPlaylist: duplicate playlist id");
-  }
-
-  Playlist &playlist = it->second;
-  setUpTableView(&playlist, tbv);
-  playlist.registerStatusUpdateCallback();
-}
-
 void PlaylistTabs::addPlaylistTab(const QString &playlistName, int playlistId) {
+  Playlist *playlist = collection_->playlist(playlistId);
+  Q_ASSERT(playlist != nullptr);
   QWidget *newTab = new QWidget;
   QGridLayout *layout = new QGridLayout(newTab);
   QTableView *tbv = new QTableView(this);
   layout->addWidget(tbv);
-  createPlaylist(playlistId, tbv);
+  setUpTableView(playlist, tbv);
   qDebug() << "add playlist:" << playlistName;
   ui->tabWidget->addTab(newTab, playlistName);
   const int tabIndex = ui->tabWidget->indexOf(newTab);
@@ -401,26 +389,14 @@ void PlaylistTabs::addPlaylistTab(const QString &playlistName, int playlistId) {
   ui->tabWidget->setCurrentWidget(newTab);
 }
 
-void PlaylistTabs::addNewPlaylistTab(const QString &playlistName) {
-  const int playlistId =
-      insertPlaylistRow(playlistName, ui->tabWidget->count());
-  addPlaylistTab(playlistName, playlistId);
-  persistPlaylistTabOrder();
-}
-
-int PlaylistTabs::insertPlaylistRow(const QString &playlistName, int tabOrder) {
-  QSqlQuery q(databaseManager_->db());
-  q.prepare(R"(
-      INSERT INTO playlists(name, last_played, tab_order)
-      VALUES(:name, 1, :tab_order)
-  )");
-  q.bindValue(":name", playlistName);
-  q.bindValue(":tab_order", tabOrder);
-  if (!q.exec()) {
-    qFatal("insertPlaylistRow failed: %s",
-           q.lastError().text().toUtf8().data());
+void PlaylistTabs::removePlaylistTab(int playlistId) {
+  const int index = tabIndexForPlaylistId(playlistId);
+  if (index < 0) {
+    return;
   }
-  return q.lastInsertId().toInt();
+  QWidget *tab = ui->tabWidget->widget(index);
+  ui->tabWidget->removeTab(index);
+  delete tab;
 }
 
 QString PlaylistTabs::getNewPlaylistName() {
@@ -457,39 +433,14 @@ bool PlaylistTabs::removePlaylistTabByIndex(int index) {
   if (index < 0 || index >= ui->tabWidget->count()) {
     return false;
   }
-  if (ui->tabWidget->count() <= 1) {
-    return false;
-  }
-  const int playlistId = playlistIdForTabIndex(index);
-  auto it = playlistMap.find(playlistId);
-  if (it == playlistMap.end()) {
-    return false;
-  }
-  if (!deletePlaylistById(playlistId)) {
-    return false;
-  }
-  QWidget *tab = ui->tabWidget->widget(index);
-  ui->tabWidget->removeTab(index);
-  delete tab;
-  playlistMap.erase(it);
-  persistPlaylistTabOrder();
-  return true;
+  return collection_->removePlaylist(playlistIdForTabIndex(index));
 }
 
 bool PlaylistTabs::renamePlaylistTabByIndex(int index, const QString &newName) {
   if (index < 0 || index >= ui->tabWidget->count()) {
     return false;
   }
-  const QString trimmedName = newName.trimmed();
-  if (trimmedName.isEmpty()) {
-    return false;
-  }
-  const int playlistId = playlistIdForTabIndex(index);
-  if (!updatePlaylistNameById(playlistId, trimmedName)) {
-    return false;
-  }
-  ui->tabWidget->setTabText(index, trimmedName);
-  return true;
+  return collection_->renamePlaylist(playlistIdForTabIndex(index), newName);
 }
 
 void PlaylistTabs::beginInlineRename(int index) {
@@ -605,12 +556,7 @@ void PlaylistTabs::openContainingFolderForRow(int row) {
 }
 
 Playlist *PlaylistTabs::playlistForTabIndex(int index) {
-  const int playlistId = playlistIdForTabIndex(index);
-  auto it = playlistMap.find(playlistId);
-  if (it == playlistMap.end()) {
-    return nullptr;
-  }
-  return &it->second;
+  return collection_->playlist(playlistIdForTabIndex(index));
 }
 
 int PlaylistTabs::playlistIdForTabIndex(int index) const {
@@ -620,151 +566,23 @@ int PlaylistTabs::playlistIdForTabIndex(int index) const {
   return ui->tabWidget->tabBar()->tabData(index).toInt();
 }
 
+int PlaylistTabs::tabIndexForPlaylistId(int playlistId) const {
+  for (int i = 0; i < ui->tabWidget->count(); ++i) {
+    if (playlistIdForTabIndex(i) == playlistId) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 void PlaylistTabs::persistPlaylistTabOrder() {
-  QList<int> playlistIdsInOrder;
+  std::vector<int> playlistIdsInOrder;
   for (int i = 0; i < ui->tabWidget->count(); ++i) {
     playlistIdsInOrder.push_back(playlistIdForTabIndex(i));
   }
-  if (!updatePlaylistTabOrder(playlistIdsInOrder)) {
+  if (!collection_->setPlaylistOrder(playlistIdsInOrder)) {
     qWarning() << "persistPlaylistTabOrder failed";
   }
-}
-
-QList<PlaylistTabs::PlaylistDefinition>
-PlaylistTabs::loadPlaylistsInDisplayOrder() const {
-  QSqlQuery q(databaseManager_->db());
-  if (!q.exec(R"(
-        SELECT playlist_id, name, tab_order
-        FROM playlists
-        ORDER BY tab_order ASC, playlist_id ASC
-    )")) {
-    qWarning() << "loadPlaylistsInDisplayOrder query failed:"
-               << q.lastError().text();
-    return {};
-  }
-
-  QList<PlaylistDefinition> definitions;
-  while (q.next()) {
-    definitions.push_back(PlaylistDefinition{.playlistId = q.value(0).toInt(),
-                                             .name = q.value(1).toString(),
-                                             .tabOrder = q.value(2).toInt()});
-  }
-  if (definitions.isEmpty()) {
-    QSqlQuery ensureDefault(databaseManager_->db());
-    if (!ensureDefault.exec(R"(
-          INSERT INTO playlists(playlist_id, name, last_played, tab_order)
-          VALUES(1, 'Default', 1, 0)
-      )")) {
-      qWarning() << "loadPlaylistsInDisplayOrder ensure default failed:"
-                 << ensureDefault.lastError().text();
-      return {};
-    }
-    definitions.push_back(
-        PlaylistDefinition{.playlistId = 1, .name = "Default", .tabOrder = 0});
-  }
-
-  bool tabOrderValid = true;
-  for (int i = 0; i < definitions.size(); ++i) {
-    if (definitions[i].tabOrder != i) {
-      tabOrderValid = false;
-      break;
-    }
-  }
-  if (tabOrderValid) {
-    return definitions;
-  }
-
-  std::sort(definitions.begin(), definitions.end(),
-            [](const PlaylistDefinition &a, const PlaylistDefinition &b) {
-              return a.playlistId < b.playlistId;
-            });
-  QList<int> repairedOrder;
-  repairedOrder.reserve(definitions.size());
-  for (const PlaylistDefinition &definition : definitions) {
-    repairedOrder.push_back(definition.playlistId);
-  }
-  if (!updatePlaylistTabOrder(repairedOrder)) {
-    qWarning() << "loadPlaylistsInDisplayOrder failed to repair tab_order";
-    return {};
-  }
-  for (int i = 0; i < definitions.size(); ++i) {
-    definitions[i].tabOrder = i;
-  }
-  return definitions;
-}
-
-bool PlaylistTabs::updatePlaylistTabOrder(
-    const QList<int> &playlistIdsInOrder) const {
-  if (playlistIdsInOrder.empty()) {
-    return true;
-  }
-
-  QSqlDatabase &db = databaseManager_->db();
-  if (!db.transaction()) {
-    qWarning() << "updatePlaylistTabOrder: failed to start transaction";
-    return false;
-  }
-
-  QSqlQuery q(db);
-  q.prepare(R"(
-      UPDATE playlists
-      SET tab_order=:tab_order
-      WHERE playlist_id=:playlist_id
-  )");
-  for (int i = 0; i < playlistIdsInOrder.size(); ++i) {
-    q.bindValue(":tab_order", i);
-    q.bindValue(":playlist_id", playlistIdsInOrder[i]);
-    if (!q.exec()) {
-      db.rollback();
-      qWarning() << "updatePlaylistTabOrder update failed:"
-                 << q.lastError().text();
-      return false;
-    }
-  }
-  if (!db.commit()) {
-    db.rollback();
-    qWarning() << "updatePlaylistTabOrder commit failed:" << db.lastError();
-    return false;
-  }
-  return true;
-}
-
-bool PlaylistTabs::deletePlaylistById(int playlistId) const {
-  if (playlistId <= 0) {
-    return false;
-  }
-
-  QSqlQuery q(databaseManager_->db());
-  q.prepare(R"(
-      DELETE FROM playlists
-      WHERE playlist_id=:playlist_id
-  )");
-  q.bindValue(":playlist_id", playlistId);
-  if (!q.exec()) {
-    qWarning() << "deletePlaylistById failed:" << q.lastError().text();
-    return false;
-  }
-  return true;
-}
-
-bool PlaylistTabs::updatePlaylistNameById(int playlistId,
-                                          const QString &name) const {
-  if (playlistId <= 0) {
-    return false;
-  }
-  QSqlQuery q(databaseManager_->db());
-  q.prepare(R"(
-      UPDATE playlists
-      SET name=:name
-      WHERE playlist_id=:playlist_id
-  )");
-  q.bindValue(":name", name);
-  q.bindValue(":playlist_id", playlistId);
-  if (!q.exec()) {
-    qWarning() << "updatePlaylistNameById failed:" << q.lastError().text();
-    return false;
-  }
-  return true;
 }
 
 void PlaylistTabs::applyLayoutToTableView(QTableView *tbv) {
