@@ -42,6 +42,14 @@ cd src
 ctest --test-dir build-tests --output-on-failure
 ```
 
+Format code (clang-format, style in `.clang-format`):
+
+```bash
+scripts/format.sh            # bash / zsh; add --check to only report
+scripts/format.ps1           # PowerShell; add -Check to only report
+git clang-format             # only the lines changed in staged files
+```
+
 ### TagLib source in this repo
 
 By default, this project builds TagLib from the bundled submodule at
