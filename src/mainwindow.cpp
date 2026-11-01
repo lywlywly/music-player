@@ -149,8 +149,22 @@ QIcon tintedIcon(const QString &iconPath, const QColor &color,
   return QIcon(pixmap);
 }
 
+QString playbackButtonStyleSheet() {
+  const bool dark =
+      QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark;
+  const QString hover = dark ? QStringLiteral("rgba(255, 255, 255, 0.12)")
+                             : QStringLiteral("rgba(0, 0, 0, 0.08)");
+  const QString pressed = dark ? QStringLiteral("rgba(255, 255, 255, 0.22)")
+                               : QStringLiteral("rgba(0, 0, 0, 0.16)");
+  return QStringLiteral("QToolButton { border: none; border-radius: 4px;"
+                        " background: transparent; padding: 0px; }"
+                        "QToolButton:hover:enabled { background: %1; }"
+                        "QToolButton:pressed:enabled { background: %2; }")
+      .arg(hover, pressed);
+}
+
 void setIconOnlyButton(QToolButton *button, const QString &iconPath,
-                       const QColor &color) {
+                       const QColor &color, const QString &styleSheet) {
   const QString label =
       button->text().isEmpty() ? button->toolTip() : button->text();
   const qreal iconRenderScale = button->devicePixelRatioF();
@@ -160,24 +174,31 @@ void setIconOnlyButton(QToolButton *button, const QString &iconPath,
   button->setAccessibleName(label);
   button->setIconSize(QSize(kPlaybackIconSize, kPlaybackIconSize));
   button->setFixedSize(24, 24);
-  button->setAutoRaise(false);
   button->setToolButtonStyle(Qt::ToolButtonIconOnly);
+  button->setStyleSheet(styleSheet);
 }
 
 void setUpPlaybackButtonIcons(Ui::MainWindow *ui) {
   const QColor color = playbackIconColor();
+  const QString styleSheet = playbackButtonStyleSheet();
   setIconOnlyButton(ui->play_button,
-                    QStringLiteral(":/icons/media-playback-start.svg"), color);
+                    QStringLiteral(":/icons/media-playback-start.svg"), color,
+                    styleSheet);
   setIconOnlyButton(ui->pause_button,
-                    QStringLiteral(":/icons/media-playback-pause.svg"), color);
+                    QStringLiteral(":/icons/media-playback-pause.svg"), color,
+                    styleSheet);
   setIconOnlyButton(ui->stop_button,
-                    QStringLiteral(":/icons/media-playback-stop.svg"), color);
+                    QStringLiteral(":/icons/media-playback-stop.svg"), color,
+                    styleSheet);
   setIconOnlyButton(ui->prev_button,
-                    QStringLiteral(":/icons/media-skip-backward.svg"), color);
+                    QStringLiteral(":/icons/media-skip-backward.svg"), color,
+                    styleSheet);
   setIconOnlyButton(ui->next_button,
-                    QStringLiteral(":/icons/media-skip-forward.svg"), color);
+                    QStringLiteral(":/icons/media-skip-forward.svg"), color,
+                    styleSheet);
   setIconOnlyButton(ui->random_button,
-                    QStringLiteral(":/icons/media-playback-random.svg"), color);
+                    QStringLiteral(":/icons/media-playback-random.svg"), color,
+                    styleSheet);
 }
 
 QPixmap scaledCoverPixmap(const QPixmap &source, const QSize &logicalMaxSize,
