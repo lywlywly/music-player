@@ -2,6 +2,7 @@
 #define LYRICSPANEL_H
 
 #include <QColor>
+#include <QPointer>
 #include <QPropertyAnimation>
 #include <QTextEdit>
 #include <QWidget>
@@ -26,7 +27,7 @@ private:
   void scrollToIndexCenter(int index);
   void colorLineText(const QTextBlock &block);
   Ui::LyricsPanel *ui;
-  QPropertyAnimation *anim_ = nullptr;
+  QPointer<QPropertyAnimation> anim_;
   QColor highlightTextColor_ = QColor(0, 100, 255);
   QTextEdit::ExtraSelection currentSelection_;
 };

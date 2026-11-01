@@ -55,6 +55,7 @@ private:
   void setUpImageAndLyrics(
       const MSong &song,
       const std::unordered_map<std::string, std::string> &remainingFields);
+  void clearImageAndLyrics();
   void open();
   void openFolder();
   void seek(int mseconds);

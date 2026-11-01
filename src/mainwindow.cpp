@@ -779,6 +779,7 @@ void MainWindow::stop() {
   currentBitrateBps_ = 0;
   currentTagBitrateBps_ = 0;
   useTagBitrateForCurrentTrack_ = false;
+  clearImageAndLyrics();
   updatePlaybackTimeStatus();
   sysMedia->setPlaybackState(ISystemMediaInterface::PlaybackState::Stopped);
 }
@@ -832,6 +833,13 @@ void MainWindow::setUpImageAndLyrics(
     ui->label->setText("No cover");
   }
   ui->lyricsPanel->setLyricsPanel(lyricsManager.getCurrentLyricsMap());
+}
+
+void MainWindow::clearImageAndLyrics() {
+  lyricsManager.setLyrics({});
+  ui->lyricsPanel->setLyricsPanel(lyricsManager.getCurrentLyricsMap());
+  pixmap = QPixmap();
+  ui->label->clear();
 }
 
 bool MainWindow::event(QEvent *event) {

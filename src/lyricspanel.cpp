@@ -17,11 +17,19 @@ LyricsPanel::~LyricsPanel() { delete ui; }
 void LyricsPanel::updateLyricsPanel(int index) { scrollToIndexCenter(index); }
 
 void LyricsPanel::setLyricsPanel(const std::map<int, std::string> &map) {
+  if (anim_) {
+    anim_->stop();
+  }
+  currentSelection_ = {};
+  ui->textEdit->setExtraSelections({});
   ui->textEdit->clear();
   ui->textEdit->setAlignment(Qt::AlignHCenter);
   for (const auto &[key, value] : map) {
     ui->textEdit->append(QString::fromUtf8(value));
   }
+  // append() keeps the view pinned to the bottom; start at the first line.
+  ui->textEdit->moveCursor(QTextCursor::Start);
+  ui->textEdit->verticalScrollBar()->setValue(0);
 }
 
 void LyricsPanel::setLyricsTextFont(const QFont &font) {
@@ -37,6 +45,9 @@ void LyricsPanel::setHighlightTextColor(const QColor &color) {
 }
 
 void LyricsPanel::smoothScrollTo(int targetY, int durationMs) {
+  if (anim_) {
+    anim_->stop();
+  }
   QScrollBar *vbar = ui->textEdit->verticalScrollBar();
   anim_ = new QPropertyAnimation(vbar, "value", this);
   anim_->setDuration(durationMs);

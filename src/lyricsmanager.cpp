@@ -13,6 +13,7 @@ void LyricsManager::setLyrics(std::map<int, std::string> &&map) {
     _keys.push_back(key);
   }
   keys = std::move(_keys);
+  currentLineIndex = -1;
 }
 
 const std::map<int, std::string> &LyricsManager::getCurrentLyricsMap() const {
