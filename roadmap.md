@@ -67,3 +67,6 @@ See `docs/architecture.md` (Design Principles).
 - `QMediaPlayer` seek accuracy on macOS:
   <https://forum.qt.io/topic/107671/qmediaplayer-unable-to-seek-accurately-on-macos>
 - Custom slider allows movement when no value is set
+- `.lrc` fallback misses files with non-ASCII artist/title on Windows
+  (UTF-8 file name decoded with the ANSI code page); see
+  `docs/architecture.md` (`LyricsLoader` / `LyricsManager`)

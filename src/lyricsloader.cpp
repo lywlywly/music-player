@@ -72,6 +72,9 @@ std::map<int, std::string> parseLyricsStream(std::istream &stream) {
   return lyricsMap;
 }
 
+// Known issue: on Windows, path(std::string) decodes with the ANSI code page,
+// so a non-ASCII (UTF-8) artist or title yields the wrong file name. See
+// docs/architecture.md (LyricsLoader / LyricsManager).
 std::filesystem::path findFileByTitleAndArtist(std::string_view title,
                                                std::string_view artist) {
   std::string filename = std::format("{} - {}.lrc", artist, title);

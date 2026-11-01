@@ -284,6 +284,18 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
   * Lyrics fetch + timed line updates from playback position.
   * On play, `MainWindow` refreshes song metadata once and prefers embedded
     lyrics from parsed tag fields; file-based `.lrc` loading is fallback.
+  * The `.lrc` fallback (`LyricsLoader::getLyrics`) opens
+    `<home>/Music/<artist> - <title>.lrc` only, where `<home>` is
+    `USERPROFILE` on Windows and `HOME` elsewhere; it does not look next to
+    the audio file.
+  * Known issue (Windows): the `.lrc` file name is built as a UTF-8
+    `std::string` and converted to `std::filesystem::path`, which on Windows
+    decodes narrow strings with the active ANSI code page, not UTF-8. A
+    non-ASCII artist or title (for example CJK) maps to a different file name,
+    so its `.lrc` is not found. macOS/Linux are unaffected, as is Windows with
+    the system-wide UTF-8 code page enabled. Fix: build the path from UTF-8
+    explicitly (`std::u8string` or a wide path), as `SongParser` does for
+    TagLib with `MultiByteToWideChar`.
   * Cover art comes from `SongParser::extractCoverImage`; a file it cannot
     open (for example moved or deleted) logs a warning and shows no cover.
 * Lyrics panel style settings (`SettingsDialog` + `MainWindow`)
