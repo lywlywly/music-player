@@ -63,9 +63,6 @@ set(PROJECT_SOURCES
   resources/resources.qrc
   mainwindow.h
   mainwindow.cpp
-  addentrydialog.ui
-  addentrydialog.h
-  addentrydialog.cpp
   addfielddialog.ui
   addfielddialog.h
   addfielddialog.cpp

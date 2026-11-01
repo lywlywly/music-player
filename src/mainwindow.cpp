@@ -1,7 +1,6 @@
 #include "mainwindow.h"
 
 #include "./ui_mainwindow.h"
-#include "addentrydialog.h"
 #ifdef MYPLAYER_TESTING
 #include "dummysystemmediainterface.h"
 #endif
@@ -399,7 +398,6 @@ void MainWindow::finishSetUpPlaylist(SongLibrary::Snapshot &&snapshot) {
   connect(ui->actionOpen, &QAction::triggered, this, &MainWindow::open);
   connect(ui->actionAdd_folder, &QAction::triggered, this,
           &MainWindow::openFolder);
-  connect(ui->actionAdd, &QAction::triggered, this, &MainWindow::addEntry);
   connect(ui->actionClear_Playlist, &QAction::triggered, this, [this]() {
     Playlist *current = playlistTabs->currentPlaylist();
     if (current != nullptr) {
@@ -415,7 +413,6 @@ void MainWindow::finishSetUpPlaylist(SongLibrary::Snapshot &&snapshot) {
 void MainWindow::setPlaylistDependentActionsEnabled(bool enabled) {
   ui->actionOpen->setEnabled(enabled);
   ui->actionAdd_folder->setEnabled(enabled);
-  ui->actionAdd->setEnabled(enabled);
   ui->actionClear_Playlist->setEnabled(enabled);
   ui->actionSearch->setEnabled(enabled);
   ui->actionPlay->setEnabled(enabled);
@@ -863,20 +860,6 @@ void MainWindow::updateImageSize() {
   const qreal devicePixelRatio = ui->label->devicePixelRatioF();
   ui->label->setPixmap(
       scaledCoverPixmap(pixmap, logicalMaxSize, devicePixelRatio));
-}
-
-void MainWindow::addEntry() {
-  if (!playlistReady_) {
-    return;
-  }
-  AddEntryDialog *addEntryDialog = new AddEntryDialog(this);
-  addEntryDialog->show();
-  addEntryDialog->setAttribute(Qt::WA_DeleteOnClose);
-  QObject::connect(addEntryDialog, &AddEntryDialog::entryStringEntered,
-                   [this](const QString &text) {
-                     playlistTabs->currentPlaylist()->addFiles(
-                         {text.toStdString()});
-                   });
 }
 
 void MainWindow::durationChanged(qint64 newDuration) {

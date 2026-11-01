@@ -374,7 +374,7 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
 ### Song ingest and metadata refresh
 
 * Ingest path: parse file -> evaluate computed fields -> generate identity key -> upsert song -> sync dynamic/computed attributes.
-  Adding files to a playlist (open, add entry, add folder) goes through
+  Adding files to a playlist (open, add folder) goes through
   `Playlist::addFiles(...)`, which runs this path for each file and then
   appends the rows.
 * Refresh path re-parses file and syncs built-in/dynamic/computed fields to DB + memory.

@@ -59,7 +59,6 @@ private:
   void open();
   void openFolder();
   void seek(int mseconds);
-  void addEntry();
   void next();
   void prev();
   void playRandom();
