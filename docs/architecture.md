@@ -183,6 +183,24 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
     songs no longer in their playlist, and the policies treat a current song no
     longer in the playlist as no current song (sequential Next starts at the
     first row, Prev at the last).
+* Playback stop and failure handling (`MainWindow`)
+  * Next with nothing to play (the shown playlist is empty) stops playback.
+  * Removing the playlist that is playing stops playback before
+    `PlaybackQueue::removePlaylist` drops its current song.
+  * A song that cannot be played is skipped with `next()`: its file is
+    missing (checked in `playSong` before the play stats are updated), or the
+    backend reports `InvalidMedia` (`GstAudioPlayer` reports bus errors that
+    way too). The previous song's audio stops at once, so its position
+    updates cannot reset the failure count and its `EndOfMedia` cannot start
+    a second skip. The skip behaves like the user pressing Next: queued songs
+    first, then `Playback follows cursor`, then the playback order, and with
+    `Cursor follows playback` on the selection moves to the song that plays.
+    It runs from a zero-delay timer, not recursively, so the `next()` that hit
+    the failure finishes (including its selection update) before the skip
+    starts; `stop()` cancels a pending skip.
+  * After as many consecutive failures as the shown playlist has songs,
+    playback stops and the status bar shows `Cannot play file: <path>`. The
+    count resets when playback position advances or on stop.
 * Playback policies (`PlaybackPolicySequential`, `PlaybackPolicyShuffle`)
   * `PlaybackPolicyShuffle` sizes its history to half the playlist and follows
     size changes through `Playlist` insert/remove/reset signals; it

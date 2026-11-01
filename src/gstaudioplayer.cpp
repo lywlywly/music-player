@@ -306,6 +306,8 @@ void GstAudioPlayer::onBusMessage(GstBus *, GstMessage *msg,
     if (debugInfo) {
       g_free(debugInfo);
     }
+    // Match QMediaPlayer, so MainWindow handles both backends the same way.
+    emit self->mediaStatusChanged(QMediaPlayer::MediaStatus::InvalidMedia);
     break;
   }
   default:

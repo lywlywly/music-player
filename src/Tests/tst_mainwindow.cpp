@@ -169,10 +169,16 @@ private slots:
   void cloudSync_startupRebase_runsOnWindowStartup();
   void cloudSync_manualRebase_appliesCloudPlayCount_integration();
 
-  // Play/Next with a stale last-played song, a missing file, or a removed tab.
+  // Play/Next edge cases: a stale last-played song, missing or undecodable
+  // files, and empty or removed tabs.
   void play_afterLastPlayedRowRemoved_startsFirstRow();
-  void play_missingFile_doesNotThrow();
+  void playbackFailures_countResetsAfterSongPlays();
+  void play_allFilesMissing_stopsAndReportsError();
+  void next_overMissingFile_skipsLikeUserNext();
+  void invalidMedia_skipsToNextSong();
   void next_afterRemovingTabWithQueuedSong_playsCurrentTab();
+  void next_onEmptyCurrentTab_stopsPlayback();
+  void removingPlayingTab_stopsPlayback();
   void play_onEmptyPlaylist_doesNothing();
 
 private:
@@ -1317,21 +1323,150 @@ void TestMainWindow::play_afterLastPlayedRowRemoved_startsFirstRow() {
   QTRY_COMPARE(statusAt(playlist, 0, statusCol), QString::fromUtf8("\u25B6"));
 }
 
-void TestMainWindow::play_missingFile_doesNotThrow() {
-  // A song whose file was moved or deleted after it was added.
+void TestMainWindow::playbackFailures_countResetsAfterSongPlays() {
+  // Failures are counted while consecutive: once a song plays, a later
+  // missing file is skipped again instead of reaching the stop limit.
   PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
   QVERIFY(tabs != nullptr);
   Playlist *playlist = tabs->currentPlaylist();
   QVERIFY(playlist != nullptr);
+  PlaybackBackendManager *backend =
+      window_->findChild<PlaybackBackendManager *>();
+  QVERIFY(backend != nullptr);
+  auto *media = window_->findChild<DummySystemMediaInterface *>();
+  QVERIFY(media != nullptr);
 
-  const QString missing = workDir_->filePath("missing.wav");
-  QVERIFY(!QFile::exists(missing));
-  playlist->addSong(makeSong("Missing", "Artist", missing));
+  // Two songs, so two consecutive failures would stop playback.
+  const QString wav = workDir_->filePath("reset-count-1.wav");
+  QVERIFY(writeSilentWav(wav));
+  playlist->addSong(
+      makeSong("Missing0", "Artist", workDir_->filePath("reset-count-0.wav")));
+  playlist->addSong(makeSong("Song1", "Artist", wav));
   playlist->setLastPlayed(playlist->getPkByIndex(0));
 
+  const int statusCol = statusColumn(playlist);
+  QVERIFY(statusCol >= 0);
+  QAction *playAction = window_->findChild<QAction *>("actionPlay");
+  QAction *nextAction = window_->findChild<QAction *>("actionNext");
+  QVERIFY(playAction != nullptr);
+  QVERIFY(nextAction != nullptr);
+  playAction->trigger(); // row 0 fails, row 1 plays
+  QTRY_COMPARE(statusAt(playlist, 1, statusCol), QString::fromUtf8("\u25B6"));
+  emit backend->player()->positionChanged(500); // row 1 is playing
+
+  nextAction->trigger(); // wraps to row 0, which fails again
+  QTRY_COMPARE(statusAt(playlist, 1, statusCol), QString::fromUtf8("\u25B6"));
+  QCOMPARE(media->stateForTest().playbackState,
+           ISystemMediaInterface::PlaybackState::Playing);
+}
+
+void TestMainWindow::play_allFilesMissing_stopsAndReportsError() {
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(tabs != nullptr);
+  Playlist *playlist = tabs->currentPlaylist();
+  QVERIFY(playlist != nullptr);
+  auto *media = window_->findChild<DummySystemMediaInterface *>();
+  QVERIFY(media != nullptr);
+  QStatusBar *statusBar = window_->findChild<QStatusBar *>("statusbar");
+  QVERIFY(statusBar != nullptr);
+
+  playlist->addSong(
+      makeSong("Missing1", "Artist", workDir_->filePath("missing1.wav")));
+  playlist->addSong(
+      makeSong("Missing2", "Artist", workDir_->filePath("missing2.wav")));
+  playlist->setLastPlayed(playlist->getPkByIndex(0));
+
+  const int statusCol = statusColumn(playlist);
+  QVERIFY(statusCol >= 0);
   QAction *playAction = window_->findChild<QAction *>("actionPlay");
   QVERIFY(playAction != nullptr);
-  QVERIFY_THROWS_NO_EXCEPTION(playAction->trigger());
+  playAction->trigger();
+
+  // Every song was tried once, then playback stopped instead of looping.
+  QTRY_VERIFY(statusBar->currentMessage().startsWith("Cannot play file:"));
+  QVERIFY(statusBar->currentMessage().contains("missing2.wav"));
+  QCOMPARE(media->stateForTest().playbackState,
+           ISystemMediaInterface::PlaybackState::Stopped);
+  QCOMPARE(statusAt(playlist, 0, statusCol), QString());
+  QCOMPARE(statusAt(playlist, 1, statusCol), QString());
+}
+
+void TestMainWindow::next_overMissingFile_skipsLikeUserNext() {
+  // Skipping a missing file behaves like the user pressing Next again: the
+  // previous song stops at once, the following song plays, and with Cursor
+  // follows playback on the selection ends on that song, not the skipped one.
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(tabs != nullptr);
+  Playlist *playlist = tabs->currentPlaylist();
+  QVERIFY(playlist != nullptr);
+  PlaybackBackendManager *backend =
+      window_->findChild<PlaybackBackendManager *>();
+  QVERIFY(backend != nullptr);
+  QAction *cursorAction =
+      window_->findChild<QAction *>("actionCursor_follows_playback");
+  QVERIFY(cursorAction != nullptr);
+  QVERIFY(cursorAction->isChecked());
+
+  const QString wav0 = workDir_->filePath("cursor-skip-0.wav");
+  const QString wav2 = workDir_->filePath("cursor-skip-2.wav");
+  QVERIFY(writeSilentWav(wav0));
+  QVERIFY(writeSilentWav(wav2));
+  playlist->addSong(makeSong("Song0", "Artist", wav0));
+  playlist->addSong(
+      makeSong("Missing1", "Artist", workDir_->filePath("cursor-skip-1.wav")));
+  playlist->addSong(makeSong("Song2", "Artist", wav2));
+  playlist->setLastPlayed(playlist->getPkByIndex(0));
+
+  const int statusCol = statusColumn(playlist);
+  QVERIFY(statusCol >= 0);
+  QAction *playAction = window_->findChild<QAction *>("actionPlay");
+  QAction *nextAction = window_->findChild<QAction *>("actionNext");
+  QVERIFY(playAction != nullptr);
+  QVERIFY(nextAction != nullptr);
+  playAction->trigger();
+  QTRY_COMPARE(statusAt(playlist, 0, statusCol), QString::fromUtf8("\u25B6"));
+
+  QSignalSpy backendStatusSpy(backend->player(),
+                              &AudioPlayer::mediaStatusChanged);
+  nextAction->trigger();
+  // The missing file is detected synchronously; song 0 is stopped before the
+  // skip runs.
+  QVERIFY(!backendStatusSpy.isEmpty());
+  QCOMPARE(backendStatusSpy.at(0).at(0).value<QMediaPlayer::MediaStatus>(),
+           QMediaPlayer::NoMedia);
+
+  QTRY_COMPARE(statusAt(playlist, 2, statusCol), QString::fromUtf8("\u25B6"));
+  QCOMPARE(statusAt(playlist, 1, statusCol), QString());
+  QCOMPARE(tabs->firstSelectedRow(), 2);
+}
+
+void TestMainWindow::invalidMedia_skipsToNextSong() {
+  // The file exists but the backend cannot decode it.
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(tabs != nullptr);
+  Playlist *playlist = tabs->currentPlaylist();
+  QVERIFY(playlist != nullptr);
+  PlaybackBackendManager *backend =
+      window_->findChild<PlaybackBackendManager *>();
+  QVERIFY(backend != nullptr);
+
+  const QString wav1 = workDir_->filePath("invalid-1.wav");
+  const QString wav2 = workDir_->filePath("invalid-2.wav");
+  QVERIFY(writeSilentWav(wav1));
+  QVERIFY(writeSilentWav(wav2));
+  playlist->addSong(makeSong("Song1", "Artist", wav1));
+  playlist->addSong(makeSong("Song2", "Artist", wav2));
+  playlist->setLastPlayed(playlist->getPkByIndex(0));
+
+  const int statusCol = statusColumn(playlist);
+  QVERIFY(statusCol >= 0);
+  QAction *playAction = window_->findChild<QAction *>("actionPlay");
+  QVERIFY(playAction != nullptr);
+  playAction->trigger();
+  QTRY_COMPARE(statusAt(playlist, 0, statusCol), QString::fromUtf8("\u25B6"));
+
+  emit backend->player()->mediaStatusChanged(QMediaPlayer::InvalidMedia);
+  QTRY_COMPARE(statusAt(playlist, 1, statusCol), QString::fromUtf8("\u25B6"));
 }
 
 void TestMainWindow::next_afterRemovingTabWithQueuedSong_playsCurrentTab() {
@@ -1367,6 +1502,74 @@ void TestMainWindow::next_afterRemovingTabWithQueuedSong_playsCurrentTab() {
   QVERIFY(nextAction != nullptr);
   nextAction->trigger();
   QTRY_COMPARE(statusAt(playlistA, 0, statusCol), QString::fromUtf8("\u25B6"));
+}
+
+void TestMainWindow::next_onEmptyCurrentTab_stopsPlayback() {
+  // Playing from tab A while tab B is shown and empty: Next has nothing to
+  // play, so playback stops instead of staying "Playing" with no song.
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(tabs != nullptr);
+  Playlist *playlistA = tabs->currentPlaylist();
+  QVERIFY(playlistA != nullptr);
+  auto *media = window_->findChild<DummySystemMediaInterface *>();
+  QVERIFY(media != nullptr);
+
+  const QString wav = workDir_->filePath("empty-tab-next.wav");
+  QVERIFY(writeSilentWav(wav));
+  playlistA->addSong(makeSong("SongA", "Artist", wav));
+  playlistA->setLastPlayed(playlistA->getPkByIndex(0));
+
+  const int statusCol = statusColumn(playlistA);
+  QVERIFY(statusCol >= 0);
+  QAction *playAction = window_->findChild<QAction *>("actionPlay");
+  QAction *nextAction = window_->findChild<QAction *>("actionNext");
+  QVERIFY(playAction != nullptr);
+  QVERIFY(nextAction != nullptr);
+  playAction->trigger();
+  QTRY_COMPARE(statusAt(playlistA, 0, statusCol), QString::fromUtf8("\u25B6"));
+
+  tabs->createNewPlaylistTabFromSongIds({playlistA->getPkByIndex(0)});
+  Playlist *playlistB = tabs->currentPlaylist();
+  QVERIFY(playlistB != playlistA);
+  playlistB->clear();
+
+  nextAction->trigger();
+  QCOMPARE(media->stateForTest().playbackState,
+           ISystemMediaInterface::PlaybackState::Stopped);
+  QCOMPARE(statusAt(playlistA, 0, statusCol), QString());
+}
+
+void TestMainWindow::removingPlayingTab_stopsPlayback() {
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(tabs != nullptr);
+  Playlist *playlistA = tabs->currentPlaylist();
+  QVERIFY(playlistA != nullptr);
+  auto *media = window_->findChild<DummySystemMediaInterface *>();
+  QVERIFY(media != nullptr);
+
+  const QString wav = workDir_->filePath("remove-playing-tab.wav");
+  QVERIFY(writeSilentWav(wav));
+  playlistA->addSong(makeSong("Song", "Artist", wav));
+  tabs->createNewPlaylistTabFromSongIds({playlistA->getPkByIndex(0)});
+  Playlist *playlistB = tabs->currentPlaylist();
+  QVERIFY(playlistB != playlistA);
+
+  const int statusCol = statusColumn(playlistB);
+  QVERIFY(statusCol >= 0);
+  QAction *playAction = window_->findChild<QAction *>("actionPlay");
+  QVERIFY(playAction != nullptr);
+  playAction->trigger();
+  QTRY_COMPARE(statusAt(playlistB, 0, statusCol), QString::fromUtf8("\u25B6"));
+
+  QVERIFY(tabs->removePlaylistTabByIndex(1));
+  QCOMPARE(media->stateForTest().playbackState,
+           ISystemMediaInterface::PlaybackState::Stopped);
+
+  // With playback stopped, Play starts the shown playlist again.
+  const int statusColA = statusColumn(playlistA);
+  QVERIFY(statusColA >= 0);
+  playAction->trigger();
+  QTRY_COMPARE(statusAt(playlistA, 0, statusColA), QString::fromUtf8("\u25B6"));
 }
 
 void TestMainWindow::play_onEmptyPlaylist_doesNothing() {

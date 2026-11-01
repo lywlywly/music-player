@@ -26,8 +26,10 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QDateTime>
+#include <QDir>
 #include <QEvent>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFutureWatcher>
 #include <QIcon>
 #include <QKeySequence>
@@ -386,7 +388,13 @@ void MainWindow::finishSetUpPlaylist(SongLibrary::Snapshot &&snapshot) {
   playlists_->loadAll();
   connect(playlists_, &PlaylistCollection::playlistAboutToBeRemoved, this,
           [this](int playlistId) {
-            playbackQueue_.removePlaylist(playlists_->playlist(playlistId));
+            const Playlist *removed = playlists_->playlist(playlistId);
+            // Removing the playing playlist stops playback; otherwise the
+            // queue would drop the current song while audio keeps playing.
+            if (playbackQueue_.getCurrentPk().second == removed) {
+              stop();
+            }
+            playbackQueue_.removePlaylist(removed);
           });
   playlistTabs->init(&songLibrary, &playbackQueue_, &control,
                      playbackOrderMenuActionGroup, &columnRegistry_,
@@ -515,6 +523,9 @@ void MainWindow::setUpPlaybackActions() {
   connect(ui->prev_button, &QAbstractButton::clicked, this, &MainWindow::prev);
   connect(ui->random_button, &QAbstractButton::clicked, this,
           &MainWindow::playRandom);
+  skipFailedSongTimer_.setSingleShot(true);
+  skipFailedSongTimer_.setInterval(0);
+  connect(&skipFailedSongTimer_, &QTimer::timeout, this, &MainWindow::next);
   connect(ui->horizontalSlider, &QSlider::sliderReleased, this,
           [this]() { seek(ui->horizontalSlider->value()); });
 }
@@ -646,6 +657,11 @@ void MainWindow::playSong(const MSong &song, int row, Playlist *pl) {
   if (filepath.empty()) {
     qFatal("playSong: filepath is empty");
   }
+  const QString filepathText = QString::fromStdString(filepath);
+  if (!QFileInfo::exists(filepathText)) {
+    handlePlaybackFailure(filepathText);
+    return;
+  }
   std::unordered_map<std::string, std::string> remainingFields;
   const MSong &activeSong =
       songLibrary.refreshSongFromFile(filepath, &remainingFields);
@@ -678,6 +694,24 @@ void MainWindow::playSong(const MSong &song, int row, Playlist *pl) {
   updatePlaybackTimeStatus();
 }
 
+void MainWindow::handlePlaybackFailure(const QString &filepath) {
+  qWarning() << "Cannot play file:" << filepath;
+  // Like switching songs, the previous song stops right away. Otherwise its
+  // position updates would reset the failure count and its EndOfMedia could
+  // start another skip.
+  backendManager->player()->stop();
+  ++consecutivePlaybackFailures_;
+  const Playlist *pl = playlistTabs->currentPlaylist();
+  const int maxFailures = std::max(1, pl != nullptr ? pl->songCount() : 0);
+  if (consecutivePlaybackFailures_ < maxFailures) {
+    skipFailedSongTimer_.start();
+    return;
+  }
+  stop();
+  statusBar()->showMessage(
+      tr("Cannot play file: %1").arg(QDir::toNativeSeparators(filepath)));
+}
+
 void MainWindow::next() {
   if (!playlistReady_) {
     return;
@@ -687,8 +721,12 @@ void MainWindow::next() {
                                ? playlistTabs->firstSelectedRow()
                                : -1;
   const auto &[song, row, pl] = control.next(preferredRow);
-  if (row < 0)
+  // Nothing to play (the current playlist is empty): stop instead of leaving
+  // the previous song playing with no current song.
+  if (row < 0) {
+    stop();
     return;
+  }
 
   playSong(song, row, pl);
   navigateIndex(row, pl);
@@ -772,6 +810,8 @@ void MainWindow::stop() {
   if (!playlistReady_) {
     return;
   }
+  skipFailedSongTimer_.stop();
+  consecutivePlaybackFailures_ = 0;
   backendManager->player()->stop();
   control.stop();
   currentBitrateBps_ = 0;
@@ -873,6 +913,10 @@ void MainWindow::durationChanged(qint64 newDuration) {
 
 void MainWindow::positionChanged(qint64 progress) {
   currentPositionMs_ = progress;
+  // Playback is progressing, so the current song is playable.
+  if (progress > 0) {
+    consecutivePlaybackFailures_ = 0;
+  }
   if (progress > sessionMaxPositionMs_) {
     sessionMaxPositionMs_ = progress;
   }
@@ -1039,7 +1083,14 @@ void MainWindow::statusChanged(QMediaPlayer::MediaStatus status) {
     this->next();
     break;
   case QMediaPlayer::InvalidMedia:
-    // displayErrorMessage();
+    // InvalidMedia does not say which source failed. currentTrackPk_ is the
+    // song passed to setSource: playSong sets it (resetPlayStatsSession)
+    // before calling setSource, so keep that order.
+    if (control.getStatus() != PlaybackQueue::PlaybackStatus::None &&
+        currentTrackPk_ >= 0) {
+      handlePlaybackFailure(QString::fromStdString(
+          songLibrary.getSongByPK(currentTrackPk_).at("filepath").text));
+    }
     break;
   }
 }

@@ -17,6 +17,7 @@
 #include <QColor>
 #include <QMainWindow>
 #include <QString>
+#include <QTimer>
 #include <unordered_map>
 
 QT_BEGIN_NAMESPACE
@@ -67,6 +68,10 @@ private:
   void toggle();
   void stop();
   void playSong(const MSong &, int row, Playlist *pl);
+  // Called when a song cannot be played (missing file, or the backend reports
+  // InvalidMedia). Skips to the next song, or stops and reports the file once
+  // as many consecutive songs as the current playlist holds have failed.
+  void handlePlaybackFailure(const QString &filepath);
   void navigateIndex(int row, Playlist *);
   void setUpSplitter();
   void setUpLyricsPanel();
@@ -130,5 +135,11 @@ private:
   bool completionCounted_ = false;
   CloudPlayStatsSyncCoordinator cloudPlayStatsSyncCoordinator_;
   bool playlistReady_ = false;
+  int consecutivePlaybackFailures_ = 0;
+  // Runs next() after a failure from the event loop rather than recursively:
+  // the next() that hit the failure finishes first, so its selection update
+  // does not override the skip's, and a long run of unplayable songs cannot
+  // overflow the stack. stop() cancels a pending skip.
+  QTimer skipFailedSongTimer_;
 };
 #endif // MAINWINDOW_H
