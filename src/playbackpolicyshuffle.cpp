@@ -63,19 +63,15 @@ int PlaybackPolicyShuffle::prevPk() {
 }
 
 int PlaybackPolicyShuffle::randomPk() {
-  // Pick a random row whose song is not in the recent history. If every song
-  // is recent (possible when rows repeat a song), pick from all rows.
-  // TODO: once a playlist rejects duplicate rows, every song cannot be recent
-  // (history holds half the rows), so the all-rows fallback can go.
+  // Pick a random row whose song is not in the recent history. Songs are
+  // unique per playlist and history holds at most half the rows, so there is
+  // always a candidate.
   std::vector<int> candidates;
   for (int row = 0; row < playlist->songCount(); ++row) {
     const int pk = playlist->getPkByIndex(row);
     if (!recentPks->contains(pk)) {
       candidates.push_back(pk);
     }
-  }
-  if (candidates.empty()) {
-    return playlist->getPkByIndex(getRandom(0, playlist->songCount() - 1));
   }
   return candidates[getRandom(0, static_cast<int>(candidates.size()) - 1)];
 }

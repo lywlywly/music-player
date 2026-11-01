@@ -3,12 +3,11 @@
 #include "fieldformatter.h"
 #include <QSqlError>
 #include <QSqlQuery>
-#include <QUuid>
-#include <QtConcurrent>
 #include <optional>
 #include <stdexcept>
 #include <unicode/coll.h>
 #include <unicode/locid.h>
+#include <unordered_set>
 
 UErrorCode status = U_ZERO_ERROR;
 icu::Locale loc = icu::Locale::forLanguageTag("zh-u-kr-latn-hani-hrkt", status);
@@ -83,7 +82,7 @@ bool Playlist::loadState() {
   songPKs_.clear();
   QSqlQuery qItems(db);
   qItems.prepare(R"(
-      SELECT song_id
+      SELECT song_id, position
       FROM playlist_items
       WHERE playlist_id=:playlist_id
       ORDER BY position ASC
@@ -94,6 +93,7 @@ bool Playlist::loadState() {
   }
   while (qItems.next()) {
     songPKs_.push_back(qItems.value(0).toInt());
+    nextPosition_ = qItems.value(1).toInt() + 1;
   }
 
   rebuildIndices();
@@ -136,9 +136,13 @@ std::vector<int> Playlist::addFiles(const std::vector<std::string> &paths,
                                     const ProgressFn &progress) {
   std::vector<int> pks;
   pks.reserve(paths.size());
+  std::unordered_set<int> seen;
   const int total = static_cast<int>(paths.size());
   for (int i = 0; i < total; ++i) {
-    pks.push_back(library_.addTolibrary(library_.loadSongFromFile(paths[i])));
+    const int pk = library_.addTolibrary(library_.loadSongFromFile(paths[i]));
+    if (!containsPk(pk) && seen.insert(pk).second) {
+      pks.push_back(pk);
+    }
     if (progress) {
       progress(i + 1, total);
     }
@@ -156,22 +160,30 @@ std::vector<int> Playlist::addFiles(const std::vector<std::string> &paths,
   return pks;
 }
 
-void Playlist::addSong(MSong &&s) {
+bool Playlist::addSong(MSong &&s) {
   const int songId = library_.addTolibrary(std::move(s));
-  addSongByPk(songId);
+  return addSongByPk(songId);
 }
 
-void Playlist::addSongByPk(int songId) {
+bool Playlist::addSongByPk(int songId) {
+  if (containsPk(songId)) {
+    return false;
+  }
   const int row = songCount();
   emit aboutToInsertSongs(row, row);
   appendSongPk(songId);
   emit songsInserted(row, row);
+  return true;
 }
 
 void Playlist::removeSong(int row) {
   emit aboutToRemoveSongs(row, row);
+  const int songId = songPKs_.at(row);
   songPKs_.erase(songPKs_.begin() + row);
   rebuildIndices();
+  if (playlistId_ > 0) {
+    removePlaylistItemInDb(songId);
+  }
   emit songsRemoved(row, row);
 }
 
@@ -280,7 +292,7 @@ void Playlist::appendSongPk(int songId) {
     indices_.resize(songId + 1, -1);
   indices_[songId] = songPKs_.size() - 1;
   if (playlistId_ > 0) {
-    appendSongToPlaylistInDb(songId, songPKs_.size());
+    appendSongToPlaylistInDb(songId, nextPosition_++);
   }
 }
 
@@ -300,57 +312,32 @@ void Playlist::appendSongToPlaylistInDb(int songId, int position) {
   }
 }
 
+void Playlist::removePlaylistItemInDb(int songId) {
+  QSqlQuery q(databaseManager_.db());
+  q.prepare(R"(
+      DELETE FROM playlist_items
+      WHERE playlist_id=:playlist_id AND song_id=:song_id
+  )");
+  q.bindValue(":playlist_id", playlistId_);
+  q.bindValue(":song_id", songId);
+  if (!q.exec()) {
+    qFatal("removePlaylistItemInDb failed: %s",
+           q.lastError().text().toUtf8().data());
+  }
+}
+
+// Synchronous, so rows appended right after clear() are not deleted later.
 void Playlist::removePlaylistItemsInDb() {
-  if (playlistId_ <= 0) {
-    return;
+  QSqlQuery q(databaseManager_.db());
+  q.prepare(R"(
+      DELETE FROM playlist_items
+      WHERE playlist_id=:playlist_id
+  )");
+  q.bindValue(":playlist_id", playlistId_);
+  if (!q.exec()) {
+    qFatal("removePlaylistItemsInDb failed: %s",
+           q.lastError().text().toUtf8().data());
   }
-
-  QSqlDatabase &mainDb = databaseManager_.db();
-  const QString dbPath = mainDb.databaseName();
-  if (dbPath.isEmpty() || dbPath == ":memory:") {
-    QSqlQuery q(mainDb);
-    q.prepare(R"(
-        DELETE FROM playlist_items
-        WHERE playlist_id=:playlist_id
-    )");
-    q.bindValue(":playlist_id", playlistId_);
-    if (!q.exec()) {
-      qFatal("removePlaylistItemsInDb failed: %s",
-             q.lastError().text().toUtf8().data());
-    }
-    return;
-  }
-
-  const int targetPlaylistId = playlistId_;
-  QtConcurrent::run([dbPath, targetPlaylistId]() {
-    const QString connectionName =
-        QStringLiteral("remove_playlist_items_%1")
-            .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
-    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
-    db.setDatabaseName(dbPath);
-    if (!db.open()) {
-      qWarning() << "removePlaylistItemsInDb worker open failed:"
-                 << db.lastError().text();
-      db = QSqlDatabase();
-      QSqlDatabase::removeDatabase(connectionName);
-      return;
-    }
-
-    QSqlQuery q(db);
-    q.prepare(R"(
-        DELETE FROM playlist_items
-        WHERE playlist_id=:playlist_id
-    )");
-    q.bindValue(":playlist_id", targetPlaylistId);
-    if (!q.exec()) {
-      qWarning() << "removePlaylistItemsInDb worker delete failed:"
-                 << q.lastError().text();
-    }
-
-    db.close();
-    db = QSqlDatabase();
-    QSqlDatabase::removeDatabase(connectionName);
-  });
 }
 
 void Playlist::rebuildIndices() {

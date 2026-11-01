@@ -168,6 +168,7 @@ bool DatabaseManager::ensurePlaylistsSchema(QSqlQuery &q) {
             song_id          INTEGER NOT NULL,
             position         INTEGER NOT NULL,
 
+            UNIQUE (playlist_id, song_id),
             FOREIGN KEY (playlist_id) REFERENCES playlists(playlist_id) ON DELETE CASCADE,
             FOREIGN KEY (song_id)     REFERENCES songs(song_id)         ON DELETE CASCADE
         );

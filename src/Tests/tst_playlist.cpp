@@ -64,6 +64,9 @@ private slots:
   void setLastPlayed_nonPersistentKeepsValueInMemory();
   void refreshMetadataFromFiles_updatesSongsAndReportsProgress();
   void addFiles_insertsBatchWithOneSignalPair();
+  void addSong_existingSong_isNoOp();
+  void addFiles_skipsExistingAndRepeatedSongs();
+  void removeSong_thenReadd_persistsSingleRowAtEnd();
   void operations_emitBeforeAndAfterSignals();
 
 private:
@@ -368,6 +371,80 @@ void TestPlaylist::addFiles_insertsBatchWithOneSignalPair() {
 
   QVERIFY(playlist.addFiles({}).empty());
   QCOMPARE(aboutToInsertSpy.count(), 1);
+}
+
+void TestPlaylist::addSong_existingSong_isNoOp() {
+  Playlist playlist(-1, *library_, *databaseManager_);
+  QVERIFY(playlist.addSong(makeSong("A", "Artist", "/tmp/dup-a.mp3")));
+  const int pk = playlist.getPkByIndex(0);
+
+  QSignalSpy aboutToInsertSpy(&playlist, &Playlist::aboutToInsertSongs);
+  QSignalSpy insertedSpy(&playlist, &Playlist::songsInserted);
+  QVERIFY(!playlist.addSong(makeSong("A", "Artist", "/tmp/dup-a.mp3")));
+  QVERIFY(!playlist.addSongByPk(pk));
+
+  QCOMPARE(playlist.songCount(), 1);
+  QCOMPARE(aboutToInsertSpy.count(), 0);
+  QCOMPARE(insertedSpy.count(), 0);
+}
+
+void TestPlaylist::addFiles_skipsExistingAndRepeatedSongs() {
+  SongLibrary localLibrary(
+      *registry_, *databaseManager_,
+      [](const std::string &path, const ColumnRegistry &,
+         std::unordered_map<std::string, std::string> *) -> MSong {
+        return makeSong(QString::fromStdString(path), "Artist",
+                        QString::fromStdString(path));
+      });
+  Playlist playlist(-1, localLibrary, *databaseManager_);
+  playlist.addSong(makeSong("A", "Artist", "/tmp/dup-files-a.mp3"));
+  const int pkA = playlist.getPkByIndex(0);
+
+  QSignalSpy aboutToInsertSpy(&playlist, &Playlist::aboutToInsertSongs);
+  const std::vector<int> pks =
+      playlist.addFiles({"/tmp/dup-files-b.mp3", "/tmp/dup-files-a.mp3",
+                         "/tmp/dup-files-b.mp3", "/tmp/dup-files-c.mp3"});
+
+  QCOMPARE(pks.size(), static_cast<size_t>(2));
+  QCOMPARE(playlist.songCount(), 3);
+  QCOMPARE(playlist.getPkByIndex(0), pkA);
+  QCOMPARE(playlist.getPkByIndex(1), pks[0]);
+  QCOMPARE(playlist.getPkByIndex(2), pks[1]);
+  QCOMPARE(playlist.getSongByIndex(1).at("title").text,
+           std::string("/tmp/dup-files-b.mp3"));
+  QCOMPARE(playlist.getSongByIndex(2).at("title").text,
+           std::string("/tmp/dup-files-c.mp3"));
+  QCOMPARE(aboutToInsertSpy.count(), 1);
+  QCOMPARE(aboutToInsertSpy.at(0).at(0).toInt(), 1);
+  QCOMPARE(aboutToInsertSpy.at(0).at(1).toInt(), 2);
+
+  QVERIFY(playlist.addFiles({"/tmp/dup-files-a.mp3"}).empty());
+  QCOMPARE(aboutToInsertSpy.count(), 1);
+}
+
+void TestPlaylist::removeSong_thenReadd_persistsSingleRowAtEnd() {
+  QSqlQuery q(databaseManager_->db());
+  QVERIFY(q.exec("INSERT INTO playlists(playlist_id, name, last_played, "
+                 "tab_order) VALUES (1, 'Default', 1, 0)"));
+  Playlist playlist(1, *library_, *databaseManager_);
+  QVERIFY(playlist.loadState());
+  playlist.addSong(makeSong("S1", "Artist", "/tmp/readd-1.mp3"));
+  playlist.addSong(makeSong("S2", "Artist", "/tmp/readd-2.mp3"));
+  playlist.addSong(makeSong("S3", "Artist", "/tmp/readd-3.mp3"));
+  const int pk1 = playlist.getPkByIndex(0);
+  const int pk3 = playlist.getPkByIndex(2);
+
+  // Stored: S3 at position 3. A row-count position for re-added S1 would be
+  // 2 and load before S3.
+  playlist.removeSong(0);
+  playlist.removeSong(0);
+  QVERIFY(playlist.addSongByPk(pk1));
+
+  Playlist reloaded(1, *library_, *databaseManager_);
+  QVERIFY(reloaded.loadState());
+  QCOMPARE(reloaded.songCount(), 2);
+  QCOMPARE(reloaded.getPkByIndex(0), pk3);
+  QCOMPARE(reloaded.getPkByIndex(1), pk1);
 }
 
 void TestPlaylist::operations_emitBeforeAndAfterSignals() {

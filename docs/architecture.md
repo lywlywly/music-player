@@ -141,6 +141,7 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
     context-menu action.
 * `Playlist` (backend)
   * One playlist: song-id ordering, sorting, `last_played`, and per-playlist operations (`addFiles`, `addSong`, `addSongByPk`, `removeSong`, `clear`, `sortByField`, `refreshMetadataFromFiles`).
+  * A song appears at most once per playlist. Adding a song already present is a silent no-op (`addSong` / `addSongByPk` return `false`; `addFiles` skips it and returns only the appended pks). `playlist_items` enforces this with `UNIQUE (playlist_id, song_id)`.
   * Ingests/refreshes songs through `SongLibrary`; owns `playlist_items` and `playlists.last_played` persistence. `playlistId <= 0` is non-persistent (used by tests).
   * Sends before/after signals for insert, remove and reset, and after-only signals for reorder and song-data changes. `addFiles` parses and ingests all paths first, then sends one insert pair for the batch. Does not know playback status.
 * `PlaylistTableModel` (frontend)
@@ -187,8 +188,9 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
     size changes through `Playlist` insert/remove/reset signals; it
     disconnects when switched to another playlist or destroyed.
   * Shuffle steps through history entries still in the playlist; otherwise it
-    picks a random row whose song is not in the history (falling back to any
-    row when every song is recent, which only duplicate rows allow).
+    picks a random row whose song is not in the history. Songs are unique per
+    playlist and the history holds at most half the rows, so a candidate
+    always exists.
   * `Playback -> Playback follows cursor` passes the first selected row from
     `MainWindow` into `PlaybackManager::next(...)`: queued songs still take
     priority, then the selected row may be played once if it is not already
@@ -506,8 +508,10 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
 * Writers: `PlaylistCollection` owns `playlists` rows (insert, delete, `name`,
   `tab_order`); `Playlist` owns `playlist_items` and `playlists.last_played`.
 * Playlist metadata writes (`playlists` row create/update/delete) stay synchronous.
-* Removing a row from a playlist changes memory only (`playlist_items` is not
-  updated), and sort order is not persisted.
+* Removing a row from a playlist also deletes its `playlist_items` row. Sort
+  order is not persisted.
+* New `playlist_items` rows get a position above every stored one, so
+  positions may have gaps but never collide.
 
 ## Cloud Sync Design
 
@@ -583,6 +587,6 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
 * Cloud sync worker tasks are serialized through the worker thread event queue.
 * Cloud pull inter-page waits and rebase-push chunking are paced by `QTimer`.
 * GStreamer GLib loop uses a dedicated `std::thread` on macOS/Windows.
-* DB writes that can touch many songs are backgrounded. Current path:
-  `Playlist::removePlaylistItemsInDb()` (bulk `playlist_items` delete) runs in
-  a worker thread for file-backed DBs and synchronously for in-memory DB tests.
+* Playlist DB writes, including the bulk `playlist_items` delete in
+  `Playlist::clear()`, are synchronous, so rows appended right after a clear
+  are never removed by a late delete.

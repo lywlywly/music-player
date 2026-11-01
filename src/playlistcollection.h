@@ -31,7 +31,8 @@ public:
   QString name(int playlistId) const;
 
   // Inserts a playlists row at the end of the order, creates and loads the
-  // Playlist, emits playlistCreated, then appends songPks. Returns its id.
+  // Playlist, emits playlistCreated, then appends songPks (repeats skipped).
+  // Returns its id.
   int createPlaylist(const QString &name, const std::vector<int> &songPks = {});
   // Returns false for an unknown id, the only remaining playlist, or a failed
   // delete. Emits playlistAboutToBeRemoved before the Playlist is destroyed;

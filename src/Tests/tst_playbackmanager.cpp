@@ -83,9 +83,6 @@ private slots:
   void prev_afterRemovingCurrentSong_sequential_doesNotThrow();
   void prev_shuffle_afterRemovingSongInHistory_doesNotThrow();
   void next_queuedSongRemovedFromPlaylist_doesNotThrow();
-  // TODO: replace once a playlist rejects duplicate rows; duplicates are not
-  // a valid playlist state.
-  void shuffle_duplicateRows_nextTerminates();
 
 private:
   ColumnRegistry *registry_ = nullptr;
@@ -579,23 +576,6 @@ void TestPlaybackManager::next_queuedSongRemovedFromPlaylist_doesNotThrow() {
   QVERIFY_THROWS_NO_EXCEPTION(step = toStepResult(manager_->next()));
   QCOMPARE(step.title, std::string("S2"));
   QCOMPARE(step.row, 0);
-  QCOMPARE(step.playlist, &playlist);
-}
-
-void TestPlaybackManager::shuffle_duplicateRows_nextTerminates() {
-  // The same file added twice gives two rows with one song id.
-  Playlist playlist(-1, *library_, *databaseManager_);
-  playlist.addSong(makeSong("A", "Artist", "/tmp/pm-shuffle-dup-a.mp3", "1"));
-  playlist.addSong(makeSong("A", "Artist", "/tmp/pm-shuffle-dup-a.mp3", "1"));
-  QCOMPARE(playlist.songCount(), 2);
-  QCOMPARE(playlist.getPkByIndex(0), playlist.getPkByIndex(1));
-
-  manager_->setView(playlist);
-  manager_->setPolicy(Shuffle); // history capacity 1
-  manager_->playIndex(0);       // history holds the only distinct song
-
-  const StepResult step = toStepResult(manager_->next());
-  QCOMPARE(step.title, std::string("A"));
   QCOMPARE(step.playlist, &playlist);
 }
 

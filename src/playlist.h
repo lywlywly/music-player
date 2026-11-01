@@ -10,6 +10,7 @@ class DatabaseManager;
 // `playlists.last_played`), library ingest/refresh for its operations, and
 // change signals. Backend class: no Qt view types, no playback status.
 // Canonical song metadata lives in SongLibrary.
+// A song appears at most once; adding a song already present is a no-op.
 // playlistId <= 0 is non-persistent (no DB reads or writes).
 class Playlist : public QObject {
   Q_OBJECT
@@ -33,21 +34,23 @@ public:
   int getLastPlayed() const;
 
   // Parses each path (SongLibrary::loadSongFromFile), ingests it
-  // (addTolibrary), then appends one row per path. progress is called after
-  // each path is ingested. Returns pks in input order.
+  // (addTolibrary), then appends one row per song not already in the
+  // playlist. progress is called after each path is ingested. Returns the
+  // appended pks in input order.
   std::vector<int> addFiles(const std::vector<std::string> &paths,
                             const ProgressFn &progress = {});
-  // Ingests a pre-parsed song (addTolibrary) and appends it. Assumes DB write
+  // Ingests a pre-parsed song (addTolibrary) and appends it if not already in
+  // the playlist. Returns whether it was appended. Assumes DB write
   // preconditions are satisfied; on violation/write failure, process crashes
   // via qFatal.
-  void addSong(MSong &&);
-  // Appends a song already in SongLibrary.
-  void addSongByPk(int songPk);
-  // Removes one row (current order) in memory only.
+  bool addSong(MSong &&);
+  // Appends a song already in SongLibrary if not already in the playlist.
+  // Returns whether it was appended.
+  bool addSongByPk(int songPk);
+  // Removes one row (current order) and its `playlist_items` row.
   void removeSong(int row);
-  // Clears this playlist immediately in memory. For persistent playlists, DB
-  // table `playlist_items` deletion runs in background for file-backed DBs
-  // (sync for in-memory DB). Song rows in DB table `songs` are not deleted.
+  // Clears this playlist and its `playlist_items` rows. Song rows in DB table
+  // `songs` are not deleted.
   void clear();
   // order: 0 ascending, otherwise descending.
   void sortByField(const std::string &fieldId, int order = 0);
@@ -74,6 +77,7 @@ signals:
 private:
   void appendSongPk(int songId);
   void appendSongToPlaylistInDb(int songId, int position);
+  void removePlaylistItemInDb(int songId);
   void removePlaylistItemsInDb();
   void rebuildIndices();
   int playlistId_;
@@ -82,6 +86,9 @@ private:
   std::vector<int> songPKs_;
   std::vector<int> indices_;
   int lastPlayed_ = 1;
+  // Position for the next appended `playlist_items` row; above every stored
+  // position, so removals cannot cause collisions.
+  int nextPosition_ = 1;
 };
 
 #endif // PLAYLIST_H

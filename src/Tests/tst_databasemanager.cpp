@@ -19,6 +19,7 @@ private slots:
   void createsComputedAttributesSchema();
   void createsPlayStatsSchema();
   void deleteSong_cascadesToPlaylistItemsAndSongAttributes();
+  void playlistItems_rejectDuplicateSongInPlaylist();
 
 private:
   ColumnRegistry *registry_ = nullptr;
@@ -102,6 +103,22 @@ void TestDatabaseManager::createsPlayStatsSchema() {
   QVERIFY(columns.contains("play_count"));
   QVERIFY(columns.contains("last_played_timestamp"));
   QVERIFY(identityIsPrimaryKey);
+}
+
+void TestDatabaseManager::playlistItems_rejectDuplicateSongInPlaylist() {
+  QSqlQuery q(databaseManager_->db());
+  QVERIFY(q.exec("INSERT INTO playlists(playlist_id, name, last_played) VALUES "
+                 "(1, 'P1', 1), (2, 'P2', 1)"));
+  QVERIFY(q.exec("INSERT INTO song_identities(identity_id, song_identity_key) "
+                 "VALUES (1, 'song|artist|album')"));
+  QVERIFY(q.exec("INSERT INTO songs(song_id, title, filepath, identity_id) "
+                 "VALUES (10, 'Song', '/tmp/unique.mp3', 1)"));
+  QVERIFY(q.exec("INSERT INTO playlist_items(playlist_id, song_id, position) "
+                 "VALUES (1, 10, 1)"));
+  QVERIFY(!q.exec("INSERT INTO playlist_items(playlist_id, song_id, position) "
+                  "VALUES (1, 10, 2)"));
+  QVERIFY(q.exec("INSERT INTO playlist_items(playlist_id, song_id, position) "
+                 "VALUES (2, 10, 1)"));
 }
 
 void TestDatabaseManager::
