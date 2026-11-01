@@ -3,6 +3,24 @@
 
 PlaybackQueue::PlaybackQueue(QObject *parent) : QObject{parent} {}
 
+void PlaybackQueue::removePlaylist(const Playlist *pl) {
+  if (currentPlaylist == pl) {
+    currentPk = -1;
+    currentPlaylist = nullptr;
+  }
+  std::erase_if(queue, [&](int pk) { return orders[pk].second == pl; });
+  for (auto &order : orders) {
+    if (order.second == pl) {
+      order = {-1, nullptr};
+    }
+  }
+  int position = 1;
+  for (int pk : queue) {
+    orders[pk].first = position++;
+    notifyAll(pk, orders[pk].second);
+  }
+}
+
 void PlaybackQueue::setCurrentId(int curPk, Playlist *pl) {
   int oldPk = this->currentPk;
   this->currentPk = curPk;

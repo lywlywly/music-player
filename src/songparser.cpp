@@ -333,13 +333,18 @@ std::pair<std::vector<uint8_t>, size_t>
 SongParser::extractCoverImage(const std::string &filepath) {
   AVFormatContext *fmt_ctx = nullptr;
 
+  // An unreadable file (for example moved or deleted) has no cover.
   if (avformat_open_input(&fmt_ctx, filepath.c_str(), nullptr, nullptr) < 0) {
-    throw std::runtime_error("Failed to open input file");
+    qWarning() << "extractCoverImage: failed to open input file:"
+               << QString::fromStdString(filepath);
+    return {{}, 0};
   }
 
   if (avformat_find_stream_info(fmt_ctx, nullptr) < 0) {
+    qWarning() << "extractCoverImage: failed to find stream info:"
+               << QString::fromStdString(filepath);
     avformat_close_input(&fmt_ctx);
-    throw std::runtime_error("Failed to find stream info");
+    return {{}, 0};
   }
 
   for (unsigned int i = 0; i < fmt_ctx->nb_streams; ++i) {

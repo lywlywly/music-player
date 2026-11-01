@@ -20,6 +20,7 @@ private slots:
   void statusOf_currentSongIgnoresQueuePosition();
   void statusOf_queuedSongInSamePlaylistOnly();
   void pop_empty_throws();
+  void removePlaylist_dropsItsCurrentAndQueuedSongsOnly();
 };
 
 void TestPlaybackQueue::addNextAndAddLast_maintainsQueueAndOrder() {
@@ -102,6 +103,25 @@ void TestPlaybackQueue::statusOf_queuedSongInSamePlaylistOnly() {
 void TestPlaybackQueue::pop_empty_throws() {
   PlaybackQueue queue;
   QVERIFY_THROWS_EXCEPTION(std::out_of_range, queue.pop());
+}
+
+void TestPlaybackQueue::removePlaylist_dropsItsCurrentAndQueuedSongsOnly() {
+  PlaybackQueue queue;
+  Playlist *plA = fakePlaylist(1);
+  Playlist *plB = fakePlaylist(2);
+  queue.setCurrentId(1, plA);
+  queue.addLast(2, plA);
+  queue.addLast(3, plB);
+
+  queue.removePlaylist(plA);
+
+  QCOMPARE(queue.getCurrentPk().first, -1);
+  QCOMPARE(queue.getCurrentPk().second, nullptr);
+  const std::deque<int> expected = {3};
+  QCOMPARE(queue.getQueue(), expected);
+  QCOMPARE(queue.statusOf(2, plA).state,
+           PlaybackQueue::SongPlaybackState::None);
+  QCOMPARE(queue.statusOf(3, plB).queuePosition, 1);
 }
 
 QTEST_MAIN(TestPlaybackQueue)

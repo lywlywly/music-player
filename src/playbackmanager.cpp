@@ -34,15 +34,18 @@ PlaybackManager::activatePk(int pk, Playlist *pl) {
 
   const int row = pl->getIndexByPk(pk);
   queue.setCurrentId(pk, pl);
-  playlist->setLastPlayed(pk);
+  pl->setLastPlayed(pk);
   return {pl->getSongByPk(pk), row, pl};
 }
 
 std::tuple<const MSong &, int, Playlist *>
 PlaybackManager::next(int preferredRow) {
   Q_ASSERT(playlist != nullptr);
-  if (!queue.empty()) {
+  while (!queue.empty()) {
     auto [pk, pl] = queue.pop();
+    // Skip songs removed from their playlist after they were queued.
+    if (!pl->containsPk(pk))
+      continue;
     // If queued song is not in current playlist, don't notify PlaybackPolicy.
     if (pl == playlist)
       policy->setCurrentPk(pk);

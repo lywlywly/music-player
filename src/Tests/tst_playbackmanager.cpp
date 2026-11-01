@@ -34,6 +34,24 @@ MSong makeSong(const QString &title, const QString &artist, const QString &path,
                         FieldValue(identity, "song_identity_key"));
   return song;
 }
+
+// Copies a next()/prev() result out of the call, so the call can be wrapped in
+// QVERIFY_THROWS_NO_EXCEPTION and the result checked afterwards.
+struct StepResult {
+  int row = -2;
+  Playlist *playlist = nullptr;
+  std::string title;
+};
+
+StepResult
+toStepResult(const std::tuple<const MSong &, int, Playlist *> &step) {
+  const auto &[song, row, pl] = step;
+  StepResult result{row, pl, {}};
+  if (auto it = song.find("title"); it != song.end()) {
+    result.title = it->second.text;
+  }
+  return result;
+}
 } // namespace
 
 class TestPlaybackManager : public QObject {
@@ -59,6 +77,15 @@ private slots:
   void next_withQueuedSongFromOtherPlaylist_keepsCurrentPolicyProgress();
   void queue_multiplePlaylists_consumesInExpectedOrder();
   void queue_multiplePlaylists_queueStartPreemptsQueueEnd();
+
+  // Playback after songs are removed from a playlist (stale song ids).
+  void next_afterRemovingCurrentSong_sequential_doesNotThrow();
+  void prev_afterRemovingCurrentSong_sequential_doesNotThrow();
+  void prev_shuffle_afterRemovingSongInHistory_doesNotThrow();
+  void next_queuedSongRemovedFromPlaylist_doesNotThrow();
+  // TODO: replace once a playlist rejects duplicate rows; duplicates are not
+  // a valid playlist state.
+  void shuffle_duplicateRows_nextTerminates();
 
 private:
   ColumnRegistry *registry_ = nullptr;
@@ -396,6 +423,9 @@ void TestPlaybackManager::
   QCOMPARE(queuedSong.at("title").text, std::string("B1"));
   QCOMPARE(queuedRow, 0);
   QCOMPARE(queuedPl, &playlistB);
+  // last_played moves on the queued song's playlist, not the viewed one.
+  QCOMPARE(playlistA.getLastPlayed(), playlistA.getPkByIndex(0));
+  QCOMPARE(playlistB.getLastPlayed(), playlistB.getPkByIndex(0));
 
   const auto &[nextSong, nextRow, nextPl] = manager_->next();
   QCOMPARE(nextSong.at("title").text, std::string("A2"));
@@ -464,6 +494,108 @@ void TestPlaybackManager::queue_multiplePlaylists_queueStartPreemptsQueueEnd() {
   QCOMPARE(song2.at("title").text, std::string("B1"));
   QCOMPARE(row2, 0);
   QCOMPARE(pl2, &playlistB);
+}
+
+void TestPlaybackManager::
+    next_afterRemovingCurrentSong_sequential_doesNotThrow() {
+  // Backspace on the playing row, then Next (or the track ending).
+  Playlist playlist(-1, *library_, *databaseManager_);
+  playlist.addSong(makeSong("S1", "Artist", "/tmp/pm-rm-cur-next-1.mp3", "1"));
+  playlist.addSong(makeSong("S2", "Artist", "/tmp/pm-rm-cur-next-2.mp3", "2"));
+  playlist.addSong(makeSong("S3", "Artist", "/tmp/pm-rm-cur-next-3.mp3", "3"));
+
+  manager_->setView(playlist);
+  manager_->setPolicy(Sequential);
+  manager_->playIndex(0);
+  playlist.removeSong(0);
+
+  StepResult step;
+  QVERIFY_THROWS_NO_EXCEPTION(step = toStepResult(manager_->next()));
+  QCOMPARE(step.title, std::string("S2"));
+  QCOMPARE(step.row, 0);
+  QCOMPARE(step.playlist, &playlist);
+}
+
+void TestPlaybackManager::
+    prev_afterRemovingCurrentSong_sequential_doesNotThrow() {
+  Playlist playlist(-1, *library_, *databaseManager_);
+  playlist.addSong(makeSong("S1", "Artist", "/tmp/pm-rm-cur-prev-1.mp3", "1"));
+  playlist.addSong(makeSong("S2", "Artist", "/tmp/pm-rm-cur-prev-2.mp3", "2"));
+  playlist.addSong(makeSong("S3", "Artist", "/tmp/pm-rm-cur-prev-3.mp3", "3"));
+
+  manager_->setView(playlist);
+  manager_->setPolicy(Sequential);
+  manager_->playIndex(1);
+  playlist.removeSong(1);
+
+  StepResult step;
+  QVERIFY_THROWS_NO_EXCEPTION(step = toStepResult(manager_->prev()));
+  QVERIFY(step.row >= 0 && step.row < playlist.songCount());
+  QCOMPARE(step.playlist, &playlist);
+  QCOMPARE(step.title, playlist.getSongByIndex(step.row).at("title").text);
+}
+
+void TestPlaybackManager::
+    prev_shuffle_afterRemovingSongInHistory_doesNotThrow() {
+  Playlist playlist(-1, *library_, *databaseManager_);
+  for (int i = 1; i <= 6; ++i) {
+    const QString n = QString::number(i);
+    playlist.addSong(makeSong("S" + n, "Artist",
+                              "/tmp/pm-shuffle-rm-hist-" + n + ".mp3", n));
+  }
+
+  manager_->setView(playlist);
+  manager_->setPolicy(Shuffle); // history capacity 3
+  manager_->playIndex(0);
+  manager_->playIndex(1);
+  manager_->playIndex(2); // history: S1, S2, S3 (cursor on S3)
+
+  const int removedPk = playlist.getPkByIndex(1);
+  playlist.removeSong(1); // S2; capacity shrinks to 2 -> history: S2, S3
+
+  StepResult step;
+  QVERIFY_THROWS_NO_EXCEPTION(step = toStepResult(manager_->prev()));
+  QVERIFY(step.row >= 0 && step.row < playlist.songCount());
+  QVERIFY(playlist.getPkByIndex(step.row) != removedPk);
+  QCOMPARE(step.playlist, &playlist);
+}
+
+void TestPlaybackManager::next_queuedSongRemovedFromPlaylist_doesNotThrow() {
+  // "Add to Playback Queue" on a row, Backspace that row, then Next.
+  Playlist playlist(-1, *library_, *databaseManager_);
+  playlist.addSong(makeSong("S1", "Artist", "/tmp/pm-rm-queued-1.mp3", "1"));
+  playlist.addSong(makeSong("S2", "Artist", "/tmp/pm-rm-queued-2.mp3", "2"));
+  playlist.addSong(makeSong("S3", "Artist", "/tmp/pm-rm-queued-3.mp3", "3"));
+
+  manager_->setView(playlist);
+  manager_->setPolicy(Sequential);
+  manager_->playIndex(2); // S3
+  manager_->queueEnd(0);  // S1
+  playlist.removeSong(0);
+
+  // The stale queue entry is skipped; the policy wraps from S3 to S2.
+  StepResult step;
+  QVERIFY_THROWS_NO_EXCEPTION(step = toStepResult(manager_->next()));
+  QCOMPARE(step.title, std::string("S2"));
+  QCOMPARE(step.row, 0);
+  QCOMPARE(step.playlist, &playlist);
+}
+
+void TestPlaybackManager::shuffle_duplicateRows_nextTerminates() {
+  // The same file added twice gives two rows with one song id.
+  Playlist playlist(-1, *library_, *databaseManager_);
+  playlist.addSong(makeSong("A", "Artist", "/tmp/pm-shuffle-dup-a.mp3", "1"));
+  playlist.addSong(makeSong("A", "Artist", "/tmp/pm-shuffle-dup-a.mp3", "1"));
+  QCOMPARE(playlist.songCount(), 2);
+  QCOMPARE(playlist.getPkByIndex(0), playlist.getPkByIndex(1));
+
+  manager_->setView(playlist);
+  manager_->setPolicy(Shuffle); // history capacity 1
+  manager_->playIndex(0);       // history holds the only distinct song
+
+  const StepResult step = toStepResult(manager_->next());
+  QCOMPARE(step.title, std::string("A"));
+  QCOMPARE(step.playlist, &playlist);
 }
 
 QTEST_MAIN(TestPlaybackManager)

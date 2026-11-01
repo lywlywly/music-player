@@ -170,13 +170,25 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
     for the current song (queue position not consulted), otherwise Queued with
     its position for a song queued from the same playlist. `statusChanged(songPk,
     playlist)` reports changes.
+  * Stores `Playlist` pointers but only compares them, never dereferences
+    them. `removePlaylist(playlist)` drops that playlist's current song and
+    queued entries; `MainWindow` calls it on
+    `PlaylistCollection::playlistAboutToBeRemoved`, while the id still resolves
+    to the `Playlist`.
 * `PlaybackManager` (backend)
   * Playback policy orchestration (`next/prev/play/pause/stop`) on top of `PlaybackQueue` + active `Playlist`.
   * Requires `setView(Playlist&)` with a valid playlist before playback/policy operations.
+  * Songs removed from a playlist leave stale ids behind: `next()` skips queued
+    songs no longer in their playlist, and the policies treat a current song no
+    longer in the playlist as no current song (sequential Next starts at the
+    first row, Prev at the last).
 * Playback policies (`PlaybackPolicySequential`, `PlaybackPolicyShuffle`)
   * `PlaybackPolicyShuffle` sizes its history to half the playlist and follows
     size changes through `Playlist` insert/remove/reset signals; it
     disconnects when switched to another playlist or destroyed.
+  * Shuffle steps through history entries still in the playlist; otherwise it
+    picks a random row whose song is not in the history (falling back to any
+    row when every song is recent, which only duplicate rows allow).
   * `Playback -> Playback follows cursor` passes the first selected row from
     `MainWindow` into `PlaybackManager::next(...)`: queued songs still take
     priority, then the selected row may be played once if it is not already
@@ -270,6 +282,8 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
   * Lyrics fetch + timed line updates from playback position.
   * On play, `MainWindow` refreshes song metadata once and prefers embedded
     lyrics from parsed tag fields; file-based `.lrc` loading is fallback.
+  * Cover art comes from `SongParser::extractCoverImage`; a file it cannot
+    open (for example moved or deleted) logs a warning and shows no cover.
 * Lyrics panel style settings (`SettingsDialog` + `MainWindow`)
   * Uses four settings keys: `lyrics/use_system_default_font`,
     `lyrics/font_family`, `lyrics/font_size`, and
@@ -482,7 +496,10 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
 * Playlist identity is `playlist_id`.
 * Playlist order is persisted by `tab_order`.
 * Last opened playlist tab is persisted in `QSettings` (`playlist/last_opened_id`).
-* Per-playlist resume pointer is persisted by `last_played`.
+* Per-playlist resume pointer is persisted by `last_played`. Play with nothing
+  playing resumes it, or starts at the first row when that song is not in the
+  playlist (new playlists start with `last_played = 1`, or the song was
+  removed); an empty playlist does nothing.
 * Playlist membership is persisted in `playlist_items(position)`.
 * Playlist tab name edits are done inline on the tab bar and persisted to
   `playlists.name`.

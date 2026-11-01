@@ -169,6 +169,12 @@ private slots:
   void cloudSync_startupRebase_runsOnWindowStartup();
   void cloudSync_manualRebase_appliesCloudPlayCount_integration();
 
+  // Play/Next with a stale last-played song, a missing file, or a removed tab.
+  void play_afterLastPlayedRowRemoved_startsFirstRow();
+  void play_missingFile_doesNotThrow();
+  void next_afterRemovingTabWithQueuedSong_playsCurrentTab();
+  void play_onEmptyPlaylist_doesNothing();
+
 private:
   void recreateWindow();
   MainWindow *window_ = nullptr;
@@ -1281,6 +1287,100 @@ void TestMainWindow::
   CloudPlayStatsSync::clearDummyPullPages();
   CloudPlayStatsSync::clearDummyPushCalls();
   qunsetenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC");
+}
+
+void TestMainWindow::play_afterLastPlayedRowRemoved_startsFirstRow() {
+  // Same path as a new playlist, whose last_played = 1 is not in it.
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(tabs != nullptr);
+  Playlist *playlist = tabs->currentPlaylist();
+  QVERIFY(playlist != nullptr);
+
+  const QString wav1 = workDir_->filePath("lp-removed-song1.wav");
+  const QString wav2 = workDir_->filePath("lp-removed-song2.wav");
+  const QString wav3 = workDir_->filePath("lp-removed-song3.wav");
+  QVERIFY(writeSilentWav(wav1));
+  QVERIFY(writeSilentWav(wav2));
+  QVERIFY(writeSilentWav(wav3));
+  playlist->addSong(makeSong("Song1", "Artist", wav1));
+  playlist->addSong(makeSong("Song2", "Artist", wav2));
+  playlist->addSong(makeSong("Song3", "Artist", wav3));
+  playlist->setLastPlayed(playlist->getPkByIndex(0));
+  playlist->removeSong(0);
+
+  const int statusCol = statusColumn(playlist);
+  QVERIFY(statusCol >= 0);
+
+  QAction *playAction = window_->findChild<QAction *>("actionPlay");
+  QVERIFY(playAction != nullptr);
+  QVERIFY_THROWS_NO_EXCEPTION(playAction->trigger());
+  QTRY_COMPARE(statusAt(playlist, 0, statusCol), QString::fromUtf8("\u25B6"));
+}
+
+void TestMainWindow::play_missingFile_doesNotThrow() {
+  // A song whose file was moved or deleted after it was added.
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(tabs != nullptr);
+  Playlist *playlist = tabs->currentPlaylist();
+  QVERIFY(playlist != nullptr);
+
+  const QString missing = workDir_->filePath("missing.wav");
+  QVERIFY(!QFile::exists(missing));
+  playlist->addSong(makeSong("Missing", "Artist", missing));
+  playlist->setLastPlayed(playlist->getPkByIndex(0));
+
+  QAction *playAction = window_->findChild<QAction *>("actionPlay");
+  QVERIFY(playAction != nullptr);
+  QVERIFY_THROWS_NO_EXCEPTION(playAction->trigger());
+}
+
+void TestMainWindow::next_afterRemovingTabWithQueuedSong_playsCurrentTab() {
+  // Queue a song in tab B, remove tab B, then Next: the queue must not keep
+  // the destroyed playlist.
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(tabs != nullptr);
+  Playlist *playlistA = tabs->currentPlaylist();
+  QVERIFY(playlistA != nullptr);
+
+  const QString wavA = workDir_->filePath("rm-tab-a.wav");
+  const QString wavB = workDir_->filePath("rm-tab-b.wav");
+  QVERIFY(writeSilentWav(wavA));
+  QVERIFY(writeSilentWav(wavB));
+  playlistA->addSong(makeSong("SongA", "Artist", wavA));
+  playlistA->addSong(makeSong("SongB", "Artist", wavB));
+
+  tabs->createNewPlaylistTabFromSongIds({playlistA->getPkByIndex(1)});
+  QCOMPARE(tabs->tabWidget()->count(), 2);
+  QTableView *tableB =
+      tabs->tabWidget()->currentWidget()->findChild<QTableView *>();
+  QVERIFY(tableB != nullptr);
+  tabs->playEndAction()->setData(
+      QVariant::fromValue(tableB->model()->index(0, 0)));
+  tabs->playEndAction()->trigger();
+
+  QVERIFY(tabs->removePlaylistTabByIndex(1));
+  QCOMPARE(tabs->currentPlaylist(), playlistA);
+
+  const int statusCol = statusColumn(playlistA);
+  QVERIFY(statusCol >= 0);
+  QAction *nextAction = window_->findChild<QAction *>("actionNext");
+  QVERIFY(nextAction != nullptr);
+  nextAction->trigger();
+  QTRY_COMPARE(statusAt(playlistA, 0, statusCol), QString::fromUtf8("\u25B6"));
+}
+
+void TestMainWindow::play_onEmptyPlaylist_doesNothing() {
+  // Fresh install: the Default playlist is empty and last_played is 1.
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(tabs != nullptr);
+  Playlist *playlist = tabs->currentPlaylist();
+  QVERIFY(playlist != nullptr);
+  QVERIFY(playlist->empty());
+
+  QAction *playAction = window_->findChild<QAction *>("actionPlay");
+  QVERIFY(playAction != nullptr);
+  QVERIFY_THROWS_NO_EXCEPTION(playAction->trigger());
+  QVERIFY(playlist->empty());
 }
 
 QTEST_MAIN(TestMainWindow)

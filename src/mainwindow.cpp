@@ -363,6 +363,10 @@ void MainWindow::finishSetUpPlaylist(SongLibrary::Snapshot &&snapshot) {
   columnLayoutManager_.refreshFromRegistry();
   songLibrary.replaceWithSnapshot(std::move(snapshot));
   playlists_->loadAll();
+  connect(playlists_, &PlaylistCollection::playlistAboutToBeRemoved, this,
+          [this](int playlistId) {
+            playbackQueue_.removePlaylist(playlists_->playlist(playlistId));
+          });
   playlistTabs->init(&songLibrary, &playbackQueue_, &control,
                      playbackOrderMenuActionGroup, &columnRegistry_,
                      &columnLayoutManager_, playlists_);
@@ -705,8 +709,14 @@ void MainWindow::play() {
   }
   if (control.getStatus() == PlaybackQueue::PlaybackStatus::None) {
     Playlist *pl = playlistTabs->currentPlaylist();
-    int lastPlayedPk = pl->getLastPlayed();
-    const int row = pl->getIndexByPk(lastPlayedPk);
+    if (pl->empty()) {
+      return;
+    }
+    // Resume the last played song, or start from the top if it is not in
+    // this playlist (new playlist, or the song was removed).
+    const int lastPlayedPk = pl->getLastPlayed();
+    const int row =
+        pl->containsPk(lastPlayedPk) ? pl->getIndexByPk(lastPlayedPk) : 0;
     MSong song = control.playIndex(row);
     playSong(song, row, pl);
   } else {

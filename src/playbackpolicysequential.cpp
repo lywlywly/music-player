@@ -11,8 +11,10 @@ int PlaybackPolicySequential::nextPk() {
     return -1;
   }
 
-  int curIdx =
-      this->currentPk >= 0 ? playlist->getIndexByPk(this->currentPk) : -1;
+  // A current song removed from the playlist counts as no current song.
+  int curIdx = playlist->containsPk(this->currentPk)
+                   ? playlist->getIndexByPk(this->currentPk)
+                   : -1;
 
   if (curIdx < playlist->songCount() - 1)
     this->currentPk = playlist->getPkByIndex(curIdx + 1);
@@ -27,8 +29,9 @@ int PlaybackPolicySequential::prevPk() {
     return -1;
   }
 
-  int curIdx =
-      this->currentPk >= 0 ? playlist->getIndexByPk(this->currentPk) : 0;
+  int curIdx = playlist->containsPk(this->currentPk)
+                   ? playlist->getIndexByPk(this->currentPk)
+                   : 0;
 
   if (curIdx >= 1)
     this->currentPk = playlist->getPkByIndex(curIdx - 1);

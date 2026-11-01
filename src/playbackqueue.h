@@ -31,6 +31,9 @@ public:
   // playback status (queue position not consulted); otherwise a song queued
   // from the same playlist reports Queued with its position.
   SongStatus statusOf(int songPk, const Playlist *playlist) const;
+  // Drops the current song and queued entries of a playlist that is about to
+  // be destroyed. Playlists are only compared, never dereferenced.
+  void removePlaylist(const Playlist *pl);
 
 signals:
   void statusChanged(int songPk, Playlist *playlist);
@@ -40,7 +43,7 @@ private:
   std::deque<int> queue;
   std::vector<std::pair<int, Playlist *>> orders;
   int currentPk = -1;
-  Playlist *currentPlaylist;
+  Playlist *currentPlaylist = nullptr;
   PlaybackStatus playbackStatus = PlaybackStatus::None;
 };
 
