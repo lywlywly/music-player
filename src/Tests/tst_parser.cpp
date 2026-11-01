@@ -21,6 +21,7 @@ public:
 private slots:
   void parseRepositoryInputFiles();
   void writeTags_updatesOnlySpecifiedFields_roundTrip();
+  void parse_missingFileReturnsNullopt();
   void parseLyricsText_parsesLrcLines();
   void parseLyricsText_handlesInvalidInput();
 };
@@ -73,7 +74,12 @@ void TestParser::parseRepositoryInputFiles() {
     QVERIFY2(!expected.isEmpty(),
              qPrintable(QString("Case %1 has empty 'expect'").arg(i)));
 
-    const MSong song = SongParser::parse(absFile.toStdString(), columnRegistry);
+    const std::optional<MSong> parsed =
+        SongParser::parse(absFile.toStdString(), columnRegistry);
+    QVERIFY2(
+        parsed.has_value(),
+        qPrintable(QString("Case %1 failed to parse: %2").arg(i).arg(absFile)));
+    const MSong &song = *parsed;
 
     QVERIFY2(song.contains("filepath"), "Parsed song is missing filepath");
     QCOMPARE(song.at("filepath").text, absFile.toStdString());
@@ -126,9 +132,10 @@ void TestParser::writeTags_updatesOnlySpecifiedFields_roundTrip() {
   QVERIFY(QFile::copy(sourcePath, editedPath));
 
   std::unordered_map<std::string, std::string> beforeRemaining;
-  const MSong before = SongParser::parse(editedPath.toStdString(),
-                                         columnRegistry, &beforeRemaining);
-  QVERIFY(before.contains("artist"));
+  const std::optional<MSong> before = SongParser::parse(
+      editedPath.toStdString(), columnRegistry, &beforeRemaining);
+  QVERIFY(before.has_value());
+  QVERIFY(before->contains("artist"));
 
   const std::unordered_map<std::string, std::string> updates = {
       {"title", "Edited Title"},
@@ -140,19 +147,33 @@ void TestParser::writeTags_updatesOnlySpecifiedFields_roundTrip() {
       SongParser::writeTags(editedPath.toStdString(), updates, columnRegistry));
 
   std::unordered_map<std::string, std::string> afterRemaining;
-  const MSong after = SongParser::parse(editedPath.toStdString(),
-                                        columnRegistry, &afterRemaining);
+  const std::optional<MSong> after = SongParser::parse(
+      editedPath.toStdString(), columnRegistry, &afterRemaining);
+  QVERIFY(after.has_value());
 
-  QVERIFY(after.contains("title"));
-  QCOMPARE(after.at("title").text, std::string("Edited Title"));
-  QVERIFY(after.contains("genre"));
-  QCOMPARE(after.at("genre").text, std::string("rock, pop, jazz"));
-  QCOMPARE(after.at("artist").text, before.at("artist").text);
+  QVERIFY(after->contains("title"));
+  QCOMPARE(after->at("title").text, std::string("Edited Title"));
+  QVERIFY(after->contains("genre"));
+  QCOMPARE(after->at("genre").text, std::string("rock, pop, jazz"));
+  QCOMPARE(after->at("artist").text, before->at("artist").text);
   QVERIFY(afterRemaining.contains("lyrics"));
   QCOMPARE(afterRemaining.at("lyrics"), std::string("[00:01.00]edited-line"));
   QVERIFY(afterRemaining.contains("custom_note"));
   QCOMPARE(afterRemaining.at("custom_note"),
            std::string("hello-note, second-note"));
+}
+
+void TestParser::parse_missingFileReturnsNullopt() {
+  QTemporaryDir tempDir;
+  QVERIFY(tempDir.isValid());
+  const QString missingPath = QDir(tempDir.path()).filePath("missing.flac");
+
+  std::unordered_map<std::string, std::string> remainingFields = {
+      {"stale", "value"}};
+  QVERIFY(!SongParser::parse(missingPath.toStdString(), columnRegistry,
+                             &remainingFields)
+               .has_value());
+  QVERIFY(remainingFields.empty());
 }
 
 void TestParser::parseLyricsText_parsesLrcLines() {

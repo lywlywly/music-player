@@ -35,10 +35,12 @@ public:
 
   // Parses each path (SongLibrary::loadSongFromFile), ingests it
   // (addTolibrary), then appends one row per song not already in the
-  // playlist. progress is called after each path is ingested. Returns the
-  // appended pks in input order.
+  // playlist. Paths that fail to parse are skipped and, when failedPaths is
+  // provided, appended to it in input order. progress is called after each
+  // path is processed. Returns the appended pks in input order.
   std::vector<int> addFiles(const std::vector<std::string> &paths,
-                            const ProgressFn &progress = {});
+                            const ProgressFn &progress = {},
+                            std::vector<std::string> *failedPaths = nullptr);
   // Ingests a pre-parsed song (addTolibrary) and appends it if not already in
   // the playlist. Returns whether it was appended. Assumes DB write
   // preconditions are satisfied; on violation/write failure, process crashes

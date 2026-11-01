@@ -854,18 +854,23 @@ void SongLibrary::upsertComputedFieldValueInDb(
   }
 }
 
-MSong SongLibrary::loadPreparedSongFromFile(
+std::optional<MSong> SongLibrary::loadPreparedSongFromFile(
     const std::string &path,
     std::unordered_map<std::string, std::string> *remainingFields) const {
 #ifdef MYPLAYER_TESTING
-  MSong parsed = parseSong_(path, columnRegistry_, remainingFields);
+  std::optional<MSong> parsed =
+      parseSong_(path, columnRegistry_, remainingFields);
 #else
-  MSong parsed = SongParser::parse(path, columnRegistry_, remainingFields);
+  std::optional<MSong> parsed =
+      SongParser::parse(path, columnRegistry_, remainingFields);
 #endif
-  evaluateComputedFieldsInSong(parsed, columnRegistry_);
-  parsed.insert_or_assign(
+  if (!parsed) {
+    return std::nullopt;
+  }
+  evaluateComputedFieldsInSong(*parsed, columnRegistry_);
+  parsed->insert_or_assign(
       "song_identity_key",
-      FieldValue(songIdentityKeyFromSong(parsed), "song_identity_key"));
+      FieldValue(songIdentityKeyFromSong(*parsed), "song_identity_key"));
   return parsed;
 }
 
@@ -887,14 +892,21 @@ const MSong &SongLibrary::refreshSongFromFile(
            path.c_str());
   }
 
-  MSong parsed = loadPreparedSongFromFile(path, remainingFields);
-  syncBuiltInFieldsBySongId(songId, parsed);
-  syncDynamicAttributesBySongId(songId, parsed);
-  syncComputedValuesBySongId(songId, parsed);
+  const std::optional<MSong> parsed =
+      loadPreparedSongFromFile(path, remainingFields);
+  // Keep stored metadata when the file cannot be read (for example moved or
+  // deleted), instead of overwriting it with empty fields.
+  if (!parsed) {
+    return songs[songId];
+  }
+  syncBuiltInFieldsBySongId(songId, *parsed);
+  syncDynamicAttributesBySongId(songId, *parsed);
+  syncComputedValuesBySongId(songId, *parsed);
   return songs[songId];
 }
 
-MSong SongLibrary::loadSongFromFile(const std::string &path) const {
+std::optional<MSong>
+SongLibrary::loadSongFromFile(const std::string &path) const {
   return loadPreparedSongFromFile(path, nullptr);
 }
 

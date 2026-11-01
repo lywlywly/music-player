@@ -133,15 +133,20 @@ int Playlist::getPkByIndex(int i) const { return songPKs_.at(i); }
 int Playlist::getLastPlayed() const { return lastPlayed_; }
 
 std::vector<int> Playlist::addFiles(const std::vector<std::string> &paths,
-                                    const ProgressFn &progress) {
+                                    const ProgressFn &progress,
+                                    std::vector<std::string> *failedPaths) {
   std::vector<int> pks;
   pks.reserve(paths.size());
   std::unordered_set<int> seen;
   const int total = static_cast<int>(paths.size());
   for (int i = 0; i < total; ++i) {
-    const int pk = library_.addTolibrary(library_.loadSongFromFile(paths[i]));
-    if (!containsPk(pk) && seen.insert(pk).second) {
-      pks.push_back(pk);
+    if (std::optional<MSong> song = library_.loadSongFromFile(paths[i])) {
+      const int pk = library_.addTolibrary(std::move(*song));
+      if (!containsPk(pk) && seen.insert(pk).second) {
+        pks.push_back(pk);
+      }
+    } else if (failedPaths) {
+      failedPaths->push_back(paths[i]);
     }
     if (progress) {
       progress(i + 1, total);

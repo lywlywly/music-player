@@ -77,6 +77,7 @@ private slots:
   void search_noMatchReturnsEmpty();
   void refreshSongFromFile_usesInjectedParserAndSyncsDb();
   void refreshSongFromFile_populatesRemainingFields();
+  void refreshSongFromFile_unparsableFileKeepsStoredFields();
   void refreshSongFromFile_customLyricsFieldsPersist();
   void refreshSongsFromFilepaths_dedupesAndReportsProgress();
   void registerQuery_tracksLaterInsertions();
@@ -943,6 +944,35 @@ void TestSongLibrary::refreshSongFromFile_populatesRemainingFields() {
   QVERIFY(sawProvidedRemaining);
   QCOMPARE(remainingFields.at("unsynced_lyrics"),
            std::string("[00:01.00]embedded"));
+}
+
+void TestSongLibrary::refreshSongFromFile_unparsableFileKeepsStoredFields() {
+  SongLibrary localLibrary(
+      *registry_, *databaseManager_,
+      [](const std::string &, const ColumnRegistry &,
+         std::unordered_map<std::string, std::string> *)
+          -> std::optional<MSong> { return std::nullopt; });
+
+  const std::string path = "/tmp/refresh-unparsable.mp3";
+  const int songId = localLibrary.addTolibrary(
+      makeSong("Stored", "Artist A", QString::fromStdString(path), "Album A"));
+  const std::string identityKey = localLibrary.songIdentityKeyBySongPk(songId);
+
+  const MSong &refreshed = localLibrary.refreshSongFromFile(path);
+
+  QCOMPARE(refreshed.at("title").text, std::string("Stored"));
+  QCOMPARE(refreshed.at("artist").text, std::string("Artist A"));
+  QCOMPARE(refreshed.at("album").text, std::string("Album A"));
+  QCOMPARE(localLibrary.songIdentityKeyBySongPk(songId), identityKey);
+
+  QSqlQuery q(databaseManager_->db());
+  q.prepare("SELECT title, artist, album FROM songs WHERE song_id=:song_id");
+  q.bindValue(":song_id", songId);
+  QVERIFY(q.exec());
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toString(), QString("Stored"));
+  QCOMPARE(q.value(1).toString(), QString("Artist A"));
+  QCOMPARE(q.value(2).toString(), QString("Album A"));
 }
 
 void TestSongLibrary::refreshSongFromFile_customLyricsFieldsPersist() {

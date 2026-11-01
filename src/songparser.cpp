@@ -232,7 +232,7 @@ bool SongParser::isLikelyCbrAudioFile(const std::string &filepath) {
          dynamic_cast<const TagLib::RIFF::WAV::File *>(file.file()) != nullptr;
 }
 
-MSong SongParser::parse(
+std::optional<MSong> SongParser::parse(
     const std::string &filepath, const ColumnRegistry &columnRegistry,
     std::unordered_map<std::string, std::string> *remainingFields) {
 #ifdef _WIN32
@@ -252,64 +252,67 @@ MSong SongParser::parse(
     remainingFields->clear();
   }
 
-  if (!file.isNull()) {
-    const TagLib::PropertyMap propertyMap = file.file()->properties();
-    for (auto it = propertyMap.begin(); it != propertyMap.end(); ++it) {
-      if (it->second.isEmpty()) {
-        continue;
-      }
+  if (file.isNull()) {
+    qWarning() << "SongParser::parse failed to open file:"
+               << QString::fromStdString(filepath);
+    return std::nullopt;
+  }
 
-      const std::string rawKey = it->first.to8Bit(true);
-      const std::string key = util::canonicalizeTagKey(rawKey);
-      if (key.empty()) {
-        continue;
-      }
-      const std::string value = joinTagValuesForDisplay(it->second);
-      if (value.empty()) {
-        continue;
-      }
-
-      if (isBuiltInTagKey(key, columnRegistry)) {
-        tags.insert_or_assign(key, FieldValue(value, key));
-      } else {
-        const QString columnId =
-            QString::fromStdString(std::string{"attr:"} + key);
-        if (columnRegistry.hasColumn(columnId)) {
-          const std::string fieldId = columnId.toStdString();
-          tags.insert_or_assign(fieldId, FieldValue(value, fieldId));
-        } else if (remainingFields) {
-          (*remainingFields)[key] = value;
-        }
-      }
+  const TagLib::PropertyMap propertyMap = file.file()->properties();
+  for (auto it = propertyMap.begin(); it != propertyMap.end(); ++it) {
+    if (it->second.isEmpty()) {
+      continue;
     }
 
-    const TagLib::AudioProperties *audioProperties = file.audioProperties();
-    const std::string codec = codecFromFileClass(file.file(), audioProperties);
-    if (!codec.empty()) {
-      tags.insert_or_assign("codec", FieldValue(codec, "codec"));
+    const std::string rawKey = it->first.to8Bit(true);
+    const std::string key = util::canonicalizeTagKey(rawKey);
+    if (key.empty()) {
+      continue;
     }
-    if (audioProperties) {
-      const int bitrate = audioProperties->bitrate();
-      if (bitrate > 0) {
-        tags.insert_or_assign("bitrate",
-                              FieldValue(std::to_string(bitrate), "bitrate"));
+    const std::string value = joinTagValuesForDisplay(it->second);
+    if (value.empty()) {
+      continue;
+    }
+
+    if (isBuiltInTagKey(key, columnRegistry)) {
+      tags.insert_or_assign(key, FieldValue(value, key));
+    } else {
+      const QString columnId =
+          QString::fromStdString(std::string{"attr:"} + key);
+      if (columnRegistry.hasColumn(columnId)) {
+        const std::string fieldId = columnId.toStdString();
+        tags.insert_or_assign(fieldId, FieldValue(value, fieldId));
+      } else if (remainingFields) {
+        (*remainingFields)[key] = value;
       }
-      const int duration = audioProperties->lengthInSeconds();
-      if (duration > 0) {
-        tags.insert_or_assign("duration",
-                              FieldValue(std::to_string(duration), "duration"));
-      }
-      const int sampleRate = audioProperties->sampleRate();
-      if (sampleRate > 0) {
-        tags.insert_or_assign(
-            "sample_rate",
-            FieldValue(std::to_string(sampleRate), "sample_rate"));
-      }
-      const int channels = audioProperties->channels();
-      if (channels > 0) {
-        tags.insert_or_assign("channels",
-                              FieldValue(std::to_string(channels), "channels"));
-      }
+    }
+  }
+
+  const TagLib::AudioProperties *audioProperties = file.audioProperties();
+  const std::string codec = codecFromFileClass(file.file(), audioProperties);
+  if (!codec.empty()) {
+    tags.insert_or_assign("codec", FieldValue(codec, "codec"));
+  }
+  if (audioProperties) {
+    const int bitrate = audioProperties->bitrate();
+    if (bitrate > 0) {
+      tags.insert_or_assign("bitrate",
+                            FieldValue(std::to_string(bitrate), "bitrate"));
+    }
+    const int duration = audioProperties->lengthInSeconds();
+    if (duration > 0) {
+      tags.insert_or_assign("duration",
+                            FieldValue(std::to_string(duration), "duration"));
+    }
+    const int sampleRate = audioProperties->sampleRate();
+    if (sampleRate > 0) {
+      tags.insert_or_assign(
+          "sample_rate", FieldValue(std::to_string(sampleRate), "sample_rate"));
+    }
+    const int channels = audioProperties->channels();
+    if (channels > 0) {
+      tags.insert_or_assign("channels",
+                            FieldValue(std::to_string(channels), "channels"));
     }
   }
 

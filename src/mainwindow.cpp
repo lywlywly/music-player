@@ -31,6 +31,7 @@
 #include <QFutureWatcher>
 #include <QIcon>
 #include <QKeySequence>
+#include <QMessageBox>
 #include <QPainter>
 #include <QProgressDialog>
 #include <QRandomGenerator>
@@ -1056,7 +1057,16 @@ void MainWindow::open() {
   for (const QString &s : fileName) {
     paths.push_back(s.toStdString());
   }
-  playlistTabs->currentPlaylist()->addFiles(paths);
+  // A failed file is reported only when it was the only one selected; in a
+  // multi-file add, failed files are skipped silently.
+  std::vector<std::string> failedPaths;
+  playlistTabs->currentPlaylist()->addFiles(paths, {}, &failedPaths);
+  if (paths.size() == 1 && !failedPaths.empty()) {
+    QMessageBox::warning(this, tr("Add File"),
+                         tr("Could not read the file:\n%1")
+                             .arg(QDir::toNativeSeparators(
+                                 QString::fromStdString(failedPaths.front()))));
+  }
 }
 
 void MainWindow::openFolder() {

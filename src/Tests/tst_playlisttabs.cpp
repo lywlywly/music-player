@@ -583,8 +583,10 @@ void TestPlaylistTabs::
   QCOMPARE(args.at(0).toInt(), songPk);
 
   std::unordered_map<std::string, std::string> remainingAfter;
-  const MSong parsedAfter =
+  const std::optional<MSong> parseResult =
       SongParser::parse(editedPath.toStdString(), *registry_, &remainingAfter);
+  QVERIFY(parseResult.has_value());
+  const MSong &parsedAfter = *parseResult;
   QVERIFY(parsedAfter.contains("attr:lyrics"));
   QCOMPARE(parsedAfter.at("attr:lyrics").text, std::string("edited-line"));
 }
@@ -697,8 +699,10 @@ void TestPlaylistTabs::propertiesDialog_cancel_discardsBufferedEdits() {
   QTest::qWait(0);
 
   std::unordered_map<std::string, std::string> remainingAfter;
-  const MSong parsedAfter =
+  const std::optional<MSong> parseResult =
       SongParser::parse(editedPath.toStdString(), *registry_, &remainingAfter);
+  QVERIFY(parseResult.has_value());
+  const MSong &parsedAfter = *parseResult;
   if (parsedAfter.contains("attr:lyrics")) {
     QVERIFY(parsedAfter.at("attr:lyrics").text !=
             std::string("should-not-save"));
@@ -798,8 +802,10 @@ void TestPlaylistTabs::propertiesDialog_removeField_removesNonBuiltInOnSave() {
   QTest::qWait(0);
 
   std::unordered_map<std::string, std::string> remainingAfter;
-  const MSong parsedAfter =
+  const std::optional<MSong> parseResult =
       SongParser::parse(editedPath.toStdString(), *registry_, &remainingAfter);
+  QVERIFY(parseResult.has_value());
+  const MSong &parsedAfter = *parseResult;
   QVERIFY(!parsedAfter.contains("attr:lyrics"));
   QVERIFY(!remainingAfter.contains("lyrics"));
 }
@@ -954,8 +960,10 @@ void TestPlaylistTabs::propertiesDialog_addField_addsAndSavesTag() {
   QTest::qWait(0);
 
   std::unordered_map<std::string, std::string> remainingAfter;
-  const MSong parsedAfter =
+  const std::optional<MSong> parseResult =
       SongParser::parse(editedPath.toStdString(), *registry_, &remainingAfter);
+  QVERIFY(parseResult.has_value());
+  const MSong &parsedAfter = *parseResult;
   QVERIFY(parsedAfter.contains("attr:mood") || remainingAfter.contains("mood"));
   if (parsedAfter.contains("attr:mood")) {
     QCOMPARE(parsedAfter.at("attr:mood").text, std::string("calm"));

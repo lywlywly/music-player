@@ -8,6 +8,7 @@
 #include <QTime>
 #include <QTimeZone>
 #include <QUuid>
+#include <optional>
 
 #include "../columnregistry.h"
 #include "../databasemanager.h"
@@ -66,6 +67,7 @@ private slots:
   void addFiles_insertsBatchWithOneSignalPair();
   void addSong_existingSong_isNoOp();
   void addFiles_skipsExistingAndRepeatedSongs();
+  void addFiles_skipsAndReportsUnparsableFiles();
   void removeSong_thenReadd_persistsSingleRowAtEnd();
   void operations_emitBeforeAndAfterSignals();
 
@@ -420,6 +422,39 @@ void TestPlaylist::addFiles_skipsExistingAndRepeatedSongs() {
 
   QVERIFY(playlist.addFiles({"/tmp/dup-files-a.mp3"}).empty());
   QCOMPARE(aboutToInsertSpy.count(), 1);
+}
+
+void TestPlaylist::addFiles_skipsAndReportsUnparsableFiles() {
+  SongLibrary localLibrary(*registry_, *databaseManager_,
+                           [](const std::string &path, const ColumnRegistry &,
+                              std::unordered_map<std::string, std::string> *)
+                               -> std::optional<MSong> {
+                             if (path.find("broken") != std::string::npos) {
+                               return std::nullopt;
+                             }
+                             return makeSong(QString::fromStdString(path),
+                                             "Artist",
+                                             QString::fromStdString(path));
+                           });
+  Playlist playlist(-1, localLibrary, *databaseManager_);
+
+  std::vector<std::pair<int, int>> progress;
+  std::vector<std::string> failed;
+  const std::vector<int> pks = playlist.addFiles(
+      {"/tmp/broken-1.mp3", "/tmp/ok-1.mp3", "/tmp/broken-2.mp3"},
+      [&](int current, int total) { progress.emplace_back(current, total); },
+      &failed);
+
+  QCOMPARE(pks.size(), static_cast<size_t>(1));
+  QCOMPARE(playlist.songCount(), 1);
+  QCOMPARE(playlist.getSongByIndex(0).at("title").text,
+           std::string("/tmp/ok-1.mp3"));
+  const std::vector<std::string> expectedFailed = {"/tmp/broken-1.mp3",
+                                                   "/tmp/broken-2.mp3"};
+  QCOMPARE(failed, expectedFailed);
+  const std::vector<std::pair<int, int>> expectedProgress = {
+      {1, 3}, {2, 3}, {3, 3}};
+  QCOMPARE(progress, expectedProgress);
 }
 
 void TestPlaylist::removeSong_thenReadd_persistsSingleRowAtEnd() {

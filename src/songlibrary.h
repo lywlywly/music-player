@@ -7,6 +7,7 @@
 #include <QSqlDatabase>
 #include <QString>
 #include <functional>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -24,9 +25,9 @@ inline QString songFieldText(const MSong &song, const std::string &field) {
 
 class DatabaseManager;
 #ifdef MYPLAYER_TESTING
-using SongParseFn =
-    std::function<MSong(const std::string &, const ColumnRegistry &,
-                        std::unordered_map<std::string, std::string> *)>;
+using SongParseFn = std::function<std::optional<MSong>(
+    const std::string &, const ColumnRegistry &,
+    std::unordered_map<std::string, std::string> *)>;
 #endif
 
 // SongLibrary is the canonical repository for song metadata in memory and in
@@ -77,14 +78,15 @@ public:
   void replaceWithSnapshot(Snapshot &&snapshot);
   // Re-parses one song by filepath, updates DB + in-memory fields, and returns
   // the refreshed in-memory song. When remainingFields is provided, parser
-  // leftovers (unbound tags) are written there for caller-side use.
+  // leftovers (unbound tags) are written there for caller-side use. If the file
+  // cannot be parsed, stored fields are left unchanged and returned as-is.
   const MSong &refreshSongFromFile(
       const std::string &path,
       std::unordered_map<std::string, std::string> *remainingFields = nullptr);
   // Parses one file and returns a prepared song map containing:
   // built-in fields, dynamic attrs from parser, computed fields, and
-  // song_identity_key.
-  MSong loadSongFromFile(const std::string &path) const;
+  // song_identity_key. Returns std::nullopt when the file cannot be parsed.
+  std::optional<MSong> loadSongFromFile(const std::string &path) const;
   // Re-parses a filepath list (deduped internally), then updates DB and
   // in-memory fields for each song. This can take noticeable time on large
   // lists; progressCallback receives (current, total) after each refresh for
@@ -107,7 +109,7 @@ public:
   std::unordered_map<std::string, int> identityPlayCounts() const;
 
 private:
-  MSong loadPreparedSongFromFile(
+  std::optional<MSong> loadPreparedSongFromFile(
       const std::string &path,
       std::unordered_map<std::string, std::string> *remainingFields) const;
   void loadBuiltInSongs();

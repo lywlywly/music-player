@@ -377,7 +377,14 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
   Adding files to a playlist (open, add folder) goes through
   `Playlist::addFiles(...)`, which runs this path for each file and then
   appends the rows.
+* `SongParser::parse` returns `std::nullopt` when TagLib cannot open the file
+  (missing, unreadable, or unsupported); a readable file without tags is not
+  a failure. `Playlist::addFiles(...)` skips such paths and reports them
+  through its optional `failedPaths` output. `MainWindow::open()` shows an
+  error dialog only when the single selected file failed; multi-file and
+  folder adds skip failed files silently.
 * Refresh path re-parses file and syncs built-in/dynamic/computed fields to DB + memory.
+  If parsing fails, the stored fields are kept unchanged.
 * Computed values are namespaced in memory (`computed:<key>`) but persisted in
   DB with plain keys (`<key>`) in `song_computed_attributes`.
 * Properties save path:
