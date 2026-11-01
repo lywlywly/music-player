@@ -284,6 +284,36 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
   * Apply behavior:
     * `use_system_default_font=true`: system UI family + stored size
     * `use_system_default_font=false`: stored family + stored size
+  * The lyrics font starts from the application font, and a stored family is
+    put first in its family list, so the CJK fallback families below still
+    apply to characters the chosen font lacks.
+* Application font and CJK fallback (Windows, `main.cpp`)
+  * Without an explicit family list, Qt does not use Windows font fallback
+    (neither the registry font-link list nor DirectWrite system fallback). It
+    uses a built-in list chosen by user language
+    (`QWindowsFontDatabaseBase::extraTryFontsForFamily`); for non-CJK locales
+    that renders Chinese text in MS UI Gothic / SimSun.
+  * Temporary fix: the app font uses the system UI family, then `Meiryo UI`,
+    `Microsoft JhengHei UI`, `Microsoft YaHei UI`, the order of the `Segoe UI`
+    entry in `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\FontLink\SystemLink`
+    on an en-US install.
+  * Limitation: Han characters shared with Japanese use Meiryo UI glyph
+    shapes, and Simplified-only characters fall through to JhengHei / YaHei,
+    so one line of Chinese can mix fonts (native Windows does the same on
+    non-Chinese locales). Possible replacements: choose the CJK family order
+    by detected text language, or use one CJK family with consistent design
+    across languages (for example Source Han Sans).
+  * Size: native Windows draws CJK fallback fonts larger than the base font
+    (Segoe UI 9pt falls back to Meiryo UI 10pt). This is hard in Qt:
+    `QFontEngineMulti` creates every fallback engine at the base font size,
+    so it would need per-run layout in every place text is drawn (custom
+    delegates, `QProxyStyle` overrides for menus). Instead the whole app font
+    is set to 10pt on Windows.
+  * 10pt also matches the `windows11` style's menu bar, which paints
+    `CE_MenuBarItem` text at a hard-coded 10pt while sizing items from the
+    widget font. With another app font size, menu bar gaps change but the
+    text does not. Other sizes would need a `QProxyStyle` override of
+    `CE_MenuBarItem` or the `windowsvista` style.
 * Display settings (`SettingsDialog` + `MainWindow`)
   * Display theme mode is persisted as `display/theme_mode` with values:
     `system`, `light`, `dark`.

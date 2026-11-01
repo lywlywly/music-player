@@ -506,13 +506,15 @@ void MainWindow::setUpLyricsPanel() {
 }
 
 void MainWindow::setLyricsPanelFont(const QString &fontFamily, int pointSize) {
-  if (fontFamily.isEmpty()) {
-    QFont font = QApplication::font();
-    font.setPointSize(pointSize);
-    ui->lyricsPanel->setLyricsTextFont(font);
-    return;
+  // Start from the application font so its CJK fallback families are kept.
+  QFont font = QApplication::font();
+  font.setPointSize(pointSize);
+  if (!fontFamily.isEmpty()) {
+    QStringList families = font.families();
+    families.removeAll(fontFamily);
+    families.prepend(fontFamily);
+    font.setFamilies(families);
   }
-  QFont font(fontFamily, pointSize);
   ui->lyricsPanel->setLyricsTextFont(font);
 }
 
