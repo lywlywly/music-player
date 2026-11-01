@@ -14,7 +14,7 @@ endfunction()
 set(TEST_NAMES
     basics
     parser
-    # lyrics      # temporarily disabled
+    lyrics
     # checksum    # temporarily disabled
     playbackmanager
     songlibrary

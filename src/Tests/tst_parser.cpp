@@ -9,7 +9,6 @@
 #include <QTemporaryDir>
 #include <QTest>
 
-#include "../lyricsloader.h"
 #include "../songparser.h"
 
 class TestParser : public QObject {
@@ -22,8 +21,6 @@ private slots:
   void parseRepositoryInputFiles();
   void writeTags_updatesOnlySpecifiedFields_roundTrip();
   void parse_missingFileReturnsNullopt();
-  void parseLyricsText_parsesLrcLines();
-  void parseLyricsText_handlesInvalidInput();
 };
 
 TestParser::TestParser(QObject *parent) : QObject{parent} {}
@@ -174,24 +171,6 @@ void TestParser::parse_missingFileReturnsNullopt() {
                              &remainingFields)
                .has_value());
   QVERIFY(remainingFields.empty());
-}
-
-void TestParser::parseLyricsText_parsesLrcLines() {
-  const std::string raw = "[ti:Song]\n"
-                          "[00:01.00]line 1\n"
-                          "[00:02.50][00:03.00]line 2\n";
-  const std::map<int, std::string> lyrics = LyricsLoader::parseLyricsText(raw);
-
-  QCOMPARE(lyrics.size(), size_t(3));
-  QCOMPARE(lyrics.at(1000), std::string("line 1"));
-  QCOMPARE(lyrics.at(2500), std::string("line 2"));
-  QCOMPARE(lyrics.at(3000), std::string("line 2"));
-}
-
-void TestParser::parseLyricsText_handlesInvalidInput() {
-  const std::string raw = "[00:xx.xx]bad\nno timestamp\n";
-  const std::map<int, std::string> lyrics = LyricsLoader::parseLyricsText(raw);
-  QVERIFY(lyrics.empty());
 }
 
 QTEST_MAIN(TestParser)

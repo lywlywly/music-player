@@ -1,14 +1,33 @@
 #include "lyricsloader.h"
 #include "utils.h"
 
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <iostream>
 #include <regex>
 #include <sstream>
+#include <stdexcept>
 
 namespace {
+// Converts the fractional part of an LRC timestamp to milliseconds by its
+// digit count: "5" -> 500, "45" -> 450, "450" -> 450. Throws
+// std::invalid_argument when it is not 1-3 digits.
+int fractionToMs(const std::string &digits) {
+  if (digits.empty() || digits.size() > 3 ||
+      !std::all_of(digits.begin(), digits.end(),
+                   [](unsigned char c) { return std::isdigit(c); })) {
+    throw std::invalid_argument("invalid LRC fraction");
+  }
+  int ms = std::stoi(digits);
+  for (size_t i = digits.size(); i < 3; ++i) {
+    ms *= 10;
+  }
+  return ms;
+}
+
 std::map<int, std::string> parseLyricsStream(std::istream &stream) {
   std::map<int, std::string> lyricsMap;
   std::regex patternMetadata(R"(\[([a-zA-Z]+):(.*)\])");
@@ -33,9 +52,8 @@ std::map<int, std::string> parseLyricsStream(std::istream &stream) {
       try {
         int minutes = std::stoi(t.substr(0, 2));
         int seconds = std::stoi(t.substr(3, 2));
-        float fraction = std::stof(t.substr(6));
         int totalMs =
-            (minutes * 60 + seconds) * 1000 + static_cast<int>(fraction * 10);
+            (minutes * 60 + seconds) * 1000 + fractionToMs(t.substr(6));
         timeStamps.push_back(totalMs);
       } catch (...) {
         continue;
