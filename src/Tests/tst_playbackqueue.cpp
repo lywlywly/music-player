@@ -72,8 +72,7 @@ void TestPlaybackQueue::statusOf_currentSongIgnoresQueuePosition() {
   queue.addLast(3, pl);
   queue.setCurrentId(3, pl);
 
-  QCOMPARE(queue.statusOf(3, pl).state,
-           PlaybackQueue::SongPlaybackState::None);
+  QCOMPARE(queue.statusOf(3, pl).state, PlaybackQueue::SongPlaybackState::None);
   queue.setPlaybackStatus(PlaybackQueue::PlaybackStatus::Playing);
   QCOMPARE(queue.statusOf(3, pl).state,
            PlaybackQueue::SongPlaybackState::Playing);

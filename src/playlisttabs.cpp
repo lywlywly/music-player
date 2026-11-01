@@ -295,8 +295,8 @@ void PlaylistTabs::initializePlaylists() {
 }
 
 void PlaylistTabs::setUpTableView(Playlist *pl, QTableView *tbv) {
-  auto *model = new PlaylistTableModel(*pl, *playbackQueue_,
-                                       *columnLayoutManager_, tbv);
+  auto *model =
+      new PlaylistTableModel(*pl, *playbackQueue_, *columnLayoutManager_, tbv);
   tbv->setModel(model);
   tbv->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
   tbv->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
@@ -324,23 +324,25 @@ void PlaylistTabs::setUpTableView(Playlist *pl, QTableView *tbv) {
 
   connect(header, &QHeaderView::sectionClicked, this,
           [this, tbv, model](int idx) {
-    const QList<QString> visibleIds = columnLayoutManager_->visibleColumnIds();
-    if (idx < 0 || idx >= visibleIds.size()) {
-      tbv->horizontalHeader()->setSortIndicatorShown(false);
-      return;
-    }
+            const QList<QString> visibleIds =
+                columnLayoutManager_->visibleColumnIds();
+            if (idx < 0 || idx >= visibleIds.size()) {
+              tbv->horizontalHeader()->setSortIndicatorShown(false);
+              return;
+            }
 
-    const QString &columnId = visibleIds[idx];
-    const ColumnDefinition *definition = columnRegistry_->findColumn(columnId);
-    if (!definition || !definition->sortable) {
-      tbv->horizontalHeader()->setSortIndicatorShown(false);
-      return;
-    }
+            const QString &columnId = visibleIds[idx];
+            const ColumnDefinition *definition =
+                columnRegistry_->findColumn(columnId);
+            if (!definition || !definition->sortable) {
+              tbv->horizontalHeader()->setSortIndicatorShown(false);
+              return;
+            }
 
-    tbv->horizontalHeader()->setSortIndicatorShown(true);
-    model->sortByColumnId(columnId,
-                          tbv->horizontalHeader()->sortIndicatorOrder());
-  });
+            tbv->horizontalHeader()->setSortIndicatorShown(true);
+            model->sortByColumnId(
+                columnId, tbv->horizontalHeader()->sortIndicatorOrder());
+          });
 
   connect(header, &QHeaderView::sectionMoved, this, [this, tbv](int, int, int) {
     if (applyingColumnLayout_) {

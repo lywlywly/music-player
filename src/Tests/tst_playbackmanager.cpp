@@ -298,8 +298,8 @@ void TestPlaybackManager::shuffle_historyFollowsPlaylistSize() {
 
   for (int i = 0; i < 20; ++i) {
     const QString n = QString::number(i);
-    playlist->addSong(makeSong("S" + n, "Artist",
-                               "/tmp/pm-shuffle-size-" + n + ".mp3", n));
+    playlist->addSong(
+        makeSong("S" + n, "Artist", "/tmp/pm-shuffle-size-" + n + ".mp3", n));
   }
   // Capacity is now 10 only if songsInserted resized the history.
   std::vector<int> played;
@@ -367,7 +367,8 @@ void TestPlaybackManager::sequential_next_wrapsToFirst() {
 
 void TestPlaybackManager::shuffle_singleSong_nextPrevAreStable() {
   Playlist playlist(-1, *library_, *databaseManager_);
-  playlist.addSong(makeSong("Only", "Artist", "/tmp/pm-shuffle-single.mp3", "1"));
+  playlist.addSong(
+      makeSong("Only", "Artist", "/tmp/pm-shuffle-single.mp3", "1"));
 
   manager_->setView(playlist);
   manager_->setPolicy(Shuffle);

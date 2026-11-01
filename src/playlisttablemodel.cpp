@@ -38,22 +38,22 @@ PlaylistTableModel::PlaylistTableModel(
     }
     emit dataChanged(index(row, 0), index(row, columnCount() - 1));
   });
-  connect(&playbackQueue_, &PlaybackQueue::statusChanged, this,
-          [this](int pk, Playlist *pl) {
-            if (pl == nullptr || pl != playlist_ || !playlist_->containsPk(pk)) {
-              return;
-            }
+  connect(
+      &playbackQueue_, &PlaybackQueue::statusChanged, this,
+      [this](int pk, Playlist *pl) {
+        if (pl == nullptr || pl != playlist_ || !playlist_->containsPk(pk)) {
+          return;
+        }
 
-            const int row = playlist_->getIndexByPk(pk);
-            const int statusColumn =
-                columnLayoutManager_.visibleColumnIds().indexOf("status");
-            if (statusColumn < 0) {
-              return;
-            }
+        const int row = playlist_->getIndexByPk(pk);
+        const int statusColumn =
+            columnLayoutManager_.visibleColumnIds().indexOf("status");
+        if (statusColumn < 0) {
+          return;
+        }
 
-            emit dataChanged(index(row, statusColumn),
-                             index(row, statusColumn));
-          });
+        emit dataChanged(index(row, statusColumn), index(row, statusColumn));
+      });
 }
 
 int PlaylistTableModel::rowCount(const QModelIndex &) const {

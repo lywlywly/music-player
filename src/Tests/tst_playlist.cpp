@@ -11,8 +11,8 @@
 
 #include "../columnregistry.h"
 #include "../databasemanager.h"
-#include "../songlibrary.h"
 #include "../playlist.h"
+#include "../songlibrary.h"
 #include "../utils.h"
 
 namespace {
@@ -95,9 +95,11 @@ void TestPlaylist::cleanup() {
 
 void TestPlaylist::sortByField_numericAndDate() {
   Playlist playlist(-1, *library_, *databaseManager_);
-  playlist.addSong(makeSong("A", "Artist", "/tmp/sort-a.mp3", "10", "2023-01-01"));
+  playlist.addSong(
+      makeSong("A", "Artist", "/tmp/sort-a.mp3", "10", "2023-01-01"));
   playlist.addSong(makeSong("B", "Artist", "/tmp/sort-b.mp3", "2", "2021"));
-  playlist.addSong(makeSong("C", "Artist", "/tmp/sort-c.mp3", "1", "2022-12-01"));
+  playlist.addSong(
+      makeSong("C", "Artist", "/tmp/sort-c.mp3", "1", "2022-12-01"));
 
   playlist.sortByField("tracknumber", 0);
   QCOMPARE(playlist.getSongByIndex(0).at("title").text, std::string("C"));

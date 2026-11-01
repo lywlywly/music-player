@@ -141,12 +141,11 @@ void TestPlaylistCollection::removePlaylist_rejectsLastAndEmitsInOrder() {
                           .arg(id)
                           .arg(collection_->playlist(id) != nullptr);
           });
-  connect(collection_, &PlaylistCollection::playlistRemoved, this,
-          [&](int id) {
-            events << QStringLiteral("removed:%1:%2")
-                          .arg(id)
-                          .arg(collection_->playlist(id) != nullptr);
-          });
+  connect(collection_, &PlaylistCollection::playlistRemoved, this, [&](int id) {
+    events << QStringLiteral("removed:%1:%2")
+                  .arg(id)
+                  .arg(collection_->playlist(id) != nullptr);
+  });
 
   QVERIFY(collection_->removePlaylist(1));
   const QStringList expectedEvents = {"about:1:1", "removed:1:0"};
