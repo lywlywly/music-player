@@ -115,6 +115,8 @@ The top-level window and what it owns.
     playlists and playback state it shows.
   * Starts the library load (`loadLibrary`) during startup and builds the
     playlists, tabs and actions once it calls back.
+  * Open and Add Folder call `addFilesFromDialog` and `addFolderFromDialog`
+    (playlistdialogs.h) on the current playlist.
 
 ### Persistence and schema
 
@@ -184,6 +186,7 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
   * Creates one `PlaylistTableModel` per tab (parented to the tab's table view) and connects UI interactions.
   * Opens per-song Properties dialog from row context menu and refreshes playlist rows after successful save.
   * Remove from Playlist (row context menu) removes the selected rows with `Playlist::removeSongs`.
+  * Refresh (tab context menu) re-reads the playlist's tags with `refreshMetadataWithProgress`.
   * The Properties context-menu action carries shortcut metadata so the menu can
     display the platform binding (`Command+I` on macOS, `Alt+Enter` elsewhere),
     but the actual keyboard handling is registered with `QShortcut` on each
@@ -494,7 +497,7 @@ How files become songs, and how songs are refreshed after their tags change.
 * `SongParser::parse` returns `std::nullopt` when TagLib cannot open the file
   (missing, unreadable, or unsupported); a readable file without tags is not
   a failure. `Playlist::addFiles(...)` skips such paths and reports them
-  through its optional `failedPaths` output. `MainWindow::open()` shows an
+  through its optional `failedPaths` output. `addFilesFromDialog` shows an
   error dialog only when the single selected file failed; multi-file and
   folder adds skip failed files silently.
 * Refresh path re-parses file and syncs built-in/dynamic/computed fields to DB + memory.
@@ -504,11 +507,12 @@ How files become songs, and how songs are refreshed after their tags change.
 * Properties save path:
   * collect dirty/removed rows -> `SongParser::writeTags(...)` -> `SongLibrary::refreshSongFromFile(...)` -> emit song-updated signal -> `PlaylistCollection::notifySongChanged(...)` refreshes the song's rows.
 * Two bulk user-triggered flows are intentionally blocking with progress UI:
-  * `PlaylistTabs::refreshPlaylistMetadata(...)` (playlist-wide metadata refresh
+  * `refreshMetadataWithProgress(...)` (playlist-wide metadata refresh
     via `Playlist::refreshMetadataFromFiles(...)`)
-  * `MainWindow::openFolder()` (folder import via `Playlist::addFiles(...)`)
-  Both use modal progress dialogs and process events while work runs, instead of
-  moving those operations to background threads.
+  * `addFolderFromDialog(...)` (folder import via `Playlist::addFiles(...)`)
+  Both are in `playlistdialogs.h` and share one modal progress dialog that
+  processes events while work runs, instead of moving those operations to
+  background threads.
 
 ### FieldValue and typed conversion behavior
 

@@ -152,6 +152,8 @@ set(PROJECT_SOURCES
   playlist.cpp
   playlistcollection.h
   playlistcollection.cpp
+  playlistdialogs.h
+  playlistdialogs.cpp
   playlisttablemodel.h
   playlisttablemodel.cpp
   playlisttabs.ui

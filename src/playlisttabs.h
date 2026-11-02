@@ -81,7 +81,6 @@ private:
   void applyLayoutToTableView(QTableView *tbv);
   void persistVisibleOrder(QTableView *tbv);
   void showHeaderColumnsMenu(QTableView *tbv, const QPoint &pos);
-  void refreshPlaylistMetadata(Playlist *playlist);
   void openPropertiesForCurrentContextRow();
   void openPropertiesForRow(int row);
   void openContainingFolderForCurrentContextRow();

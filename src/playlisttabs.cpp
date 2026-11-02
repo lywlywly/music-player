@@ -1,15 +1,14 @@
 #include "playlisttabs.h"
 #include "filemanagerutils.h"
+#include "playlistdialogs.h"
 #include "playlisttablemodel.h"
 #include "songpropertiesdialog.h"
 #include "ui_playlisttabs.h"
 #include <QActionGroup>
-#include <QApplication>
 #include <QFileInfo>
 #include <QHeaderView>
 #include <QKeyEvent>
 #include <QMessageBox>
-#include <QProgressDialog>
 #include <QSettings>
 #include <QShortcut>
 #include <QSignalBlocker>
@@ -243,7 +242,7 @@ void PlaylistTabs::onTabContextMenuRequested(const QPoint &pos) {
     collection_->createPlaylist(getNewPlaylistName());
   } else if (selected == refreshAction && index != -1) {
     if (Playlist *playlist = playlistForTabIndex(index)) {
-      refreshPlaylistMetadata(playlist);
+      refreshMetadataWithProgress(this, *playlist);
     }
   } else if (selected == renameAction && index != -1) {
     beginInlineRename(index);
@@ -691,19 +690,4 @@ bool PlaylistTabs::eventFilter(QObject *obj, QEvent *event) {
     }
   }
   return QObject::eventFilter(obj, event);
-}
-
-void PlaylistTabs::refreshPlaylistMetadata(Playlist *playlist) {
-  QProgressDialog progressDialog("Refreshing playlist metadata...", QString{},
-                                 0, playlist->songCount(), this);
-  progressDialog.setWindowModality(Qt::WindowModal);
-  progressDialog.setCancelButton(nullptr);
-  progressDialog.setMinimumDuration(0);
-  progressDialog.setValue(0);
-  playlist->refreshMetadataFromFiles([&](int current, int total) {
-    progressDialog.setMaximum(total);
-    progressDialog.setValue(current);
-    QApplication::processEvents();
-  });
-  progressDialog.setValue(progressDialog.maximum());
 }

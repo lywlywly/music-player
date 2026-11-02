@@ -6,19 +6,16 @@
 #include "libraryloader.h"
 #include "librarysearchdialog.h"
 #include "playbackbuttonstyle.h"
+#include "playlistdialogs.h"
 #include "settingsdialog.h"
 #include "systemmediainterfacefactory.h"
 #include <QActionGroup>
 #include <QApplication>
 #include <QDir>
 #include <QEvent>
-#include <QFileDialog>
 #include <QKeySequence>
-#include <QMessageBox>
-#include <QProgressDialog>
 #include <QResource>
 #include <QSettings>
-#include <QStandardPaths>
 #include <QStatusBar>
 #include <QStyleHints>
 #include <algorithm>
@@ -33,13 +30,6 @@ constexpr const char *kPlaybackFollowsCursorSettingsKey =
     "playback/playback_follows_cursor";
 constexpr const char *kCursorFollowsPlaybackSettingsKey =
     "playback/cursor_follows_playback";
-
-// Name filters for the audio files that Open and Add Folder pick up.
-const QStringList &audioFileNameFilters() {
-  static const QStringList filters = {"*.mp3", "*.flac", "*.m4a", "*.wav",
-                                      "*.ogg", "*.opus", "*.alac"};
-  return filters;
-}
 
 int clampVolumePercent(int volumePercent) {
   return std::clamp(volumePercent, kMinVolumePercent, kMaxVolumePercent);
@@ -218,9 +208,12 @@ void MainWindow::finishSetUpPlaylist() {
   connect(playlistTabs, &PlaylistTabs::doubleClicked, playback_,
           [this](QModelIndex i) { playback_->playRow(i.row()); });
   // playlist operations
-  connect(ui->actionOpen, &QAction::triggered, this, &MainWindow::open);
-  connect(ui->actionAdd_folder, &QAction::triggered, this,
-          &MainWindow::openFolder);
+  connect(ui->actionOpen, &QAction::triggered, this, [this]() {
+    addFilesFromDialog(this, *playlistTabs->currentPlaylist());
+  });
+  connect(ui->actionAdd_folder, &QAction::triggered, this, [this]() {
+    addFolderFromDialog(this, *playlistTabs->currentPlaylist());
+  });
   connect(ui->actionClear_Playlist, &QAction::triggered, this, [this]() {
     Playlist *current = playlistTabs->currentPlaylist();
     if (current != nullptr) {
@@ -513,66 +506,6 @@ void MainWindow::updatePlaybackTimeStatus() {
   statusBar()->showMessage(nowPlayingDisplay_.statusBarText(status, song));
   setWindowTitle(
       nowPlayingDisplay_.windowTitle(status, song, defaultWindowTitle_));
-}
-
-void MainWindow::open() {
-  if (!playlistReady_) {
-    return;
-  }
-  const QList<QString> fileName = QFileDialog::getOpenFileNames(
-      this, "Open the file",
-      QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
-      QStringLiteral("Audio Files (%1);;All Files (*.*)")
-          .arg(audioFileNameFilters().join(QLatin1Char(' '))));
-  std::vector<std::string> paths;
-  paths.reserve(static_cast<size_t>(fileName.size()));
-  for (const QString &s : fileName) {
-    paths.push_back(s.toStdString());
-  }
-  // A failed file is reported only when it was the only one selected; in a
-  // multi-file add, failed files are skipped silently.
-  std::vector<std::string> failedPaths;
-  playlistTabs->currentPlaylist()->addFiles(paths, {}, &failedPaths);
-  if (paths.size() == 1 && !failedPaths.empty()) {
-    QMessageBox::warning(this, tr("Add File"),
-                         tr("Could not read the file:\n%1")
-                             .arg(QDir::toNativeSeparators(
-                                 QString::fromStdString(failedPaths.front()))));
-  }
-}
-
-void MainWindow::openFolder() {
-  if (!playlistReady_) {
-    return;
-  }
-  QString dirPath = QFileDialog::getExistingDirectory(
-      this, "Select Folder",
-      QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
-      QFileDialog::ShowDirsOnly);
-
-  if (dirPath.isEmpty())
-    return;
-
-  QDir dir(dirPath);
-  const QStringList files = dir.entryList(audioFileNameFilters(), QDir::Files);
-
-  QProgressDialog progressDialog("Loading songs from folder...", QString{}, 0,
-                                 static_cast<int>(files.size()), this);
-  progressDialog.setWindowModality(Qt::WindowModal);
-  progressDialog.setCancelButton(nullptr);
-  progressDialog.setMinimumDuration(0);
-  progressDialog.setValue(0);
-
-  std::vector<std::string> paths;
-  paths.reserve(static_cast<size_t>(files.size()));
-  for (const QString &s : files) {
-    paths.push_back(dir.absoluteFilePath(s).toStdString());
-  }
-  playlistTabs->currentPlaylist()->addFiles(paths, [&](int current, int) {
-    progressDialog.setValue(current);
-    QApplication::processEvents();
-  });
-  progressDialog.setValue(static_cast<int>(files.size()));
 }
 
 void MainWindow::openLibrarySearchDialog() {

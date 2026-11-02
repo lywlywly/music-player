@@ -49,8 +49,6 @@ private:
   // runtime symbols for its display expression preview.
   void updateSettingsDisplayPreviewContext(SettingsDialog *dialog);
   void updatePlaybackTimeStatus();
-  void open();
-  void openFolder();
   // Updates the status bar, window title and system media; on stop, also
   // clears the now-playing display, lyrics and cover.
   void playbackStateChanged(PlaybackQueue::PlaybackStatus status);
