@@ -22,6 +22,12 @@ public:
   // Loads both expressions from settings.
   explicit NowPlayingDisplay(const ColumnRegistry &registry);
 
+  // Parses both expressions from settings again. Call it when the registry's
+  // columns change: field names are resolved when an expression is parsed,
+  // so a custom field the registry did not have yet stays unresolved (shown
+  // as its name inside `${}`, or the expression falls back to the default).
+  void loadExpressions();
+
   // Uses expression for this kind (a blank one means the default). An
   // expression that does not parse falls back to the default one.
   void setExpression(DisplayExpressionKind kind, const QString &expression);

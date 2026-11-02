@@ -43,6 +43,7 @@ private slots:
   void runtimeSymbols_followPassedStatus();
   void constructor_loadsExpressionsFromSettings();
   void setExpression_replacesOneKindAndFallsBackOnParseError();
+  void loadExpressions_resolvesColumnsAddedLater();
 
 private:
   ColumnRegistry registry_;
@@ -179,6 +180,27 @@ void TestNowPlayingDisplay::
   display.setExpression(DisplayExpressionKind::StatusBar,
                         QStringLiteral("no_such_field IS 1"));
   QCOMPARE(display.statusBarText(Status::Playing, &song), defaultStatus);
+}
+
+void TestNowPlayingDisplay::loadExpressions_resolvesColumnsAddedLater() {
+  setStatusBarExpression(QStringLiteral("`[${mood}] ${title}`"));
+  ColumnRegistry registry; // no custom columns yet, as at startup
+  NowPlayingDisplay display(registry);
+  MSong song = makeSong("320");
+  song.insert_or_assign("attr:mood", FieldValue("happy", "attr:mood"));
+  // An unknown name inside `${}` is parsed as plain text.
+  QCOMPARE(display.statusBarText(Status::Playing, &song),
+           QStringLiteral("[mood] Title"));
+
+  registry.addOrUpdateDynamicColumn({.id = "attr:mood", .title = "Mood"},
+                                    {.id = "attr:mood",
+                                     .source = ColumnSource::SongAttribute,
+                                     .valueType = ValueType::Text,
+                                     .searchable = true,
+                                     .writable = true});
+  display.loadExpressions();
+  QCOMPARE(display.statusBarText(Status::Playing, &song),
+           QStringLiteral("[happy] Title"));
 }
 
 QTEST_MAIN(TestNowPlayingDisplay)

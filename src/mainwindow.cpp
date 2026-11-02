@@ -270,6 +270,9 @@ void MainWindow::finishSetUpPlaylist(SongLibrary::Snapshot &&snapshot) {
   if (!columnRegistry_.loadDynamicColumns(databaseManager_.db())) {
     qFatal("finishSetUpPlaylist: failed to load dynamic columns");
   }
+  // The expressions were parsed in the constructor, before the custom
+  // columns above were loaded, so their custom fields were unresolved.
+  nowPlayingDisplay_.loadExpressions();
   columnLayoutManager_.refreshFromRegistry();
   songLibrary.replaceWithSnapshot(std::move(snapshot));
   playlists_->loadAll();
@@ -343,6 +346,9 @@ void MainWindow::initSettings() {
       if (!columnRegistry_.loadDynamicColumns(databaseManager_.db())) {
         qFatal("initSettings: failed to reload dynamic columns");
       }
+      // Resolve added or removed custom fields in the display expressions.
+      nowPlayingDisplay_.loadExpressions();
+      updatePlaybackTimeStatus();
       columnLayoutManager_.refreshFromRegistry();
       // TODO: refresh custom/computed attributes
     });

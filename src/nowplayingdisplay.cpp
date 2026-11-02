@@ -6,6 +6,10 @@
 
 NowPlayingDisplay::NowPlayingDisplay(const ColumnRegistry &registry)
     : registry_(registry) {
+  loadExpressions();
+}
+
+void NowPlayingDisplay::loadExpressions() {
   for (DisplayExpressionKind kind :
        {DisplayExpressionKind::StatusBar, DisplayExpressionKind::WindowTitle}) {
     setExpression(kind, loadDisplayExpressionSetting(kind));

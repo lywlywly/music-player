@@ -23,6 +23,9 @@
 #include <QUuid>
 
 #include "../cloudplaystatssyncservice.h"
+#include "../columnregistry.h"
+#include "../databasemanager.h"
+#include "../displayexpression.h"
 #include "../dummyaudioplayer.h"
 #include "../dummysystemmediainterface.h"
 #include "../librarysearchdialog.h"
@@ -31,6 +34,7 @@
 #include "../playlisttablemodel.h"
 #include "../playlisttabs.h"
 #include "../settingsdialog.h"
+#include "../songparser.h"
 #include "../utils.h"
 #include "testaudiofiles.h"
 
@@ -112,6 +116,7 @@ private slots:
   void windowTitleExpression_updatesOnPlaybackAndResetsOnStop();
   void settingsDisplayPreview_usesCurrentSongContext();
   void settingsApply_updatesStatusBarAndWindowTitle();
+  void startup_displayExpressionResolvesCustomField();
   void sliderReleased_invokesSeekFlow();
   void volumeSlider_defaultsPropagatesAndPersists();
   void playlistTableBackspace_removesSelectedRow();
@@ -582,6 +587,55 @@ void TestMainWindow::settingsApply_updatesStatusBarAndWindowTitle() {
 
   QTRY_COMPARE(statusBar->currentMessage(), "status: " + title);
   QTRY_COMPARE(window_->windowTitle(), "title: " + title);
+}
+
+void TestMainWindow::startup_displayExpressionResolvesCustomField() {
+  delete window_;
+  window_ = nullptr;
+  // The custom column exists in the database before the window is created,
+  // so it is only known once the library has loaded.
+  const QString dbPath = workDir_->filePath("custom-field.sqlite");
+  const ColumnDefinition moodColumn{.id = "attr:mood", .title = "Mood"};
+  const FieldDefinition moodField{.id = "attr:mood",
+                                  .source = ColumnSource::SongAttribute,
+                                  .valueType = ValueType::Text,
+                                  .searchable = true,
+                                  .writable = true};
+  const QString setupConnection = QStringLiteral("custom_field_setup");
+  const QString wav = workDir_->filePath("custom-field-song.wav");
+  QVERIFY(writeSilentWav(wav));
+  {
+    ColumnRegistry registry;
+    DatabaseManager databaseManager(registry, dbPath, setupConnection);
+    QVERIFY(registry.upsertCustomTagDefinition(databaseManager.db(), moodColumn,
+                                               moodField));
+    QVERIFY(registry.loadDynamicColumns(databaseManager.db()));
+    QVERIFY(SongParser::writeTags(wav.toStdString(), {{"mood", "happy"}},
+                                  registry));
+  }
+  QSqlDatabase::removeDatabase(setupConnection);
+  saveDisplayExpressionSetting(DisplayExpressionKind::StatusBar,
+                               QStringLiteral("`[${mood}]`"));
+
+  connectionName_ =
+      QStringLiteral("mainwindow_file_test_%1")
+          .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+  window_ = new MainWindow(dbPath, connectionName_);
+  QAction *playAction = window_->findChild<QAction *>("actionPlay");
+  QStatusBar *statusBar = window_->findChild<QStatusBar *>("statusbar");
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(playAction != nullptr);
+  QVERIFY(statusBar != nullptr);
+  QVERIFY(tabs != nullptr);
+  QTRY_VERIFY(playAction->isEnabled()); // library loaded
+
+  Playlist *playlist = tabs->currentPlaylist();
+  QVERIFY(playlist != nullptr);
+  playlist->addSong(makeSong("Song", "Artist", wav));
+  playlist->setLastPlayed(playlist->getPkByIndex(0));
+  playAction->trigger();
+
+  QTRY_COMPARE(statusBar->currentMessage(), QStringLiteral("[happy]"));
 }
 
 void TestMainWindow::sliderReleased_invokesSeekFlow() {

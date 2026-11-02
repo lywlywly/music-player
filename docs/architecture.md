@@ -373,7 +373,9 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
     only applies the strings. Nothing playing: no status text and the
     window's original title.
   * Owns the parsed expressions (`setExpression(kind, text)` with the text
-    each Settings signal carries) and the values behind the `status:*`
+    each Settings signal carries; `loadExpressions()` re-parses both from
+    settings after custom columns load or change, since field names are
+    resolved at parse time) and the values behind the `status:*`
     symbols: position, duration and the bitrate chosen for the song (see
     "Bitrate display behavior").
   * Playback status and the current song are passed in on each call, not
@@ -423,6 +425,12 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
   playlists (`PlaylistCollection::loadAll()`), creates playlist tabs/models,
   re-enables actions, restores the normal status-bar message, and starts cloud
   sync.
+* Custom (`attr:`) columns are only in `ColumnRegistry` after this step, but
+  the display expressions are parsed earlier, in the `MainWindow` constructor.
+  Field names are resolved at parse time, so `finishSetUpPlaylist` re-parses
+  them (`NowPlayingDisplay::loadExpressions()`); without that, a custom field
+  showed its name inside `${}` (`[mood]` instead of `[happy]`), or the
+  expression fell back to the default, until Settings was applied.
 * Startup-sensitive handlers are guarded in addition to disabling actions, so
   direct/system-media requests cannot play, seek, load songs, or manually rebase
   before playlist hydration finishes.
