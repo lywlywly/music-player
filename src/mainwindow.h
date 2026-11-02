@@ -46,6 +46,9 @@ private:
   void statusChanged(QMediaPlayer::MediaStatus status);
   void initStatusBarExpression();
   void initWindowTitleExpression();
+  // The song most recently started by playSong (kept after stop), or nullptr
+  // before any song has played.
+  const MSong *currentSong() const;
   void updateStatusRuntimeSymbols();
   qint64 effectiveBitrateKbps() const;
   QString evaluateStatusBarExpression() const;

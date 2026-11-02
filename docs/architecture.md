@@ -277,6 +277,11 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
 
 * `ISystemMediaInterface` (+ platform impls)
   * Bridge to OS media controls/metadata.
+  * The interface has no QtWidgets dependency. Platform selection lives in
+    `createSystemMediaInterface(window)` (`systemmediainterfacefactory.h`),
+    which takes the window because Windows needs its native handle; test
+    builds return `DummySystemMediaInterface` when
+    `MYPLAYER_USE_DUMMY_MEDIA_INTERFACE` is set.
 * Playback toolbar icons
   * `mainwindow.ui` keeps playback controls in a nested
     `playbackButtonsLayout` so the button group has its own compact spacing
@@ -293,7 +298,8 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
     `Q_INIT_RESOURCE(resources)` because the qrc is compiled into static
     library target `MYLib`.
   * Playback buttons render these icons as fixed-size `QToolButton` controls
-    and tint them at runtime (`#fcfcfc` in dark mode, `#232629` otherwise).
+    (`setIconOnlyPlaybackButton` in `playbackbuttonstyle.cpp`) and tint them
+    at runtime (`#fcfcfc` in dark mode, `#232629` otherwise).
   * Tinted icon pixmaps are rendered at the displaying widget's device pixel ratio for
     sharp high-DPI output, but button/icon sizing stays in Qt logical pixels.
     The tint fill uses the logical icon rect after `setDevicePixelRatio(...)`
@@ -504,6 +510,18 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
   * Collisions prefer runtime symbols; fully-qualified names always disambiguate.
   * Interpolation is supported in backtick strings only.
   * In interpolation, `${field}` display comes from `FieldValue::display()`.
+  * Known issue: a bare field used as the whole expression is not formatted.
+    `MainWindow` (status bar, window title) and the `SettingsDialog` preview
+    turn the result into text with `runtimeValueToQString(evaluateValue(...))`,
+    which gives the raw typed value, while interpolation parts use
+    `evaluateDisplayText(...)`, and `FieldRefExpr::evaluateDisplayText` returns
+    `FieldValue::display()`. So `duration` shows `125` but `` `${duration}` ``
+    shows `02:05`, and `channels` shows `2` but `` `${channels}` `` shows
+    `stereo`. A field returned from an `IF` branch is raw in both forms,
+    because `IfExpr` uses the base `evaluateDisplayText`, which converts
+    `evaluateValue`. Possible fix: have those three callers use
+    `QString::fromStdString(expr->evaluateDisplayText(context))`; only bare-field
+    expressions would change, and no test covers that case yet.
 * Comparison AST/eval shape is unified as `leftExpr op rightExpr`.
   * The comparison type is resolved from the left expression:
     field refs use field value type; non-field expressions use static type.

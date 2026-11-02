@@ -122,6 +122,8 @@ set(PROJECT_SOURCES
   lyricspanel.cpp
   playbackbackendmanager.h
   playbackbackendmanager.cpp
+  playbackbuttonstyle.h
+  playbackbuttonstyle.cpp
   playbackmanager.h
   playbackmanager.cpp
   playbackpolicy.h
@@ -157,6 +159,8 @@ set(PROJECT_SOURCES
   songparser.cpp
   statusruntimesymboltable.h
   statusruntimesymboltable.cpp
+  systemmediainterfacefactory.h
+  systemmediainterfacefactory.cpp
   utils.h
 )
 

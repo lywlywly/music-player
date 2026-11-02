@@ -1,19 +1,6 @@
 #include "mainwindow.h"
 
 #include "./ui_mainwindow.h"
-#ifdef MYPLAYER_TESTING
-#include "dummysystemmediainterface.h"
-#endif
-#ifdef Q_OS_MACOS
-#include "macosmediacenter.h"
-#elif defined(Q_OS_LINUX)
-#include "mprismediainterface.h"
-#elif defined(Q_OS_WIN)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include "windowsmediacenter.h"
-#endif
 #include "databasemanager.h"
 #include "displayexpressionevalcontext.h"
 #include "gstaudioplayer.h"
@@ -21,8 +8,10 @@
 #include "libraryexpression_parser.h"
 #include "librarysearchdialog.h"
 #include "lyricsloader.h"
+#include "playbackbuttonstyle.h"
 #include "settingsdialog.h"
 #include "songparser.h"
+#include "systemmediainterfacefactory.h"
 #include <QActionGroup>
 #include <QApplication>
 #include <QDateTime>
@@ -31,10 +20,8 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFutureWatcher>
-#include <QIcon>
 #include <QKeySequence>
 #include <QMessageBox>
-#include <QPainter>
 #include <QProgressDialog>
 #include <QRandomGenerator>
 #include <QResource>
@@ -46,13 +33,11 @@
 #include <QStyleHints>
 #include <QThread>
 #include <QTimer>
-#include <QToolButton>
 #include <QtConcurrent>
 #include <algorithm>
 #include <utility>
 
 namespace {
-constexpr int kPlaybackIconSize = 18;
 constexpr int kMinVolumePercent = 0;
 constexpr int kMaxVolumePercent = 100;
 constexpr int kDefaultVolumePercent = 100;
@@ -61,6 +46,13 @@ constexpr const char *kPlaybackFollowsCursorSettingsKey =
     "playback/playback_follows_cursor";
 constexpr const char *kCursorFollowsPlaybackSettingsKey =
     "playback/cursor_follows_playback";
+
+// Name filters for the audio files that Open and Add Folder pick up.
+const QStringList &audioFileNameFilters() {
+  static const QStringList filters = {"*.mp3", "*.flac", "*.m4a", "*.wav",
+                                      "*.ogg", "*.opus", "*.alac"};
+  return filters;
+}
 
 int clampVolumePercent(int volumePercent) {
   return std::clamp(volumePercent, kMinVolumePercent, kMaxVolumePercent);
@@ -73,10 +65,19 @@ ExprSymbolResolver makeDisplayExprResolver(const ColumnRegistry &registry) {
                        registry.expressionSymbols()));
 }
 
-ExprPtr parseDisplayExpressionWithFallback(const ExprSymbolResolver &resolver,
-                                           const QString &expression,
-                                           const QString &defaultExpression,
-                                           const QString &logPrefix) {
+// Parses the display expression stored at settingsKey, or defaultExpression
+// when the stored one is missing, blank, or does not parse.
+ExprPtr loadDisplayExpression(const ColumnRegistry &registry,
+                              const char *settingsKey,
+                              const QString &defaultExpression,
+                              const QString &logPrefix) {
+  QSettings settings;
+  QString expression =
+      settings.value(settingsKey, defaultExpression).toString().trimmed();
+  if (expression.isEmpty()) {
+    expression = defaultExpression;
+  }
+  const ExprSymbolResolver resolver = makeDisplayExprResolver(registry);
   ExprParseResult parsed = parseLibraryExpression(expression, resolver);
   if (!parsed.ok()) {
     qWarning() << logPrefix << "parse failed:" << parsed.error.message << "at"
@@ -127,80 +128,19 @@ void prewarmSelectedPlaybackBackend() {
   }
 }
 
-QColor playbackIconColor() {
-  if (QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark) {
-    return QColor(QStringLiteral("#fcfcfc"));
-  }
-  return QColor(QStringLiteral("#232629"));
-}
-
-QIcon tintedIcon(const QString &iconPath, const QColor &color,
-                 qreal iconRenderScale) {
-  const QSize iconSize(kPlaybackIconSize, kPlaybackIconSize);
-  const qreal renderScale = std::max<qreal>(1.0, iconRenderScale);
-  const QRect logicalRect(QPoint(0, 0), iconSize);
-  QPixmap pixmap(iconSize * renderScale);
-  pixmap.setDevicePixelRatio(renderScale);
-  pixmap.fill(Qt::transparent);
-
-  QPainter painter(&pixmap);
-  painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
-  painter.drawPixmap(logicalRect, QIcon(iconPath).pixmap(pixmap.size()));
-  painter.setCompositionMode(QPainter::CompositionMode_SourceIn);
-  painter.fillRect(logicalRect, color);
-  return QIcon(pixmap);
-}
-
-QString playbackButtonStyleSheet() {
-  const bool dark =
-      QGuiApplication::styleHints()->colorScheme() == Qt::ColorScheme::Dark;
-  const QString hover = dark ? QStringLiteral("rgba(255, 255, 255, 0.12)")
-                             : QStringLiteral("rgba(0, 0, 0, 0.08)");
-  const QString pressed = dark ? QStringLiteral("rgba(255, 255, 255, 0.22)")
-                               : QStringLiteral("rgba(0, 0, 0, 0.16)");
-  return QStringLiteral("QToolButton { border: none; border-radius: 4px;"
-                        " background: transparent; padding: 0px; }"
-                        "QToolButton:hover:enabled { background: %1; }"
-                        "QToolButton:pressed:enabled { background: %2; }")
-      .arg(hover, pressed);
-}
-
-void setIconOnlyButton(QToolButton *button, const QString &iconPath,
-                       const QColor &color, const QString &styleSheet) {
-  const QString label =
-      button->text().isEmpty() ? button->toolTip() : button->text();
-  const qreal iconRenderScale = button->devicePixelRatioF();
-  button->setIcon(tintedIcon(iconPath, color, iconRenderScale));
-  button->setText(QString());
-  button->setToolTip(label);
-  button->setAccessibleName(label);
-  button->setIconSize(QSize(kPlaybackIconSize, kPlaybackIconSize));
-  button->setFixedSize(24, 24);
-  button->setToolButtonStyle(Qt::ToolButtonIconOnly);
-  button->setStyleSheet(styleSheet);
-}
-
 void setUpPlaybackButtonIcons(Ui::MainWindow *ui) {
-  const QColor color = playbackIconColor();
-  const QString styleSheet = playbackButtonStyleSheet();
-  setIconOnlyButton(ui->play_button,
-                    QStringLiteral(":/icons/media-playback-start.svg"), color,
-                    styleSheet);
-  setIconOnlyButton(ui->pause_button,
-                    QStringLiteral(":/icons/media-playback-pause.svg"), color,
-                    styleSheet);
-  setIconOnlyButton(ui->stop_button,
-                    QStringLiteral(":/icons/media-playback-stop.svg"), color,
-                    styleSheet);
-  setIconOnlyButton(ui->prev_button,
-                    QStringLiteral(":/icons/media-skip-backward.svg"), color,
-                    styleSheet);
-  setIconOnlyButton(ui->next_button,
-                    QStringLiteral(":/icons/media-skip-forward.svg"), color,
-                    styleSheet);
-  setIconOnlyButton(ui->random_button,
-                    QStringLiteral(":/icons/media-playback-random.svg"), color,
-                    styleSheet);
+  setIconOnlyPlaybackButton(ui->play_button,
+                            QStringLiteral(":/icons/media-playback-start.svg"));
+  setIconOnlyPlaybackButton(ui->pause_button,
+                            QStringLiteral(":/icons/media-playback-pause.svg"));
+  setIconOnlyPlaybackButton(ui->stop_button,
+                            QStringLiteral(":/icons/media-playback-stop.svg"));
+  setIconOnlyPlaybackButton(ui->prev_button,
+                            QStringLiteral(":/icons/media-skip-backward.svg"));
+  setIconOnlyPlaybackButton(ui->next_button,
+                            QStringLiteral(":/icons/media-skip-forward.svg"));
+  setIconOnlyPlaybackButton(
+      ui->random_button, QStringLiteral(":/icons/media-playback-random.svg"));
 }
 
 QPixmap scaledCoverPixmap(const QPixmap &source, const QSize &logicalMaxSize,
@@ -262,23 +202,7 @@ void MainWindow::initCloudSync() {
 }
 
 void MainWindow::setupSystemMediaInterface() {
-#ifdef MYPLAYER_TESTING
-  if (qEnvironmentVariableIntValue("MYPLAYER_USE_DUMMY_MEDIA_INTERFACE") != 0) {
-    sysMedia = new DummySystemMediaInterface(this);
-  } else
-#endif
-  {
-#ifdef Q_OS_MACOS
-    sysMedia = new MacOSMediaCenter(this);
-#elif defined(Q_OS_LINUX)
-    sysMedia = new MprisMediaInterface(this);
-#elif defined(Q_OS_WIN)
-    sysMedia = new WindowsMediaCenter(static_cast<quintptr>(winId()), this);
-#else
-    qFatal("setupSystemMediaInterface: unsupported platform");
-#endif
-  }
-
+  sysMedia = createSystemMediaInterface(this);
   connect(sysMedia, &ISystemMediaInterface::playRequested, this,
           &MainWindow::play);
   connect(sysMedia, &ISystemMediaInterface::pauseRequested, this,
@@ -486,11 +410,7 @@ void MainWindow::initSettings() {
     connect(dialog, &SettingsDialog::displayThemeModeChanged, this,
             [this](const QString &mode) { applyDisplayThemeMode(mode); });
     updateStatusRuntimeSymbols();
-    const MSong *activeSong = nullptr;
-    if (currentTrackPk_ >= 0) {
-      activeSong = &songLibrary.getSongByPK(currentTrackPk_);
-    }
-    dialog->setDisplayExpressionPreviewContext(activeSong,
+    dialog->setDisplayExpressionPreviewContext(currentSong(),
                                                statusRuntimeSymbols_);
     dialog->show();
   });
@@ -945,37 +865,24 @@ void MainWindow::bitrateChanged(qint64 bitsPerSecond) {
 }
 
 void MainWindow::initStatusBarExpression() {
-  const ExprSymbolResolver resolver = makeDisplayExprResolver(columnRegistry_);
-  const QString defaultExpression =
-      StatusRuntimeSymbolTable::defaultStatusBarExpression();
-  QSettings settings;
-  QString expression =
-      settings.value("status_bar/expression", defaultExpression)
-          .toString()
-          .trimmed();
-  if (expression.isEmpty()) {
-    expression = defaultExpression;
-  }
-  statusBarExpr_ = parseDisplayExpressionWithFallback(
-      resolver, expression, defaultExpression,
+  statusBarExpr_ = loadDisplayExpression(
+      columnRegistry_, "status_bar/expression",
+      StatusRuntimeSymbolTable::defaultStatusBarExpression(),
       QStringLiteral("initStatusBarExpression"));
 }
 
 void MainWindow::initWindowTitleExpression() {
-  const ExprSymbolResolver resolver = makeDisplayExprResolver(columnRegistry_);
-  const QString defaultExpression =
-      StatusRuntimeSymbolTable::defaultWindowTitleExpression();
-  QSettings settings;
-  QString expression =
-      settings.value("window_title/expression", defaultExpression)
-          .toString()
-          .trimmed();
-  if (expression.isEmpty()) {
-    expression = defaultExpression;
-  }
-  windowTitleExpr_ = parseDisplayExpressionWithFallback(
-      resolver, expression, defaultExpression,
+  windowTitleExpr_ = loadDisplayExpression(
+      columnRegistry_, "window_title/expression",
+      StatusRuntimeSymbolTable::defaultWindowTitleExpression(),
       QStringLiteral("initWindowTitleExpression"));
+}
+
+const MSong *MainWindow::currentSong() const {
+  if (currentTrackPk_ < 0) {
+    return nullptr;
+  }
+  return &songLibrary.getSongByPK(currentTrackPk_);
 }
 
 qint64 MainWindow::effectiveBitrateKbps() const {
@@ -1006,11 +913,7 @@ QString MainWindow::evaluateStatusBarExpression() const {
   if (!statusBarExpr_) {
     return {};
   }
-  const MSong *activeSong = nullptr;
-  if (currentTrackPk_ >= 0) {
-    activeSong = &songLibrary.getSongByPK(currentTrackPk_);
-  }
-  DisplayExpressionEvalContext context(statusRuntimeSymbols_, activeSong);
+  DisplayExpressionEvalContext context(statusRuntimeSymbols_, currentSong());
   return runtimeValueToQString(statusBarExpr_->evaluateValue(context));
 }
 
@@ -1018,11 +921,7 @@ QString MainWindow::evaluateWindowTitleExpression() const {
   if (!windowTitleExpr_) {
     return defaultWindowTitle_;
   }
-  const MSong *activeSong = nullptr;
-  if (currentTrackPk_ >= 0) {
-    activeSong = &songLibrary.getSongByPK(currentTrackPk_);
-  }
-  DisplayExpressionEvalContext context(statusRuntimeSymbols_, activeSong);
+  DisplayExpressionEvalContext context(statusRuntimeSymbols_, currentSong());
   return runtimeValueToQString(windowTitleExpr_->evaluateValue(context));
 }
 
@@ -1031,11 +930,8 @@ void MainWindow::updateOpenSettingsDisplayPreviewContext() {
   if (!dialog) {
     return;
   }
-  const MSong *activeSong = nullptr;
-  if (currentTrackPk_ >= 0) {
-    activeSong = &songLibrary.getSongByPK(currentTrackPk_);
-  }
-  dialog->setDisplayExpressionPreviewContext(activeSong, statusRuntimeSymbols_);
+  dialog->setDisplayExpressionPreviewContext(currentSong(),
+                                             statusRuntimeSymbols_);
 }
 
 void MainWindow::updatePlaybackTimeStatus() {
@@ -1102,7 +998,8 @@ void MainWindow::open() {
   const QList<QString> fileName = QFileDialog::getOpenFileNames(
       this, "Open the file",
       QStandardPaths::writableLocation(QStandardPaths::MusicLocation),
-      R"(Audio Files (*.mp3 *.flac *.m4a *.wav *.ogg *.opus *.alac);;All Files (*.*))");
+      QStringLiteral("Audio Files (%1);;All Files (*.*)")
+          .arg(audioFileNameFilters().join(QLatin1Char(' '))));
   std::vector<std::string> paths;
   paths.reserve(static_cast<size_t>(fileName.size()));
   for (const QString &s : fileName) {
@@ -1133,9 +1030,7 @@ void MainWindow::openFolder() {
     return;
 
   QDir dir(dirPath);
-  QStringList filters = {"*.mp3", "*.flac", "*.m4a", "*.wav",
-                         "*.ogg", "*.opus", "*.alac"};
-  const QStringList files = dir.entryList(filters, QDir::Files);
+  const QStringList files = dir.entryList(audioFileNameFilters(), QDir::Files);
 
   QProgressDialog progressDialog("Loading songs from folder...", QString{}, 0,
                                  static_cast<int>(files.size()), this);
