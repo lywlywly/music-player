@@ -3,6 +3,30 @@
 This file contains implementation-level details that are intentionally kept out
 of `README.md`.
 
+Two topics have their own files:
+
+* [expressions.md](expressions.md): the expression language used by library
+  search, computed fields, and the status bar and window title.
+* [cloud-sync.md](cloud-sync.md): optional play-count sync through AWS Lambda
+  and DynamoDB.
+
+## Overview
+
+`MainWindow` wires the subsystems together. Songs and play stats live in
+`SongLibrary`, stored in SQLite (`DatabaseManager`) and described by
+`ColumnRegistry`. Playlists (`Playlist`, `PlaylistCollection`) order songs,
+`PlaybackQueue` and `PlaybackManager` decide what plays, and an `AudioPlayer`
+backend (Qt Multimedia or GStreamer) plays it. Qt models, widgets and dialogs
+(`PlaylistTableModel`, `PlaylistTabs`, ...) only present backend state.
+
+* Startup: load the library on a worker thread, then build playlists and tabs
+  on the main thread, then start cloud sync ("Startup loading").
+* Adding files: parse tags, store the song, append it to the playlist
+  ("Song ingest and metadata refresh").
+* Playback: pick the next song, play it, follow its position to update the
+  status bar, lyrics and system media, and count the play once it is mostly
+  listened to ("Playback domain", "Play statistics").
+
 ## Design Principles
 
 ### Backend classes do not leak UI
@@ -51,6 +75,9 @@ exists when importing a song.
 
 ### Playlist call chain
 
+Which class callers go through to change playlists and songs, and how changes
+reach the views.
+
 ```
 per-playlist:     caller -> Playlist -> SongLibrary
 lifecycle/cross:  caller -> PlaylistCollection -> Playlist -> SongLibrary
@@ -67,7 +94,14 @@ view updates:     Playlist / PlaybackQueue / layout signals -> PlaylistTableMode
 
 ## Main Classes and Responsibilities
 
+Expression classes (`libraryexpression_*`, `LibrarySearchDialog`,
+`NowPlayingDisplay`, `displayexpression`) are described in
+[expressions.md](expressions.md), and the cloud sync classes in
+[cloud-sync.md](cloud-sync.md).
+
 ### App composition
+
+The top-level window and what it owns.
 
 * `MainWindow`
   * Wires the app’s major subsystems.
@@ -80,11 +114,16 @@ view updates:     Playlist / PlaybackQueue / layout signals -> PlaylistTableMode
 
 ### Persistence and schema
 
+The SQLite database every other class reads and writes through.
+
 * `DatabaseManager`
   * Owns SQLite connection, pragmas, and schema setup.
   * Creates tables for songs, playlists, dynamic/computed attributes, and play stats.
 
 ### Column and layout metadata
+
+Which fields a song can have (built-in, custom tag, computed), their types
+and display formats, and how columns are laid out.
 
 * `ColumnRegistry`
   * Source of truth for built-in, dynamic, and computed column definitions.
@@ -99,6 +138,8 @@ view updates:     Playlist / PlaybackQueue / layout signals -> PlaylistTableMode
   * `ColumnRegistry` and `StatusRuntimeSymbolTable` upsert active definitions.
 
 ### Song domain
+
+The in-memory song store and reading/writing audio file tags.
 
 * `SongLibrary`
   * Canonical song repository in memory + DB sync.
@@ -152,6 +193,8 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
 
 ### Song Properties UI
 
+The dialogs for viewing and editing one song's tags.
+
 * `SongPropertiesDialog`
   * Shows refreshed parsed/computed fields first, then remaining raw tag fields.
   * Buffers edits in-memory and writes once on `Save`.
@@ -165,6 +208,9 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
   * Adds a new raw tag key/value pair (no `attr:` prefix input).
 
 ### Playback domain
+
+Who owns the current song and the queue, how Next/Prev pick a song, how
+unplayable songs are skipped, and the audio backends.
 
 * `PlaybackQueue` (backend)
   * Current song pointer + explicit queued songs + playback status.
@@ -234,47 +280,9 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
     `QtAudioPlayer` maps it to `QAudioOutput::setVolume(...)`, and
     `GstAudioPlayer` maps it to the GStreamer `playbin` `volume` property.
 
-### Search expression domain
+### System media
 
-* `libraryexpression_*` modules
-  * Tokenization, parsing, AST, type inference, and operator evaluation.
-  * Supports boolean expressions, comparisons, lists/ranges, and `IF ... THEN ... ELSE ...`.
-  * Supports string interpolation with backticks and `${...}` placeholders.
-  * Resolves names through `ExprSymbolResolver` into canonical namespaced ids:
-    * runtime: `status:<name>`
-    * built-in: `builtin:<name>`
-    * dynamic tag: `attr:<key>`
-    * computed: `computed:<key>`
-  * Symbol providers export both unqualified aliases and fully-qualified names.
-  * Unqualified resolution precedence is: `status > builtin > attr > computed`.
-  * Precedence is implemented by first-match lookup in
-    `ExprSymbolResolver::lookup(...)` over merged symbol order:
-    display contexts prepend runtime symbols, while registry symbols are emitted
-    in `builtin`, then `attr`, then `computed` order.
-  * `HAS` supports multi-value text split by comma separators.
-* `LibraryExprEvalContext`
-  * Evaluation boundary for field lookup.
-  * Provides `FieldValue` instances to the expression runtime.
-* `LibrarySearchDialog` + `LibrarySearchResultsModel`
-  * Parse/evaluate query via `SongLibrary`, then present matching rows.
-
-### Cloud play-count sync
-
-* `CloudPlayStatsSync`
-  * Stateless blocking HTTP functions for Lambda APIs (pull/push/bulk-push +
-    throttle retry). They are called from the cloud-sync worker thread, not the
-    UI thread.
-* `CloudPlayStatsSyncCoordinator`
-  * Sync policy layer: startup incremental/rebase pull, `max(local, cloud)`
-    merge, rebase delta push, and affected-song UI notifications.
-  * Owns a dedicated `QThread` plus a generic worker `QObject`; cloud tasks are
-    posted to that worker with `Qt::QueuedConnection` so UI calls return
-    immediately and cloud operations run serially.
-  * Marshals results that touch `SongLibrary`, settings cursors, or UI-facing
-    signals back to the main thread.
-  * Startup sync starts only after playlist/library hydration completes.
-
-### System media and lyrics
+OS media controls and now-playing metadata.
 
 * `ISystemMediaInterface` (+ platform impls)
   * Bridge to OS media controls/metadata.
@@ -283,28 +291,11 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
     which takes the window because Windows needs its native handle; test
     builds return `DummySystemMediaInterface` when
     `MYPLAYER_USE_DUMMY_MEDIA_INTERFACE` is set.
-* Playback toolbar icons
-  * `mainwindow.ui` keeps playback controls in a nested
-    `playbackButtonsLayout` so the button group has its own compact spacing
-    before the volume and seek sliders.
-  * `volumeSlider` sits between `playbackButtonsLayout` and the seek slider,
-    persists to `playback/volume_percent`, defaults to `100`, and is reapplied
-    when the active playback backend changes.
-  * SVG assets live in `src/resources/icons` and are registered through
-    `src/resources/resources.qrc`; third-party attribution is tracked in
-    `THIRD_PARTY_NOTICES.md`.
-  * `media-playback-random.svg` is a custom composite icon: play triangle on
-    the left and question mark on the right.
-  * `MainWindow` initializes the resource collection with
-    `Q_INIT_RESOURCE(resources)` because the qrc is compiled into static
-    library target `MYLib`.
-  * Playback buttons render these icons as fixed-size `QToolButton` controls
-    (`setIconOnlyPlaybackButton` in `playbackbuttonstyle.cpp`) and tint them
-    at runtime (`#fcfcfc` in dark mode, `#232629` otherwise).
-  * Tinted icon pixmaps are rendered at the displaying widget's device pixel ratio for
-    sharp high-DPI output, but button/icon sizing stays in Qt logical pixels.
-    The tint fill uses the logical icon rect after `setDevicePixelRatio(...)`
-    so painting remains in the same coordinate space as the displayed icon.
+
+### Lyrics and cover art
+
+Where lyrics and cover images come from, and the lyrics panel settings.
+
 * `LyricsLoader` / `LyricsManager`
   * Lyrics fetch + timed line updates from playback position.
   * On play, `MainWindow` refreshes song metadata once and prefers embedded
@@ -340,6 +331,33 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
   * The lyrics font starts from the application font, and a stored family is
     put first in its family list, so the CJK fallback families below still
     apply to characters the chosen font lacks.
+
+### UI styling
+
+Toolbar icons, the Windows application font, and the light/dark theme.
+
+* Playback toolbar icons
+  * `mainwindow.ui` keeps playback controls in a nested
+    `playbackButtonsLayout` so the button group has its own compact spacing
+    before the volume and seek sliders.
+  * `volumeSlider` sits between `playbackButtonsLayout` and the seek slider,
+    persists to `playback/volume_percent`, defaults to `100`, and is reapplied
+    when the active playback backend changes.
+  * SVG assets live in `src/resources/icons` and are registered through
+    `src/resources/resources.qrc`; third-party attribution is tracked in
+    `THIRD_PARTY_NOTICES.md`.
+  * `media-playback-random.svg` is a custom composite icon: play triangle on
+    the left and question mark on the right.
+  * `MainWindow` initializes the resource collection with
+    `Q_INIT_RESOURCE(resources)` because the qrc is compiled into static
+    library target `MYLib`.
+  * Playback buttons render these icons as fixed-size `QToolButton` controls
+    (`setIconOnlyPlaybackButton` in `playbackbuttonstyle.cpp`) and tint them
+    at runtime (`#fcfcfc` in dark mode, `#232629` otherwise).
+  * Tinted icon pixmaps are rendered at the displaying widget's device pixel ratio for
+    sharp high-DPI output, but button/icon sizing stays in Qt logical pixels.
+    The tint fill uses the logical icon rect after `setDevicePixelRatio(...)`
+    so painting remains in the same coordinate space as the displayed icon.
 * Application font and CJK fallback (Windows, `main.cpp`)
   * Without an explicit family list, Qt does not use Windows font fallback
     (neither the registry font-link list nor DirectWrite system fallback). It
@@ -367,54 +385,18 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
     widget font. With another app font size, menu bar gaps change but the
     text does not. Other sizes would need a `QProxyStyle` override of
     `CE_MenuBarItem` or the `windowsvista` style.
-* `NowPlayingDisplay` (no widgets, owned by `MainWindow`)
-  * Builds the status bar text and window title from the display
-    expressions, the playback status and the current song; `MainWindow`
-    only applies the strings. Nothing playing: no status text and the
-    window's original title.
-  * Owns the parsed expressions (`setExpression(kind, text)` with the text
-    each Settings signal carries; `loadExpressions()` re-parses both from
-    settings after custom columns load or change, since field names are
-    resolved at parse time) and the values behind the `status:*`
-    symbols: position, duration and the bitrate chosen for the song (see
-    "Bitrate display behavior").
-  * Playback status and the current song are passed in on each call, not
-    stored, so they cannot go stale; `PlaybackQueue` and `MainWindow` own
-    them.
-* `displayexpression.{h,cpp}`
-  * The rules both `NowPlayingDisplay` and `SettingsDialog` use: settings
-    keys, the default expressions, "blank means default", parsing with
-    runtime symbols first, and evaluation (its eval context is private to
-    `displayexpression.cpp`).
-* Song field lookup for expressions (`builtin:<name>` stored as `<name>`) is
-  `findSongFieldValue` (`songlibrary.h`), shared by
-  `SongLibraryExprEvalContext` and `DisplayExpressionEvalContext`.
-* Display settings (`SettingsDialog` + `MainWindow`)
+* Display theme (`SettingsDialog` + `MainWindow`)
   * Display theme mode is persisted as `display/theme_mode` with values:
     `system`, `light`, `dark`.
   * Theme mode switches `QStyleHints::colorScheme` (`system`/`light`/`dark`);
     app widget style remains the system/default style.
-  * Status bar expression is persisted as `status_bar/expression`.
-  * Window title expression is persisted as `window_title/expression`.
-  * Settings dialog shows a live preview for the currently active display
-    expression editor, using current playback/runtime song context when
-    available (fallback sample values otherwise).
-  * Default expressions come from `defaultDisplayExpression(kind)`.
-  * A blank expression is stored and used as the default one; a stored
-    expression that does not parse is used as the default one (with a
-    warning), while the Settings preview shows the parse error.
-  * `StatusRuntimeSymbolTable` also registers its runtime field definitions into
-    `FieldTypePool`, so runtime fields (for example `playback_time` and
-    `duration`) use the same `FieldValue::display()` formatting pipeline.
-  * Runtime symbols are exposed as `status:*` fields
-    (`status:isplaying`, `status:ispaused`, `status:playback_time`,
-    `status:duration`, `status:bitrate`) and also as unqualified aliases.
-  * Runtime symbols are only available in display-expression parsing/evaluation
-    contexts; library-search parsing uses registry symbols only.
 
 ## Core Feature Implementation Notes
 
 ### Startup loading
+
+How the library loads off the main thread, and what stays disabled until it
+is ready.
 
 * File-backed startup keeps library-dependent actions disabled until playlist
   hydration finishes and shows `Loading library...` in the status bar.
@@ -425,12 +407,16 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
   playlists (`PlaylistCollection::loadAll()`), creates playlist tabs/models,
   re-enables actions, restores the normal status-bar message, and starts cloud
   sync.
-* Custom (`attr:`) columns are only in `ColumnRegistry` after this step, but
-  the display expressions are parsed earlier, in the `MainWindow` constructor.
+* Custom (`attr:`) columns enter `ColumnRegistry` through
+  `ColumnRegistry::loadDynamicColumns` (at the start of `finishSetUpPlaylist`,
+  or in `setUpPlaylist` for `:memory:`), but the display expressions are
+  parsed earlier, in the `MainWindow` constructor.
   Field names are resolved at parse time, so `finishSetUpPlaylist` re-parses
   them (`NowPlayingDisplay::loadExpressions()`); without that, a custom field
   showed its name inside `${}` (`[mood]` instead of `[happy]`), or the
   expression fell back to the default, until Settings was applied.
+  See [expressions.md](expressions.md) for how display expressions resolve
+  fields.
 * Startup-sensitive handlers are guarded in addition to disabling actions, so
   direct/system-media requests cannot play, seek, load songs, or manually rebase
   before playlist hydration finishes.
@@ -438,6 +424,8 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
   SQLite in-memory connections do not share state.
 
 ### Song ingest and metadata refresh
+
+How files become songs, and how songs are refreshed after their tags change.
 
 * Ingest path: parse file -> evaluate computed fields -> generate identity key -> upsert song -> sync dynamic/computed attributes.
   Adding files to a playlist (open, add folder) goes through
@@ -463,6 +451,8 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
   moving those operations to background threads.
 
 ### FieldValue and typed conversion behavior
+
+How one field value keeps its text, typed value and display format.
 
 * `FieldValue` stores:
   * canonical `text`
@@ -494,6 +484,8 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
 
 ### Play statistics
 
+When a play counts, and where last-played and play counts are stored.
+
 * `last_played_timestamp` is set at playback start.
 * `play_count` increments once per play session with near-end + listened-duration gating.
   * `PlayCompletionTracker` decides when: the song reached
@@ -507,89 +499,9 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
     push.
 * Stats are stored by song identity, so multiple files with the same normalized identity share counters.
 
-### Bitrate display behavior
-
-* `NowPlayingDisplay` evaluates both status bar and window title from display
-  expressions (same expression engine + runtime symbols).
-* `${bitrate}` in display expressions reads runtime symbol `status:bitrate`.
-* `status:bitrate` comes from `NowPlayingDisplay` (`startSong` reads the
-  tag bitrate and CBR detection, `setStreamBitrateBps` the backend's):
-  * if track is treated as CBR and parsed tag bitrate is available, use tag bitrate
-  * otherwise use runtime playback bitrate when available
-  * otherwise fall back to parsed tag bitrate (or `0`)
-* `GstAudioPlayer` provides playback-time bitrate:
-  * hooks `playbin` `element-setup`,
-  * attaches one pad probe to the first `Decoder/Audio` sink pad,
-  * accumulates buffer bytes in an atomic counter,
-  * emits `bitrateChanged` about once per second from `updatePosition()`.
-* For tracks treated as CBR (`mp3` and `wav`, detected via TagLib file type),
-  status display prefers parsed tag bitrate from song metadata.
-* `QTAudioPlayer` does not currently emit runtime bitrate updates, so UI falls
-  back to tag bitrate when present.
-
-### Expression parse/eval context split
-
-* `QString` / `std::string` boundary:
-  * `QString`: tokenizer/parser input, token text, and parse errors.
-  * `std::string`: AST/runtime/eval/storage data (`ExprValue`,
-    `ExprFieldRef`, runtime values, interpolated parts, `FieldValue::text`,
-    eval lookup key `std::string_view`).
-  * Main conversion happens during parse, where token text is normalized and
-    resolved into `std::string` AST/runtime payloads.
-
-* Library search:
-  * Resolver source: `ColumnRegistry::expressionSymbols()`
-  * Eval context: song-only (`SongLibraryExprEvalContext`)
-  * Eval lookup maps canonical IDs to song map keys:
-    * `builtin:* -> <builtin key>`
-    * `attr:* -> attr:*`
-    * `computed:* -> computed:*`
-* Display expressions (status bar + window title):
-  * Resolver source: runtime symbols merged first, then registry symbols
-  * Eval context: runtime-first, then current song (`DisplayExpressionEvalContext`)
-  * Collisions prefer runtime symbols; fully-qualified names always disambiguate.
-  * Interpolation is supported in backtick strings only.
-  * In interpolation, `${field}` display comes from `FieldValue::display()`.
-  * Known issue: a bare field used as the whole expression is not formatted.
-    `evaluateDisplayExpression` (status bar, window title and the
-    `SettingsDialog` preview) turns the result into text with
-    `runtimeValueToQString(evaluateValue(...))`,
-    which gives the raw typed value, while interpolation parts use
-    `evaluateDisplayText(...)`, and `FieldRefExpr::evaluateDisplayText` returns
-    `FieldValue::display()`. So `duration` shows `125` but `` `${duration}` ``
-    shows `02:05`, and `channels` shows `2` but `` `${channels}` `` shows
-    `stereo`. A field returned from an `IF` branch is raw in both forms,
-    because `IfExpr` uses the base `evaluateDisplayText`, which converts
-    `evaluateValue`. Possible fix: have `evaluateDisplayExpression` use
-    `QString::fromStdString(expr.evaluateDisplayText(context))`; only bare-field
-    expressions would change, and no test covers that case yet.
-* Comparison AST/eval shape is unified as `leftExpr op rightExpr`.
-  * The comparison type is resolved from the left expression:
-    field refs use field value type; non-field expressions use static type.
-  * Right side is validated against that left-side type (either literal/list/range
-    value form or another expression).
-* `ExprValueExpr` wraps RHS value-form literals (scalar/list/range) parsed by
-  `parseValue(...)`, so comparisons keep one `leftExpr op rightExpr` shape.
-* Field resolution/evaluation split:
-  * Parse resolves field tokens into canonical namespaced `resolvedId`s.
-  * Unqualified names are canonicalized to fully-qualified IDs at parse time
-    using precedence; evaluation does not re-resolve by precedence.
-  * Eval always reads by canonical ID (`context.fieldValue(resolvedId)`).
-  * In display context, canonical `status:*` fields are read from runtime
-    symbols; other canonical fields are read from the current song.
-* Parser flow (high level):
-  * `parseOr(...)` is the parse entry point, then `parseAnd(...)`,
-    `parseUnary(...)`, and `parsePrimary(...)` by precedence.
-  * `parsePrimary(...)` parses an atom first, then optional comparison suffix.
-    If atom-start is invalid, it falls back to field-comparison parsing for
-    clearer diagnostics.
-  * Field-led (`field op value`) and generic suffix (`expr op value`)
-    comparisons share the same comparison-tail parser path for consistency:
-    operator parse in `parseComparisonTail(...)`,
-    RHS parse+validation in `parseComparisonRightExpr(...)`,
-    then `ComparisonExpr` construction.
-
 ### Playlist persistence
+
+What is saved per playlist, and which class writes each table.
 
 * Playlist identity is `playlist_id`.
 * Playlist order is persisted by `tab_order`.
@@ -609,70 +521,6 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
 * New `playlist_items` rows get a position above every stored one, so
   positions may have gaps but never collide.
 
-## Cloud Sync Design
-
-### Cursor and Rebase
-
-* `last_synced_at` is stored in `QSettings` at key `cloud_sync/last_synced_at`.
-* Incremental pull uses `updated_after = max(0, last_synced_at - 60)`.
-* After successful incremental pull, `last_synced_at` advances to
-  `max(maxUpdatedAtFromPages, now)`.
-* UUID change (on Settings `OK`) sets `rebase_pending=true` and resets
-  `last_synced_at=0`.
-* On UUID change, `MainWindow` also triggers manual rebase immediately after
-  settings apply, so rebase starts right away (not only next startup).
-* Main window startup runs sync immediately:
-  * if `rebase_pending=true`, it runs rebase first
-  * otherwise it runs incremental pull
-* Manual menu action (`Library -> Manual cloud rebase`) triggers rebase when a
-  valid UUID is set.
-* Rebase success clears `rebase_pending` and sets `last_synced_at=now`.
-* If a pending rebase fails (pull or push), `rebase_pending` stays `true` and
-  startup will retry later. Manual rebase does not set this flag by itself.
-
-### DynamoDB Data Model
-
-* Table name: `play_stats`
-* Primary key:
-  * partition key: `user_uuid` (String)
-  * sort key: `song_identity_key` (String)
-* Attributes:
-  * `play_count` (Number)
-  * `updated_at` (Number, unix seconds)
-* Pull GSI:
-  * name: `gsi_updated_at`
-  * partition key: `user_uuid` (String)
-  * sort key: `updated_at` (Number)
-  * projection: `ALL`
-
-### Lambda API Surface
-
-* `GET` pull:
-  * params: `user_uuid`, optional `updated_after`, `limit`,
-    `last_evaluated_key`
-  * returns: `items` and `next_last_evaluated_key`
-  * reads from `gsi_updated_at`
-* `POST` single increment:
-  * body: `{ user_uuid, song_identity_key, delta }`
-* `POST` bulk increment:
-  * body: `{ user_uuid, updates: [{ song_identity_key, delta }, ...] }`
-  * duplicate keys in one batch are merged server-side before update
-* `OPTIONS`: CORS preflight
-
-### Current Pacing and Batch Settings
-
-* Pull page size: `100`
-* Pull inter-page gap: `1s`
-* Rebase bulk push chunk size: `10`
-* Rebase inter-chunk gap: `1s`
-* Pull/bulk API validation enforces `limit <= 200` and `updates <= 200`.
-* Throttle handling (lambda):
-  * botocore retry mode `adaptive`, max attempts `10`
-* Throttle handling (client):
-  * retry after `60s`
-  * request transfer timeout: `15s`
-  * max client retries for throttle/timeout: `3`
-
 ## Threading / Async Model
 
 * Qt UI/model code runs on the main thread, and so do backend playlist and
@@ -681,7 +529,7 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
   thread; results that touch `SongLibrary` or UI models are delivered back to
   the main thread.
 * Cloud sync worker tasks are serialized through the worker thread event queue.
-* Cloud pull inter-page waits and rebase-push chunking are paced by `QTimer`.
+  See [cloud-sync.md](cloud-sync.md) for the sync design.
 * GStreamer GLib loop uses a dedicated `std::thread` on macOS/Windows.
 * Playlist DB writes, including the bulk `playlist_items` delete in
   `Playlist::clear()`, are synchronous, so rows appended right after a clear

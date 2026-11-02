@@ -150,4 +150,8 @@ Cloud sync:
 
 Implementation details and architecture live in:
 
-* `docs/architecture.md`
+* `docs/architecture.md`: design principles, classes, startup, playback,
+  threading
+* `docs/expressions.md`: the expression language, library search, and the
+  status bar / window title expressions
+* `docs/cloud-sync.md`: play-count sync design, DynamoDB model, Lambda API
