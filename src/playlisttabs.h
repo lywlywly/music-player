@@ -45,6 +45,8 @@ public:
   QAction *propertiesAction() const;
   QTabWidget *tabWidget() const;
   Playlist *currentPlaylist() const;
+  // Clears the current playlist, if there is one.
+  void clearCurrentPlaylist();
   void createNewPlaylistTabFromSongIds(const QList<int> &songIds);
   bool renamePlaylistTabByIndex(int index, const QString &newName);
   void setUpTableView(Playlist *, QTableView *);

@@ -156,6 +156,12 @@ int PlaylistTabs::firstSelectedRow() const {
 
 Playlist *PlaylistTabs::currentPlaylist() const { return currentPlaylist_; }
 
+void PlaylistTabs::clearCurrentPlaylist() {
+  if (currentPlaylist_ != nullptr) {
+    currentPlaylist_->clear();
+  }
+}
+
 void PlaylistTabs::createNewPlaylistTabFromSongIds(const QList<int> &songIds) {
   if (songIds.isEmpty()) {
     return;
@@ -192,7 +198,7 @@ void PlaylistTabs::setUpPlaybackManager() {
     currentPlaylist_->removeSongs(std::move(rows));
   });
   connect(clearPlaylistAction_, &QAction::triggered, this,
-          [this]() { currentPlaylist_->clear(); });
+          &PlaylistTabs::clearCurrentPlaylist);
   connect(openContainingFolderAction_, &QAction::triggered, this,
           &PlaylistTabs::openContainingFolderForCurrentContextRow);
   connect(propertiesAction_, &QAction::triggered, this,

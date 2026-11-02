@@ -1,5 +1,6 @@
 #include "settingsdialog.h"
 #include "displayexpression.h"
+#include "displaytheme.h"
 #include "ui_settingsdialog.h"
 #include "utils.h"
 #include <QApplication>
@@ -24,15 +25,9 @@ SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
       columnRegistry_(columnRegistry), databaseManager_(databaseManager) {
   ui->setupUi(this);
 
+  ui->backend_combo_box->setCurrentIndex(
+      static_cast<int>(loadPlaybackBackendSetting()));
   QSettings settings;
-  int backendIndex =
-      settings
-          .value(
-              "playback/backend",
-              static_cast<int>(PlaybackBackendManager::Backend::QMediaPlayer))
-          .toInt();
-
-  ui->backend_combo_box->setCurrentIndex(backendIndex);
   const int defaultLyricsFontSize = QApplication::font().pointSize();
   const QString initialLyricsFontFamily =
       settings.value("lyrics/font_family", QString()).toString();
@@ -47,11 +42,7 @@ SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
       loadDisplayExpressionSetting(DisplayExpressionKind::StatusBar);
   const QString initialWindowTitleExpression =
       loadDisplayExpressionSetting(DisplayExpressionKind::WindowTitle);
-  const QString initialDisplayThemeMode =
-      settings.value("display/theme_mode", QStringLiteral("system"))
-          .toString()
-          .trimmed()
-          .toLower();
+  const QString initialDisplayThemeMode = loadDisplayThemeModeSetting();
   lyricsHighlightColor_ = QColor(
       settings.value("lyrics/highlight_color", QString("#0064ff")).toString());
   if (!lyricsHighlightColor_.isValid()) {
@@ -636,13 +627,13 @@ void SettingsDialog::updateActiveDisplayExpressionPreview() {
 }
 
 void SettingsDialog::applySettings() {
-  int selected = ui->backend_combo_box->currentIndex();
-  auto selectedBackend = static_cast<PlaybackBackendManager::Backend>(selected);
+  auto selectedBackend = static_cast<PlaybackBackendManager::Backend>(
+      ui->backend_combo_box->currentIndex());
 
   emit backendChanged(selectedBackend);
+  savePlaybackBackendSetting(selectedBackend);
 
   QSettings settings;
-  settings.setValue("playback/backend", selected);
 
   const bool useSystemDefaultFont = lyricsUseDefaultFontCheck_->isChecked();
   if (lyricsFontFamilyCombo_->currentIndex() < 0 &&
@@ -664,8 +655,7 @@ void SettingsDialog::applySettings() {
   const QString windowTitleExpression =
       saveDisplayExpressionSetting(DisplayExpressionKind::WindowTitle,
                                    windowTitleExpressionEdit_->toPlainText());
-  settings.setValue("display/theme_mode",
-                    displayThemeModeCombo_->currentData().toString());
+  saveDisplayThemeModeSetting(displayThemeModeCombo_->currentData().toString());
   const QString emittedFamily =
       useSystemDefaultFont ? QString() : resolvedFamily;
   emit lyricsFontChanged(emittedFamily, lyricsFontSizeSpin_->value());

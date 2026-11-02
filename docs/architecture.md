@@ -187,6 +187,7 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
   * Creates one `PlaylistTableModel` per tab (parented to the tab's table view) and connects UI interactions.
   * Opens per-song Properties dialog from row context menu and refreshes playlist rows after successful save.
   * Remove from Playlist (row context menu) removes the selected rows with `Playlist::removeSongs`.
+  * Clear Playlist (row context menu, and the `MainWindow` menu action) calls `clearCurrentPlaylist`.
   * Refresh (tab context menu) re-reads the playlist's tags with `refreshMetadataWithProgress`.
   * The Properties context-menu action carries shortcut metadata so the menu can
     display the platform binding (`Command+I` on macOS, `Alt+Enter` elsewhere),
@@ -309,6 +310,9 @@ unplayable songs are skipped, and the audio backends.
     not use shuffle policy history or guarantee non-duplicate selections.
 * `PlaybackBackendManager`
   * Runtime backend owner/switcher (`QMediaPlayer` or `GStreamer`).
+  * `loadPlaybackBackendSetting` / `savePlaybackBackendSetting` read and
+    write the saved backend (`playback/backend`), for `MainWindow` and
+    `SettingsDialog`.
   * Manages GLib loop thread for GStreamer on macOS/Windows.
   * `MainWindow` prewarms GStreamer startup when GStreamer is the saved backend:
     `gst_init` on all platforms and default output device lookup on macOS. The
@@ -456,11 +460,12 @@ Toolbar icons, the Windows application font, and the light/dark theme.
     widget font. With another app font size, menu bar gaps change but the
     text does not. Other sizes would need a `QProxyStyle` override of
     `CE_MenuBarItem` or the `windowsvista` style.
-* Display theme (`SettingsDialog` + `MainWindow`)
+* Display theme (`displaytheme.cpp`, used by `SettingsDialog` and `MainWindow`)
   * Display theme mode is persisted as `display/theme_mode` with values:
     `system`, `light`, `dark`.
-  * Theme mode switches `QStyleHints::colorScheme` (`system`/`light`/`dark`);
-    app widget style remains the system/default style.
+  * `applyDisplayThemeMode` switches `QStyleHints::colorScheme`
+    (`system`/`light`/`dark`); app widget style remains the system/default
+    style. `MainWindow` re-tints the playback icons after applying it.
 
 ## Core Feature Implementation Notes
 

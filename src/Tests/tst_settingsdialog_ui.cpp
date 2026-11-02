@@ -15,6 +15,7 @@
 
 #include "../columnregistry.h"
 #include "../databasemanager.h"
+#include "../playbackbackendmanager.h"
 #include "../settingsdialog.h"
 
 class TestSettingsDialogUi : public QObject {
@@ -30,7 +31,8 @@ private slots:
   void addComputedField_persistsDefinitionAndEmitsSignal();
   void displayExpressions_persistAndEmitSignals();
   void displayExpressionPreview_tracksActiveEditor();
-  void displayThemeMode_persistsAndEmitsSignal();
+  void displayThemeMode_restoresPersistsAndEmitsSignal();
+  void playbackBackend_restoresPersistsAndEmitsSignal();
 
 private:
   ColumnRegistry *registry_ = nullptr;
@@ -296,13 +298,19 @@ void TestSettingsDialogUi::displayExpressionPreview_tracksActiveEditor() {
   QTRY_COMPARE(preview->text(), QString("01:05 / 02:05"));
 }
 
-void TestSettingsDialogUi::displayThemeMode_persistsAndEmitsSignal() {
+void TestSettingsDialogUi::displayThemeMode_restoresPersistsAndEmitsSignal() {
+  {
+    QSettings settings;
+    settings.setValue("display/theme_mode", " Light ");
+  }
   SettingsDialog dialog(*registry_, *databaseManager_);
   QSignalSpy themeSpy(&dialog, &SettingsDialog::displayThemeModeChanged);
 
   QComboBox *themeCombo =
       dialog.findChild<QComboBox *>("display_theme_mode_combo");
   QVERIFY(themeCombo != nullptr);
+  // The stored mode is trimmed and lowercased.
+  QCOMPARE(themeCombo->currentData().toString(), QString("light"));
   const int darkIndex = themeCombo->findData("dark");
   QVERIFY(darkIndex >= 0);
   themeCombo->setCurrentIndex(darkIndex);
@@ -313,6 +321,33 @@ void TestSettingsDialogUi::displayThemeMode_persistsAndEmitsSignal() {
   QCOMPARE(themeSpy.at(0).at(0).toString(), QString("dark"));
   QSettings settings;
   QCOMPARE(settings.value("display/theme_mode").toString(), QString("dark"));
+}
+
+void TestSettingsDialogUi::playbackBackend_restoresPersistsAndEmitsSignal() {
+  {
+    QSettings settings;
+    settings.setValue(
+        "playback/backend",
+        static_cast<int>(PlaybackBackendManager::Backend::GStreamer));
+  }
+  SettingsDialog dialog(*registry_, *databaseManager_);
+  QSignalSpy backendSpy(&dialog, &SettingsDialog::backendChanged);
+
+  QComboBox *backendCombo = dialog.findChild<QComboBox *>("backend_combo_box");
+  QVERIFY(backendCombo != nullptr);
+  QCOMPARE(backendCombo->currentIndex(),
+           static_cast<int>(PlaybackBackendManager::Backend::GStreamer));
+  backendCombo->setCurrentIndex(
+      static_cast<int>(PlaybackBackendManager::Backend::QMediaPlayer));
+
+  dialog.accept();
+
+  QCOMPARE(backendSpy.count(), 1);
+  QCOMPARE(backendSpy.at(0).at(0).value<PlaybackBackendManager::Backend>(),
+           PlaybackBackendManager::Backend::QMediaPlayer);
+  QSettings settings;
+  QCOMPARE(settings.value("playback/backend").toInt(),
+           static_cast<int>(PlaybackBackendManager::Backend::QMediaPlayer));
 }
 
 QTEST_MAIN(TestSettingsDialogUi)

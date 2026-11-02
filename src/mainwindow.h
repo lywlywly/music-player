@@ -56,8 +56,6 @@ private:
   // playback is on.
   void navigateIndex(int row, Playlist *);
   void setUpSplitter();
-  void applyDisplayThemeFromSettings();
-  void applyDisplayThemeMode(const QString &mode);
   void initSettings();
   // Creates the audio backend and connects the playback controller's signals
   // to the window.

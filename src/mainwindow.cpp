@@ -2,6 +2,7 @@
 
 #include "./ui_mainwindow.h"
 #include "databasemanager.h"
+#include "displaytheme.h"
 #include "gstaudioplayer.h"
 #include "libraryloader.h"
 #include "librarysearchdialog.h"
@@ -17,7 +18,6 @@
 #include <QResource>
 #include <QSettings>
 #include <QStatusBar>
-#include <QStyleHints>
 #include <algorithm>
 #include <utility>
 
@@ -35,18 +35,22 @@ int clampVolumePercent(int volumePercent) {
   return std::clamp(volumePercent, kMinVolumePercent, kMaxVolumePercent);
 }
 
-PlaybackBackendManager::Backend savedPlaybackBackend() {
+// Makes action checkable, checks it from the bool setting at key, and saves
+// it there when toggled.
+void bindActionToBoolSetting(QAction *action, const char *key,
+                             bool defaultValue) {
   QSettings settings;
-  return static_cast<PlaybackBackendManager::Backend>(
-      settings
-          .value(
-              "playback/backend",
-              static_cast<int>(PlaybackBackendManager::Backend::QMediaPlayer))
-          .toInt());
+  action->setCheckable(true);
+  action->setChecked(settings.value(key, defaultValue).toBool());
+  QObject::connect(action, &QAction::toggled, action, [key](bool checked) {
+    QSettings settings;
+    settings.setValue(key, checked);
+  });
 }
 
 void prewarmSelectedPlaybackBackend() {
-  if (savedPlaybackBackend() == PlaybackBackendManager::Backend::GStreamer) {
+  if (loadPlaybackBackendSetting() ==
+      PlaybackBackendManager::Backend::GStreamer) {
     GstAudioPlayer::prewarmStartup();
   }
 }
@@ -91,7 +95,7 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
                                           *playback_, this);
   connect(coverArt_, &CoverArtPresenter::artworkChanged, systemMedia_,
           &SystemMediaPresenter::setArtwork);
-  applyDisplayThemeFromSettings();
+  applyDisplayThemeMode(loadDisplayThemeModeSetting());
   setUpPlaybackButtonIcons(ui);
   defaultWindowTitle_ = windowTitle();
   updatePlaybackTimeStatus();
@@ -142,30 +146,16 @@ void MainWindow::setUpMenuBar() {
   }
   actionToCheck->setChecked(true);
 
-  // TODO: extract menu/settings persistence wiring to a settings coordinator.
   connect(playbackOrderMenuActionGroup, &QActionGroup::triggered, this,
           [](QAction *action) {
             QSettings settings;
             settings.setValue("playback/order_action", action->objectName());
           });
 
-  ui->actionPlayback_follows_cursor->setCheckable(true);
-  ui->actionPlayback_follows_cursor->setChecked(
-      settings.value(kPlaybackFollowsCursorSettingsKey, false).toBool());
-  connect(ui->actionPlayback_follows_cursor, &QAction::toggled, this,
-          [](bool checked) {
-            QSettings settings;
-            settings.setValue(kPlaybackFollowsCursorSettingsKey, checked);
-          });
-
-  ui->actionCursor_follows_playback->setCheckable(true);
-  ui->actionCursor_follows_playback->setChecked(
-      settings.value(kCursorFollowsPlaybackSettingsKey, true).toBool());
-  connect(ui->actionCursor_follows_playback, &QAction::toggled, this,
-          [](bool checked) {
-            QSettings settings;
-            settings.setValue(kCursorFollowsPlaybackSettingsKey, checked);
-          });
+  bindActionToBoolSetting(ui->actionPlayback_follows_cursor,
+                          kPlaybackFollowsCursorSettingsKey, false);
+  bindActionToBoolSetting(ui->actionCursor_follows_playback,
+                          kCursorFollowsPlaybackSettingsKey, true);
 
   connect(ui->actionSearch, &QAction::triggered, this,
           &MainWindow::openLibrarySearchDialog);
@@ -199,12 +189,8 @@ void MainWindow::finishSetUpPlaylist() {
   connect(ui->actionAdd_folder, &QAction::triggered, this, [this]() {
     addFolderFromDialog(this, *playlistTabs->currentPlaylist());
   });
-  connect(ui->actionClear_Playlist, &QAction::triggered, this, [this]() {
-    Playlist *current = playlistTabs->currentPlaylist();
-    if (current != nullptr) {
-      current->clear();
-    }
-  });
+  connect(ui->actionClear_Playlist, &QAction::triggered, playlistTabs,
+          &PlaylistTabs::clearCurrentPlaylist);
   playlistReady_ = true;
   playback_->setReady(true);
   setPlaylistDependentActionsEnabled(true);
@@ -276,7 +262,10 @@ void MainWindow::initSettings() {
               updatePlaybackTimeStatus();
             });
     connect(dialog, &SettingsDialog::displayThemeModeChanged, this,
-            [this](const QString &mode) { applyDisplayThemeMode(mode); });
+            [this](const QString &mode) {
+              applyDisplayThemeMode(mode);
+              setUpPlaybackButtonIcons(ui);
+            });
     updateSettingsDisplayPreviewContext(dialog);
     dialog->show();
   });
@@ -285,7 +274,7 @@ void MainWindow::initSettings() {
 void MainWindow::setUpPlayback() {
   // Created after setUpPlaylist, so a file-backed library loads on its worker
   // thread meanwhile.
-  playback_->setBackend(savedPlaybackBackend());
+  playback_->setBackend(loadPlaybackBackendSetting());
   playback_->setShownPlaylist(
       [this]() { return playlistTabs->currentPlaylist(); });
   playback_->setPreferredNextRow([this]() {
@@ -354,31 +343,6 @@ void MainWindow::setUpPlaybackActions() {
           &PlaybackController::playRandom);
   connect(ui->horizontalSlider, &QSlider::sliderReleased, playback_,
           [this]() { playback_->seek(ui->horizontalSlider->value()); });
-}
-
-void MainWindow::applyDisplayThemeFromSettings() {
-  QSettings settings;
-  applyDisplayThemeMode(
-      settings.value("display/theme_mode", QStringLiteral("system"))
-          .toString()
-          .trimmed()
-          .toLower());
-}
-
-void MainWindow::applyDisplayThemeMode(const QString &mode) {
-  QStyleHints *styleHints = QGuiApplication::styleHints();
-  if (mode == QStringLiteral("dark")) {
-    styleHints->setColorScheme(Qt::ColorScheme::Dark);
-    setUpPlaybackButtonIcons(ui);
-    return;
-  }
-  if (mode == QStringLiteral("light")) {
-    styleHints->setColorScheme(Qt::ColorScheme::Light);
-    setUpPlaybackButtonIcons(ui);
-    return;
-  }
-  styleHints->setColorScheme(Qt::ColorScheme::Unknown);
-  setUpPlaybackButtonIcons(ui);
 }
 
 void MainWindow::setUpSplitter() {

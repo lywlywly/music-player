@@ -34,4 +34,8 @@ private:
   std::atomic<bool> glibRunning_{false};
 };
 
+// The stored backend, or QMediaPlayer when none is stored.
+PlaybackBackendManager::Backend loadPlaybackBackendSetting();
+void savePlaybackBackendSetting(PlaybackBackendManager::Backend backend);
+
 #endif // PLAYBACKBACKENDMANAGER_H

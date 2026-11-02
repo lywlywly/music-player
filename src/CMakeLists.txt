@@ -84,6 +84,8 @@ set(PROJECT_SOURCES
   databasemanager.cpp
   displayexpression.h
   displayexpression.cpp
+  displaytheme.h
+  displaytheme.cpp
   exprsymbolinfo.h
   fieldformatter.h
   fieldformatter.cpp

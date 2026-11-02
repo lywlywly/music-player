@@ -5,6 +5,26 @@
 #include "gstaudioplayer.h"
 #include "qtaudioplayer.h"
 #include <QDebug>
+#include <QSettings>
+
+namespace {
+constexpr const char *kPlaybackBackendSettingsKey = "playback/backend";
+} // namespace
+
+PlaybackBackendManager::Backend loadPlaybackBackendSetting() {
+  QSettings settings;
+  return static_cast<PlaybackBackendManager::Backend>(
+      settings
+          .value(
+              kPlaybackBackendSettingsKey,
+              static_cast<int>(PlaybackBackendManager::Backend::QMediaPlayer))
+          .toInt());
+}
+
+void savePlaybackBackendSetting(PlaybackBackendManager::Backend backend) {
+  QSettings settings;
+  settings.setValue(kPlaybackBackendSettingsKey, static_cast<int>(backend));
+}
 
 PlaybackBackendManager::PlaybackBackendManager(Backend backend, QObject *parent)
     : QObject{parent} {
