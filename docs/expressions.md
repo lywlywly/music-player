@@ -110,11 +110,11 @@ for the rest of the app.
 
 ### Classes
 
-* `NowPlayingDisplay` (no widgets, owned by `MainWindow`)
+* `NowPlayingDisplay` (no widgets, owned by `NowPlayingPresenter`)
   * Builds the status bar text and window title from the display
-    expressions, the playback status and the current song; `MainWindow`
-    only applies the strings. Nothing playing: no status text and the
-    window's original title.
+    expressions, the playback status and the current song;
+    `NowPlayingPresenter` only applies the strings. Nothing playing: no
+    status text and the window's original title.
   * Owns the parsed expressions (`setExpression(kind, text)` with the text
     each Settings signal carries; `loadExpressions()` re-parses both from
     settings after custom columns load or change, since field names are
@@ -123,6 +123,14 @@ for the rest of the app.
     "Bitrate display behavior").
   * Playback status and the current song are passed in on each call, not
     stored, so they cannot go stale; `PlaybackController` owns them.
+* `NowPlayingPresenter` (frontend)
+  * Connects to `PlaybackController`'s `songAboutToStart`, `songStarted`,
+    state, position, duration and bitrate signals, updates
+    `NowPlayingDisplay`, and sets the window's status bar message and title.
+  * `MainWindow` passes it the expressions from each Settings signal
+    (`setExpression`), calls `reloadExpressions()` after custom columns load
+    or change, and on `refreshed()` updates an open Settings dialog's preview
+    context with `runtimeSymbols()` and `PlaybackController::currentSong()`.
 * `displayexpression.{h,cpp}`
   * The rules both `NowPlayingDisplay` and `SettingsDialog` use: settings
     keys, the default expressions, "blank means default", parsing with

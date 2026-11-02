@@ -254,13 +254,15 @@ unplayable songs are skipped, and the audio backends.
     load, so creating the backend (about 250 ms for Qt Multimedia on a cold
     start) overlaps the load on the worker thread.
   * Knows nothing about widgets. `MainWindow` gives it the shown playlist and
-    the `Playback follows cursor` row as callbacks, and shows what its signals
-    report: `songAboutToStart` (before the source is set, since the backend
+    the `Playback follows cursor` row as callbacks. `MainWindow` and the
+    presenters show what its signals report: `songAboutToStart` (before the source is set, since the backend
     may report duration and position during `setSource`), `songStarted`,
     `playbackStateChanged` (resume, pause, stop), `movedToRow` (Next, Prev,
     Random), `playbackFailed`, `playCounted`, and the backend's position,
     duration and bitrate. `SystemMediaPresenter` connects to the state,
-    seek, position and duration signals itself. The backend's signals reach
+    seek, position and duration signals itself, and `NowPlayingPresenter`
+    (see [expressions.md](expressions.md)) to `songAboutToStart`,
+    `songStarted`, the state, position, duration and bitrate signals. The backend's signals reach
     the window and presenters only through it, so a backend switch
     (`setBackend`) needs no reconnecting. A backend switch stops playback
     like `stop()`.
@@ -366,8 +368,8 @@ Where lyrics and cover images come from, and the lyrics panel settings.
     and `clear()` on stop.
   * Emits `artworkChanged(imageData)` for a song with an embedded cover;
     `MainWindow` connects it to `SystemMediaPresenter::setArtwork`.
-* These two presenters and `SystemMediaPresenter` do not know about each
-  other; `MainWindow` drives them.
+* These two presenters, `SystemMediaPresenter` and `NowPlayingPresenter` do
+  not know about each other; `MainWindow` drives them.
 * `LyricsLoader` / `LyricsManager`
   * Lyrics fetch + timed line updates from playback position.
   * On play, `PlaybackController` refreshes song metadata once;
@@ -486,12 +488,14 @@ is ready.
   drops the result.
 * In the callback, `MainWindow` loads playlists
   (`PlaylistCollection::loadAll()`), creates playlist tabs/models, re-enables
-  actions, restores the normal status-bar message, and starts cloud sync.
+  actions, restores the normal status-bar message (through
+  `NowPlayingPresenter::reloadExpressions()`), and starts cloud sync.
 * Custom (`attr:`) columns enter `ColumnRegistry` through
   `ColumnRegistry::loadDynamicColumns` in `loadLibrary`, but the display
-  expressions are parsed earlier, in the `MainWindow` constructor.
+  expressions are parsed earlier, when the `MainWindow` constructor creates
+  `NowPlayingPresenter`.
   Field names are resolved at parse time, so `finishSetUpPlaylist` re-parses
-  them (`NowPlayingDisplay::loadExpressions()`); without that, a custom field
+  them (`NowPlayingPresenter::reloadExpressions()`); without that, a custom field
   showed its name inside `${}` (`[mood]` instead of `[happy]`), or the
   expression fell back to the default, until Settings was applied.
   See [expressions.md](expressions.md) for how display expressions resolve

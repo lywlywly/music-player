@@ -472,6 +472,8 @@ void TestMainWindow::systemMediaToggleRequest_togglesPlayback() {
 
   backend->player()->setPosition(65000);
   QTRY_VERIFY(statusBar->currentMessage().contains("01:05 / 02:05"));
+  // The tag bitrate of the WAV (8 kHz, mono, 8-bit), set on song start.
+  QVERIFY(statusBar->currentMessage().contains("64 kbps"));
 
   media->requestToggleForTest();
   QTRY_COMPARE(statusAt(playlist, 0, statusCol), QString::fromUtf8("\u23F8"));

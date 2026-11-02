@@ -16,7 +16,8 @@ class ColumnRegistry;
 // Owns the parsed expressions and the playback values shown through the
 // `status:*` symbols: position, duration and the bitrate chosen for the
 // current song. Playback status and the current song are passed in by the
-// caller, which owns them. Has no widgets; MainWindow applies the strings.
+// caller, which owns them. Has no widgets; NowPlayingPresenter applies the
+// strings.
 class NowPlayingDisplay {
 public:
   // Loads both expressions from settings.

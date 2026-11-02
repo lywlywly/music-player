@@ -6,6 +6,7 @@
 #include "gstaudioplayer.h"
 #include "libraryloader.h"
 #include "librarysearchdialog.h"
+#include "nowplayingpresenter.h"
 #include "playbackbuttonstyle.h"
 #include "playlistdialogs.h"
 #include "settingsdialog.h"
@@ -82,7 +83,6 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
       databaseManager_(columnRegistry_, std::move(databaseName),
                        std::move(connectionName)),
       songLibrary(columnRegistry_, databaseManager_),
-      nowPlayingDisplay_(columnRegistry_),
       cloudPlayStatsSyncCoordinator_(songLibrary, this) {
   prewarmSelectedPlaybackBackend();
   Q_INIT_RESOURCE(resources);
@@ -95,10 +95,12 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
                                           *playback_, this);
   connect(coverArt_, &CoverArtPresenter::artworkChanged, systemMedia_,
           &SystemMediaPresenter::setArtwork);
+  nowPlaying_ = new NowPlayingPresenter(columnRegistry_, *playback_, *this);
+  connect(nowPlaying_, &NowPlayingPresenter::refreshed, this, [this]() {
+    updateSettingsDisplayPreviewContext(findChild<SettingsDialog *>());
+  });
   applyDisplayThemeMode(loadDisplayThemeModeSetting());
   setUpPlaybackButtonIcons(ui);
-  defaultWindowTitle_ = windowTitle();
-  updatePlaybackTimeStatus();
   setUpMenuBar();
   initCloudSync();
   setUpPlaylist();
@@ -174,7 +176,7 @@ void MainWindow::setUpPlaylist() {
 void MainWindow::finishSetUpPlaylist() {
   // The expressions were parsed in the constructor, before loadLibrary loaded
   // the custom columns, so their custom fields were unresolved.
-  nowPlayingDisplay_.loadExpressions();
+  nowPlaying_->reloadExpressions();
   columnLayoutManager_.refreshFromRegistry();
   playlists_->loadAll();
   playlistTabs->init(&songLibrary, &playback_->queue(), &playback_->manager(),
@@ -194,7 +196,6 @@ void MainWindow::finishSetUpPlaylist() {
   playlistReady_ = true;
   playback_->setReady(true);
   setPlaylistDependentActionsEnabled(true);
-  updatePlaybackTimeStatus();
   cloudPlayStatsSyncCoordinator_.startSync();
 }
 
@@ -231,8 +232,7 @@ void MainWindow::initSettings() {
         qFatal("initSettings: failed to reload dynamic columns");
       }
       // Resolve added or removed custom fields in the display expressions.
-      nowPlayingDisplay_.loadExpressions();
-      updatePlaybackTimeStatus();
+      nowPlaying_->reloadExpressions();
       columnLayoutManager_.refreshFromRegistry();
       // TODO: refresh custom/computed attributes
     });
@@ -251,15 +251,13 @@ void MainWindow::initSettings() {
             [this](const QColor &color) { lyrics_->setHighlightColor(color); });
     connect(dialog, &SettingsDialog::statusBarExpressionChanged, this,
             [this](const QString &expression) {
-              nowPlayingDisplay_.setExpression(DisplayExpressionKind::StatusBar,
-                                               expression);
-              updatePlaybackTimeStatus();
+              nowPlaying_->setExpression(DisplayExpressionKind::StatusBar,
+                                         expression);
             });
     connect(dialog, &SettingsDialog::windowTitleExpressionChanged, this,
             [this](const QString &expression) {
-              nowPlayingDisplay_.setExpression(
-                  DisplayExpressionKind::WindowTitle, expression);
-              updatePlaybackTimeStatus();
+              nowPlaying_->setExpression(DisplayExpressionKind::WindowTitle,
+                                         expression);
             });
     connect(dialog, &SettingsDialog::displayThemeModeChanged, this,
             [this](const QString &mode) {
@@ -282,8 +280,6 @@ void MainWindow::setUpPlayback() {
                ? playlistTabs->firstSelectedRow()
                : -1;
   });
-  connect(playback_, &PlaybackController::songAboutToStart, this,
-          [this](const MSong &song) { nowPlayingDisplay_.startSong(song); });
   connect(
       playback_, &PlaybackController::songStarted, this,
       [this](
@@ -293,7 +289,6 @@ void MainWindow::setUpPlayback() {
         lyrics_->showSong(song, remainingFields);
         // After systemMedia_->showSong, which clears the system artwork.
         coverArt_->showSong(song);
-        updatePlaybackTimeStatus();
       });
   connect(playback_, &PlaybackController::playbackStateChanged, this,
           &MainWindow::playbackStateChanged);
@@ -314,8 +309,6 @@ void MainWindow::setUpPlayback() {
           &MainWindow::positionChanged);
   connect(playback_, &PlaybackController::durationChanged, this,
           &MainWindow::durationChanged);
-  connect(playback_, &PlaybackController::bitrateChanged, this,
-          &MainWindow::bitrateChanged);
 }
 
 void MainWindow::setUpPlaybackActions() {
@@ -369,11 +362,9 @@ void MainWindow::initVolumeControl() {
 
 void MainWindow::playbackStateChanged(PlaybackQueue::PlaybackStatus status) {
   if (status == PlaybackQueue::PlaybackStatus::None) {
-    nowPlayingDisplay_.stopSong();
     lyrics_->clear();
     coverArt_->clear();
   }
-  updatePlaybackTimeStatus();
 }
 
 void MainWindow::navigateIndex(int row, Playlist *pl) {
@@ -396,48 +387,21 @@ void MainWindow::resizeEvent(QResizeEvent *event) {
 }
 
 void MainWindow::durationChanged(qint64 newDuration) {
-  nowPlayingDisplay_.setDurationMs(newDuration);
   ui->horizontalSlider->setMaximum(newDuration);
-  updatePlaybackTimeStatus();
 }
 
 void MainWindow::positionChanged(qint64 progress) {
-  nowPlayingDisplay_.setPositionMs(progress);
   if (!ui->horizontalSlider->isSliderDown())
     ui->horizontalSlider->setValue(progress);
-  updatePlaybackTimeStatus();
   lyrics_->setPositionMs(progress);
-}
-
-void MainWindow::bitrateChanged(qint64 bitsPerSecond) {
-  if (nowPlayingDisplay_.setStreamBitrateBps(bitsPerSecond)) {
-    updatePlaybackTimeStatus();
-  }
-}
-
-const MSong *MainWindow::currentSong() const {
-  const int songPk = playback_->currentSongPk();
-  if (songPk < 0) {
-    return nullptr;
-  }
-  return &songLibrary.getSongByPK(songPk);
 }
 
 void MainWindow::updateSettingsDisplayPreviewContext(SettingsDialog *dialog) {
   if (!dialog) {
     return;
   }
-  dialog->setDisplayExpressionPreviewContext(
-      currentSong(), nowPlayingDisplay_.runtimeSymbols(playback_->status()));
-}
-
-void MainWindow::updatePlaybackTimeStatus() {
-  const PlaybackQueue::PlaybackStatus status = playback_->status();
-  const MSong *song = currentSong();
-  updateSettingsDisplayPreviewContext(findChild<SettingsDialog *>());
-  statusBar()->showMessage(nowPlayingDisplay_.statusBarText(status, song));
-  setWindowTitle(
-      nowPlayingDisplay_.windowTitle(status, song, defaultWindowTitle_));
+  dialog->setDisplayExpressionPreviewContext(playback_->currentSong(),
+                                             nowPlaying_->runtimeSymbols());
 }
 
 void MainWindow::openLibrarySearchDialog() {

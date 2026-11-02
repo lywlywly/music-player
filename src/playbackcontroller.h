@@ -37,6 +37,8 @@ public:
   // The song most recently started (kept after stop), or -1 before any song
   // has played or after that song was removed from the library.
   int currentSongPk() const { return currentSongPk_; }
+  // The song of currentSongPk(), or nullptr when it is -1.
+  const MSong *currentSong() const;
 
   // The playlist the window shows: Play starts it when nothing is playing,
   // Random picks from it, and playback stops after as many consecutive

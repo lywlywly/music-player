@@ -132,6 +132,8 @@ set(PROJECT_SOURCES
   lyricspanel.cpp
   nowplayingdisplay.h
   nowplayingdisplay.cpp
+  nowplayingpresenter.h
+  nowplayingpresenter.cpp
   playbackbackendmanager.h
   playbackbackendmanager.cpp
   playbackbuttonstyle.h

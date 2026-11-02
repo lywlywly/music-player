@@ -53,6 +53,10 @@ void PlaybackController::setPreferredNextRow(
 
 void PlaybackController::setReady(bool ready) { ready_ = ready; }
 
+const MSong *PlaybackController::currentSong() const {
+  return currentSongPk_ < 0 ? nullptr : &library_.getSongByPK(currentSongPk_);
+}
+
 void PlaybackController::connectPlayer() {
   connect(player(), &AudioPlayer::mediaStatusChanged, this,
           &PlaybackController::onMediaStatusChanged);

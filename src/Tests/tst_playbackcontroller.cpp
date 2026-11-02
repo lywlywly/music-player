@@ -389,9 +389,11 @@ void TestPlaybackController::removingCurrentSongFromLibrary_stopsAndClearsIt() {
   addSong("Song0");
   addSong("Song1");
   addSong("Song2");
+  QVERIFY(controller_->currentSong() == nullptr);
   controller_->play();
   const int currentPk = playlist_->getPkByIndex(0);
   QCOMPARE(controller_->currentSongPk(), currentPk);
+  QCOMPARE(controller_->currentSong(), &library_->getSongByPK(currentPk));
 
   // In no other playlist, so each removal also removes it from the library.
   playlist_->removeSongs({1});
@@ -401,6 +403,7 @@ void TestPlaybackController::removingCurrentSongFromLibrary_stopsAndClearsIt() {
   playlist_->removeSongs({0});
   QCOMPARE(controller_->status(), PlaybackQueue::PlaybackStatus::None);
   QCOMPARE(controller_->currentSongPk(), -1);
+  QVERIFY(controller_->currentSong() == nullptr);
 
   // Stopped: the song is kept as current until it is removed.
   controller_->play();

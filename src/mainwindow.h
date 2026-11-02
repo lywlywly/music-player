@@ -7,7 +7,6 @@
 #include "databasemanager.h"
 #include "globalcolumnlayoutmanager.h"
 #include "lyricspresenter.h"
-#include "nowplayingdisplay.h"
 #include "playbackcontroller.h"
 #include "playlist.h"
 #include "playlistcollection.h"
@@ -17,6 +16,7 @@
 #include <QMainWindow>
 #include <QString>
 
+class NowPlayingPresenter;
 class SettingsDialog;
 
 QT_BEGIN_NAMESPACE
@@ -41,16 +41,10 @@ protected:
 private:
   void positionChanged(qint64 progress);
   void durationChanged(qint64 duration);
-  void bitrateChanged(qint64 bitsPerSecond);
-  // The song most recently started (kept after stop), or nullptr
-  // before any song has played.
-  const MSong *currentSong() const;
   // Gives an open Settings dialog (nullptr: none) the current song and
   // runtime symbols for its display expression preview.
   void updateSettingsDisplayPreviewContext(SettingsDialog *dialog);
-  void updatePlaybackTimeStatus();
-  // Updates the status bar and window title; on stop, also clears the
-  // now-playing display, lyrics and cover.
+  // On stop, clears the lyrics and cover.
   void playbackStateChanged(PlaybackQueue::PlaybackStatus status);
   // Selects and scrolls to the row that started playing, if Cursor follows
   // playback is on.
@@ -83,9 +77,8 @@ private:
   CoverArtPresenter *coverArt_ = nullptr;
   LyricsPresenter *lyrics_ = nullptr;
   SystemMediaPresenter *systemMedia_ = nullptr;
+  NowPlayingPresenter *nowPlaying_ = nullptr;
   QActionGroup *playbackOrderMenuActionGroup;
-  NowPlayingDisplay nowPlayingDisplay_;
-  QString defaultWindowTitle_;
   CloudPlayStatsSyncCoordinator cloudPlayStatsSyncCoordinator_;
   bool playlistReady_ = false;
 };
