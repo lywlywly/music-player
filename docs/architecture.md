@@ -107,8 +107,9 @@ The top-level window and what it owns.
 * `MainWindow`
   * Wires the app’s major subsystems.
   * Owns settings integration and top-level UI flows, and connects the
-    playback actions, buttons and system media requests to
-    `PlaybackController`.
+    playback actions and buttons to `PlaybackController`.
+  * Creates the system media interface (`createSystemMediaInterface(this)`)
+    and hands it to `SystemMediaPresenter`.
   * Owns `PlaylistCollection` and then `PlaybackController`, created as child
     `QObject`s right after `ui->setupUi(...)`. Children are destroyed in
     creation order, so the UI (tabs, views, models) is destroyed before the
@@ -257,9 +258,11 @@ unplayable songs are skipped, and the audio backends.
     may report duration and position during `setSource`), `songStarted`,
     `playbackStateChanged` (resume, pause, stop), `movedToRow` (Next, Prev,
     Random), `playbackFailed`, `playCounted`, and the backend's position,
-    duration and bitrate. The backend's signals reach `MainWindow` only
-    through it, so a backend switch (`setBackend`) needs no reconnecting in
-    the window. A backend switch stops playback like `stop()`.
+    duration and bitrate. `SystemMediaPresenter` connects to the state,
+    seek, position and duration signals itself. The backend's signals reach
+    the window and presenters only through it, so a backend switch
+    (`setBackend`) needs no reconnecting. A backend switch stops playback
+    like `stop()`.
   * Transport commands are ignored until `setReady(true)`, which
     `MainWindow` calls once the library and playlists are loaded, and until
     the backend exists.
@@ -330,6 +333,14 @@ OS media controls and now-playing metadata.
     which takes the window because Windows needs its native handle; test
     builds return `DummySystemMediaInterface` when
     `MYPLAYER_USE_DUMMY_MEDIA_INTERFACE` is set.
+* `SystemMediaPresenter` (frontend)
+  * Sends the interface's play/pause/toggle/next/previous/seek requests to
+    `PlaybackController`, and publishes the controller's playback state,
+    duration, position and seeks to the interface.
+  * `MainWindow` calls `showSong(...)` on `PlaybackController::songStarted`
+    to publish the title and artist. That clears the system artwork, so it is
+    called before `CoverArtPresenter::showSong(...)`, whose `artworkChanged`
+    `MainWindow` connects to `setArtwork(...)`.
 
 ### Lyrics and cover art
 
@@ -347,11 +358,12 @@ Where lyrics and cover images come from, and the lyrics panel settings.
   * Shows the playing song's embedded cover in the cover label, scaled to the
     label on resize and splitter moves.
   * `MainWindow` calls `showSong(...)` on `PlaybackController::songStarted`
-    (after `setTitleAndArtist`, which clears the system artwork) and
-    `clear()` on stop.
+    (after `SystemMediaPresenter::showSong`, which clears the system artwork)
+    and `clear()` on stop.
   * Emits `artworkChanged(imageData)` for a song with an embedded cover;
-    `MainWindow` connects it to `ISystemMediaInterface::setArtwork`.
-* The two presenters do not know about each other; `MainWindow` drives both.
+    `MainWindow` connects it to `SystemMediaPresenter::setArtwork`.
+* These two presenters and `SystemMediaPresenter` do not know about each
+  other; `MainWindow` drives them.
 * `LyricsLoader` / `LyricsManager`
   * Lyrics fetch + timed line updates from playback position.
   * On play, `PlaybackController` refreshes song metadata once;

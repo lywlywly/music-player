@@ -6,7 +6,6 @@
 #include "coverartpresenter.h"
 #include "databasemanager.h"
 #include "globalcolumnlayoutmanager.h"
-#include "isystemmediainterface.h"
 #include "lyricspresenter.h"
 #include "nowplayingdisplay.h"
 #include "playbackcontroller.h"
@@ -14,6 +13,7 @@
 #include "playlistcollection.h"
 #include "playlisttabs.h"
 #include "songlibrary.h"
+#include "systemmediapresenter.h"
 #include <QMainWindow>
 #include <QString>
 
@@ -49,8 +49,8 @@ private:
   // runtime symbols for its display expression preview.
   void updateSettingsDisplayPreviewContext(SettingsDialog *dialog);
   void updatePlaybackTimeStatus();
-  // Updates the status bar, window title and system media; on stop, also
-  // clears the now-playing display, lyrics and cover.
+  // Updates the status bar and window title; on stop, also clears the
+  // now-playing display, lyrics and cover.
   void playbackStateChanged(PlaybackQueue::PlaybackStatus status);
   // Selects and scrolls to the row that started playing, if Cursor follows
   // playback is on.
@@ -58,7 +58,6 @@ private:
   void setUpSplitter();
   void applyDisplayThemeFromSettings();
   void applyDisplayThemeMode(const QString &mode);
-  void setupSystemMediaInterface();
   void initSettings();
   // Creates the audio backend and connects the playback controller's signals
   // to the window.
@@ -85,8 +84,8 @@ private:
   PlaylistTabs *playlistTabs;
   CoverArtPresenter *coverArt_ = nullptr;
   LyricsPresenter *lyrics_ = nullptr;
+  SystemMediaPresenter *systemMedia_ = nullptr;
   QActionGroup *playbackOrderMenuActionGroup;
-  ISystemMediaInterface *sysMedia;
   NowPlayingDisplay nowPlayingDisplay_;
   QString defaultWindowTitle_;
   CloudPlayStatsSyncCoordinator cloudPlayStatsSyncCoordinator_;

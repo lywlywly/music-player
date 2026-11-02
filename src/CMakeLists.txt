@@ -177,6 +177,8 @@ set(PROJECT_SOURCES
   statusruntimesymboltable.cpp
   systemmediainterfacefactory.h
   systemmediainterfacefactory.cpp
+  systemmediapresenter.h
+  systemmediapresenter.cpp
   utils.h
 )
 

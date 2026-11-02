@@ -115,6 +115,7 @@ private slots:
   void systemMediaRequests_areWired();
   void backendSignals_updateUiAndSystemMedia();
   void systemMediaToggleRequest_togglesPlayback();
+  void songStart_publishesTitleArtistAndArtworkToSystemMedia();
   void windowTitleExpression_updatesOnPlaybackAndResetsOnStop();
   void settingsDisplayPreview_usesCurrentSongContext();
   void settingsApply_updatesStatusBarAndWindowTitle();
@@ -412,6 +413,32 @@ void TestMainWindow::backendSignals_updateUiAndSystemMedia() {
   QTRY_COMPARE(slider->value(), 65000);
   QTRY_COMPARE(media->stateForTest().positionMs, 65000LL);
   QTRY_COMPARE(statusBar->currentMessage(), QString());
+}
+
+void TestMainWindow::songStart_publishesTitleArtistAndArtworkToSystemMedia() {
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(tabs != nullptr);
+  Playlist *playlist = tabs->currentPlaylist();
+  QVERIFY(playlist != nullptr);
+  auto *media = window_->findChild<DummySystemMediaInterface *>();
+  QVERIFY(media != nullptr);
+
+  // playSong re-reads the tags, so the title and artist are in the file.
+  const QString wav = workDir_->filePath("media-cover.wav");
+  const QByteArray cover("cover-bytes");
+  QVERIFY(writeWavWithCover(wav, cover, "image/png"));
+  QVERIFY(SongParser::writeTags(wav.toStdString(),
+                                {{"title", "Tagged"}, {"artist", "Singer"}},
+                                ColumnRegistry()));
+  playlist->addSong(makeSong("Song", "Artist", wav));
+  playlist->setLastPlayed(playlist->getPkByIndex(0));
+
+  media->requestPlayForTest();
+
+  QTRY_COMPARE(media->stateForTest().title, QStringLiteral("Tagged"));
+  QCOMPARE(media->stateForTest().artist, QStringLiteral("Singer"));
+  // Set after the title, which clears the artwork.
+  QCOMPARE(media->stateForTest().artworkData, cover);
 }
 
 void TestMainWindow::systemMediaToggleRequest_togglesPlayback() {

@@ -87,6 +87,10 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
   playback_ = new PlaybackController(songLibrary, *playlists_, this);
   coverArt_ = new CoverArtPresenter(ui->label, this);
   lyrics_ = new LyricsPresenter(ui->lyricsPanel, this);
+  systemMedia_ = new SystemMediaPresenter(*createSystemMediaInterface(this),
+                                          *playback_, this);
+  connect(coverArt_, &CoverArtPresenter::artworkChanged, systemMedia_,
+          &SystemMediaPresenter::setArtwork);
   applyDisplayThemeFromSettings();
   setUpPlaybackButtonIcons(ui);
   defaultWindowTitle_ = windowTitle();
@@ -100,7 +104,6 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
   setUpPlaybackActions();
   lyrics_->applySettings();
   setUpSplitter();
-  setupSystemMediaInterface();
 }
 
 void MainWindow::initCloudSync() {
@@ -108,24 +111,6 @@ void MainWindow::initCloudSync() {
           &CloudPlayStatsSyncCoordinator::songDataChanged, this,
           [this](int songPk) { playlists_->notifySongChanged(songPk); });
   refreshManualCloudRebaseActionEnabled();
-}
-
-void MainWindow::setupSystemMediaInterface() {
-  sysMedia = createSystemMediaInterface(this);
-  connect(sysMedia, &ISystemMediaInterface::playRequested, playback_,
-          &PlaybackController::play);
-  connect(sysMedia, &ISystemMediaInterface::pauseRequested, playback_,
-          &PlaybackController::pause);
-  connect(sysMedia, &ISystemMediaInterface::toggleRequested, playback_,
-          &PlaybackController::toggle);
-  connect(sysMedia, &ISystemMediaInterface::nextRequested, playback_,
-          &PlaybackController::next);
-  connect(sysMedia, &ISystemMediaInterface::previousRequested, playback_,
-          &PlaybackController::prev);
-  connect(sysMedia, &ISystemMediaInterface::seekRequested, playback_,
-          &PlaybackController::seek);
-  connect(coverArt_, &CoverArtPresenter::artworkChanged, sysMedia,
-          &ISystemMediaInterface::setArtwork);
 }
 
 void MainWindow::setUpMenuBar() {
@@ -315,11 +300,9 @@ void MainWindow::setUpPlayback() {
       [this](
           const MSong &song,
           const std::unordered_map<std::string, std::string> &remainingFields) {
-        sysMedia->setTitleAndArtist(
-            QString::fromStdString(song.at("title").text),
-            QString::fromStdString(song.at("artist").text));
+        systemMedia_->showSong(song);
         lyrics_->showSong(song, remainingFields);
-        // After setTitleAndArtist, which clears the system artwork.
+        // After systemMedia_->showSong, which clears the system artwork.
         coverArt_->showSong(song);
         updatePlaybackTimeStatus();
       });
@@ -327,8 +310,6 @@ void MainWindow::setUpPlayback() {
           &MainWindow::playbackStateChanged);
   connect(playback_, &PlaybackController::movedToRow, this,
           &MainWindow::navigateIndex);
-  connect(playback_, &PlaybackController::seeking, this,
-          [this](qint64 positionMs) { sysMedia->setPosition(positionMs); });
   connect(playback_, &PlaybackController::songFinished, this,
           [this]() { QApplication::alert(this); });
   connect(playback_, &PlaybackController::playCounted,
@@ -423,23 +404,12 @@ void MainWindow::initVolumeControl() {
 }
 
 void MainWindow::playbackStateChanged(PlaybackQueue::PlaybackStatus status) {
-  ISystemMediaInterface::PlaybackState systemState =
-      ISystemMediaInterface::PlaybackState::Stopped;
-  switch (status) {
-  case PlaybackQueue::PlaybackStatus::Playing:
-    systemState = ISystemMediaInterface::PlaybackState::Playing;
-    break;
-  case PlaybackQueue::PlaybackStatus::Paused:
-    systemState = ISystemMediaInterface::PlaybackState::Paused;
-    break;
-  case PlaybackQueue::PlaybackStatus::None:
+  if (status == PlaybackQueue::PlaybackStatus::None) {
     nowPlayingDisplay_.stopSong();
     lyrics_->clear();
     coverArt_->clear();
-    break;
   }
   updatePlaybackTimeStatus();
-  sysMedia->setPlaybackState(systemState);
 }
 
 void MainWindow::navigateIndex(int row, Playlist *pl) {
@@ -465,7 +435,6 @@ void MainWindow::durationChanged(qint64 newDuration) {
   nowPlayingDisplay_.setDurationMs(newDuration);
   ui->horizontalSlider->setMaximum(newDuration);
   updatePlaybackTimeStatus();
-  sysMedia->setDuration(newDuration);
 }
 
 void MainWindow::positionChanged(qint64 progress) {
@@ -473,7 +442,6 @@ void MainWindow::positionChanged(qint64 progress) {
   if (!ui->horizontalSlider->isSliderDown())
     ui->horizontalSlider->setValue(progress);
   updatePlaybackTimeStatus();
-  sysMedia->updateCurrentPosition(progress);
   lyrics_->setPositionMs(progress);
 }
 
