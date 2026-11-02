@@ -75,9 +75,6 @@ private:
   void openLibrarySearchDialog();
   void triggerManualCloudRebase();
   void refreshManualCloudRebaseActionEnabled();
-  // TODO: remove song from current playlist, check if any other playlist
-  // references the song, if no, remove from library
-  void removeSong();
   Ui::MainWindow *ui;
   ColumnRegistry columnRegistry_;
   GlobalColumnLayoutManager columnLayoutManager_;

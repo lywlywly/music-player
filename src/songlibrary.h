@@ -74,8 +74,14 @@ public:
   std::unordered_set<std::string> queryField(std::string) const;
   const std::unordered_set<std::string> &registerQueryField(std::string) const;
   void unRegisterQueryField(std::string) const;
-  // TODO: remove, by marking as deleted, also update registered queries
-  // TODO: serialize, skipping songs marked deleted
+  // Deletes the songs from DB table `songs` (their attributes and
+  // playlist_items rows cascade) and from memory, including registered
+  // queries. Their identities and play statistics are kept, so a song re-added
+  // later gets its play count back; it gets a new pk, as pks are never reused.
+  // getSongByPK returns an empty song for a removed pk. songPks must be
+  // distinct songs in the library.
+  void removeSongs(const std::vector<int> &songPks);
+  // TODO: serialize
   // TODO: deserialize
   // Loads the full song set (built-in columns + dynamic attributes) from DB
   // into memory. This can take noticeable time on large libraries.

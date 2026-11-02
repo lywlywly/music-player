@@ -82,6 +82,8 @@ private slots:
   void refreshSongsFromFilepaths_dedupesAndReportsProgress();
   void registerQuery_tracksLaterInsertions();
   void queryHelpers_skipEmptySongSlots();
+  void removeSongs_deletesSongAndAttributesKeepsPlayStats();
+  void removeSongs_updatesRegisteredQueries();
 
 private:
   ColumnRegistry *registry_ = nullptr;
@@ -1081,6 +1083,65 @@ void TestSongLibrary::queryHelpers_skipEmptySongSlots() {
   QCOMPARE(artists.size(), static_cast<size_t>(2));
   QVERIFY(artists.find("ArtistX") != artists.end());
   QVERIFY(artists.find("ArtistY") != artists.end());
+}
+
+void TestSongLibrary::removeSongs_deletesSongAndAttributesKeepsPlayStats() {
+  registry_->addOrUpdateDynamicColumn({.id = "attr:mood", .title = "Mood"},
+                                      {.id = "attr:mood",
+                                       .source = ColumnSource::SongAttribute,
+                                       .valueType = ValueType::Text,
+                                       .searchable = true,
+                                       .writable = true});
+  MSong song = makeSong("Song", "Artist", "/tmp/remove-song.mp3");
+  song.insert_or_assign("attr:mood", FieldValue("happy", "attr:mood"));
+  const int removedId = library_->addTolibrary(std::move(song));
+  const int keptId = library_->addTolibrary(
+      makeSong("Kept", "Artist", "/tmp/remove-kept.mp3"));
+  QVERIFY(library_->incrementPlayCount(removedId));
+  QSqlDatabase &db = databaseManager_->db();
+  const auto count = [&db](const QString &sql) {
+    QSqlQuery q(db);
+    return q.exec(sql) && q.next() ? q.value(0).toInt() : -1;
+  };
+  const QString attributesOfRemoved =
+      QString("SELECT COUNT(*) FROM song_attributes WHERE song_id=%1")
+          .arg(removedId);
+  QCOMPARE(count(attributesOfRemoved), 1);
+
+  library_->removeSongs({removedId});
+
+  QVERIFY(library_->getSongByPK(removedId).empty());
+  QCOMPARE(library_->getSongByPK(keptId).at("title").text, std::string("Kept"));
+  QCOMPARE(count(QString("SELECT COUNT(*) FROM songs WHERE song_id=%1")
+                     .arg(removedId)),
+           0);
+  QCOMPARE(count(attributesOfRemoved), 0);
+  QCOMPARE(count("SELECT play_count FROM song_play_stats"), 1);
+
+  // The same file comes back as a new song with the identity's play count.
+  const int readdedId = library_->addTolibrary(
+      makeSong("Song", "Artist", "/tmp/remove-song.mp3"));
+  QVERIFY(readdedId != removedId);
+  library_->loadFromDatabase();
+  QCOMPARE(library_->getSongByPK(readdedId).at("play_count").text,
+           std::string("1"));
+}
+
+void TestSongLibrary::removeSongs_updatesRegisteredQueries() {
+  const std::vector<int> &artistA = library_->registerQuery("ArtistA");
+  const std::unordered_set<std::string> &artists =
+      library_->registerQueryField("artist");
+  const int a1 =
+      library_->addTolibrary(makeSong("S1", "ArtistA", "/tmp/rq-a1.mp3"));
+  const int a2 =
+      library_->addTolibrary(makeSong("S2", "ArtistA", "/tmp/rq-a2.mp3"));
+  const int b =
+      library_->addTolibrary(makeSong("S3", "ArtistB", "/tmp/rq-b.mp3"));
+
+  library_->removeSongs({a1, b});
+
+  QCOMPARE(artistA, std::vector<int>{a2});
+  QCOMPARE(artists, std::unordered_set<std::string>{"ArtistA"});
 }
 
 QTEST_MAIN(TestSongLibrary)

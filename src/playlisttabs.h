@@ -41,6 +41,7 @@ public:
   bool removePlaylistTabByIndex(int index);
   QAction *playNextAction() const;
   QAction *playEndAction() const;
+  QAction *removeFromPlaylistAction() const;
   QAction *propertiesAction() const;
   QTabWidget *tabWidget() const;
   Playlist *currentPlaylist() const;
@@ -91,6 +92,7 @@ private:
   QMenu playlistContextMenu;
   QAction *playNextAction_;
   QAction *playEndAction_;
+  QAction *removeFromPlaylistAction_ = nullptr;
   QAction *clearPlaylistAction_ = nullptr;
   QAction *propertiesAction_ = nullptr;
   QAction *openContainingFolderAction_ = nullptr;

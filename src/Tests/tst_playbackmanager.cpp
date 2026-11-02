@@ -496,7 +496,7 @@ void TestPlaybackManager::queue_multiplePlaylists_queueStartPreemptsQueueEnd() {
 
 void TestPlaybackManager::
     next_afterRemovingCurrentSong_sequential_doesNotThrow() {
-  // Backspace on the playing row, then Next (or the track ending).
+  // Remove from Playlist on the playing row, then Next (or the track ending).
   Playlist playlist(-1, *library_, *databaseManager_);
   playlist.addSong(makeSong("S1", "Artist", "/tmp/pm-rm-cur-next-1.mp3", "1"));
   playlist.addSong(makeSong("S2", "Artist", "/tmp/pm-rm-cur-next-2.mp3", "2"));
@@ -505,7 +505,7 @@ void TestPlaybackManager::
   manager_->setView(playlist);
   manager_->setPolicy(Sequential);
   manager_->playIndex(0);
-  playlist.removeSong(0);
+  playlist.removeSongs({0});
 
   StepResult step;
   QVERIFY_THROWS_NO_EXCEPTION(step = toStepResult(manager_->next()));
@@ -524,7 +524,7 @@ void TestPlaybackManager::
   manager_->setView(playlist);
   manager_->setPolicy(Sequential);
   manager_->playIndex(1);
-  playlist.removeSong(1);
+  playlist.removeSongs({1});
 
   StepResult step;
   QVERIFY_THROWS_NO_EXCEPTION(step = toStepResult(manager_->prev()));
@@ -549,7 +549,7 @@ void TestPlaybackManager::
   manager_->playIndex(2); // history: S1, S2, S3 (cursor on S3)
 
   const int removedPk = playlist.getPkByIndex(1);
-  playlist.removeSong(1); // S2; capacity shrinks to 2 -> history: S2, S3
+  playlist.removeSongs({1}); // S2; capacity shrinks to 2 -> history: S2, S3
 
   StepResult step;
   QVERIFY_THROWS_NO_EXCEPTION(step = toStepResult(manager_->prev()));
@@ -559,7 +559,7 @@ void TestPlaybackManager::
 }
 
 void TestPlaybackManager::next_queuedSongRemovedFromPlaylist_doesNotThrow() {
-  // "Add to Playback Queue" on a row, Backspace that row, then Next.
+  // "Add to Playback Queue" on a row, remove that row, then Next.
   Playlist playlist(-1, *library_, *databaseManager_);
   playlist.addSong(makeSong("S1", "Artist", "/tmp/pm-rm-queued-1.mp3", "1"));
   playlist.addSong(makeSong("S2", "Artist", "/tmp/pm-rm-queued-2.mp3", "2"));
@@ -569,7 +569,7 @@ void TestPlaybackManager::next_queuedSongRemovedFromPlaylist_doesNotThrow() {
   manager_->setPolicy(Sequential);
   manager_->playIndex(2); // S3
   manager_->queueEnd(0);  // S1
-  playlist.removeSong(0);
+  playlist.removeSongs({0});
 
   // The stale queue entry is skipped; the policy wraps from S3 to S2.
   StepResult step;

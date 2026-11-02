@@ -20,6 +20,7 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
 - ✅ Playlist management
   - ✅ Persistent playlist identity (`playlist_id`) and tab order (`tab_order`)
   - ✅ Rename/remove/reorder playlist tabs with DB persistence
+  - ✅ Remove songs from a playlist; songs left in no playlist leave the library
   - ✅ Last opened playlist restored on startup
 - ✅ Song Properties dialog
   - ✅ View parsed/computed fields and remaining raw tag fields

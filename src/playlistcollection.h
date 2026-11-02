@@ -14,6 +14,8 @@ class DatabaseManager;
 // tab_order). Handles playlist lifecycle (load, create, remove, rename,
 // reorder) and cross-playlist notifications. Per-playlist operations are
 // called on the Playlist returned by playlist(id).
+// A song that leaves its last playlist (Playlist::removeSongs, clear, or
+// removePlaylist) is removed from SongLibrary; see songsRemovedFromLibrary.
 class PlaylistCollection : public QObject {
   Q_OBJECT
 public:
@@ -36,7 +38,8 @@ public:
   int createPlaylist(const QString &name, const std::vector<int> &songPks = {});
   // Returns false for an unknown id, the only remaining playlist, or a failed
   // delete. Emits playlistAboutToBeRemoved before the Playlist is destroyed;
-  // playlist_items rows cascade by FK.
+  // playlist_items rows cascade by FK. Then removes from SongLibrary the songs
+  // in no other playlist.
   bool removePlaylist(int playlistId);
   // Trims name; returns false if empty or the update fails.
   bool renamePlaylist(int playlistId, const QString &name);
@@ -52,10 +55,14 @@ signals:
   void playlistAboutToBeRemoved(int playlistId);
   void playlistRemoved(int playlistId);
   void playlistRenamed(int playlistId, const QString &name);
+  // The songs were removed from SongLibrary, as they left their last playlist.
+  void songsRemovedFromLibrary(const std::vector<int> &songPks);
 
 private:
   Playlist &addLoadedPlaylist(int playlistId, const QString &name);
   bool updatePlaylistTabOrder(const std::vector<int> &playlistIdsInOrder) const;
+  // Removes from SongLibrary the songs of songPks that are in no playlist.
+  void removeSongsInNoPlaylist(const std::vector<int> &songPks);
   SongLibrary &library_;
   DatabaseManager &databaseManager_;
   std::map<int, std::unique_ptr<Playlist>> playlists_;

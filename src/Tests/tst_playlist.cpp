@@ -60,7 +60,8 @@ private slots:
   void clear_removesPersistedPlaylistItems();
   void loadState_readsDbOrder();
   void addSongByPk_persistsPlaylistItems();
-  void removeSong_rebuildsIndices();
+  void removeSongs_rebuildsIndices();
+  void removeSongsAndClear_reportRemovedPks();
   void setLastPlayed_persistsPlaylistMetadata();
   void setLastPlayed_nonPersistentKeepsValueInMemory();
   void refreshMetadataFromFiles_updatesSongsAndReportsProgress();
@@ -68,7 +69,7 @@ private slots:
   void addSong_existingSong_isNoOp();
   void addFiles_skipsExistingAndRepeatedSongs();
   void addFiles_skipsAndReportsUnparsableFiles();
-  void removeSong_thenReadd_persistsSingleRowAtEnd();
+  void removeSongs_thenReadd_persistsSingleRowAtEnd();
   void operations_emitBeforeAndAfterSignals();
 
 private:
@@ -259,7 +260,7 @@ void TestPlaylist::addSongByPk_persistsPlaylistItems() {
   QCOMPARE(q.value(1).toInt(), 1);
 }
 
-void TestPlaylist::removeSong_rebuildsIndices() {
+void TestPlaylist::removeSongs_rebuildsIndices() {
   Playlist playlist(-1, *library_, *databaseManager_);
   playlist.addSong(makeSong("S1", "Artist", "/tmp/remove-a.mp3"));
   playlist.addSong(makeSong("S2", "Artist", "/tmp/remove-b.mp3"));
@@ -269,12 +270,36 @@ void TestPlaylist::removeSong_rebuildsIndices() {
   const int pk1 = playlist.getPkByIndex(1);
   const int pk2 = playlist.getPkByIndex(2);
 
-  playlist.removeSong(1);
+  playlist.removeSongs({1});
   QCOMPARE(playlist.songCount(), 2);
   QCOMPARE(playlist.getPkByIndex(0), pk0);
   QCOMPARE(playlist.getPkByIndex(1), pk2);
   QVERIFY(!playlist.containsPk(pk1));
   QVERIFY_THROWS_EXCEPTION(std::logic_error, playlist.getIndexByPk(pk1));
+}
+
+void TestPlaylist::removeSongsAndClear_reportRemovedPks() {
+  Playlist playlist(-1, *library_, *databaseManager_);
+  playlist.addSong(makeSong("S1", "Artist", "/tmp/remove-rows-a.mp3"));
+  playlist.addSong(makeSong("S2", "Artist", "/tmp/remove-rows-b.mp3"));
+  playlist.addSong(makeSong("S3", "Artist", "/tmp/remove-rows-c.mp3"));
+  const int pk0 = playlist.getPkByIndex(0);
+  const int pk1 = playlist.getPkByIndex(1);
+  const int pk2 = playlist.getPkByIndex(2);
+  std::vector<std::vector<int>> reported;
+  connect(&playlist, &Playlist::songPksRemoved, this,
+          [&](const std::vector<int> &pks) { reported.push_back(pks); });
+
+  playlist.removeSongs({0, 2, 0});
+  QCOMPARE(playlist.songCount(), 1);
+  QCOMPARE(playlist.getPkByIndex(0), pk1);
+  QCOMPARE(reported, (std::vector<std::vector<int>>{{pk2, pk0}}));
+
+  playlist.removeSongs({});
+  playlist.clear();
+  playlist.clear();
+  QVERIFY(playlist.empty());
+  QCOMPARE(reported, (std::vector<std::vector<int>>{{pk2, pk0}, {pk1}}));
 }
 
 void TestPlaylist::setLastPlayed_persistsPlaylistMetadata() {
@@ -457,7 +482,7 @@ void TestPlaylist::addFiles_skipsAndReportsUnparsableFiles() {
   QCOMPARE(progress, expectedProgress);
 }
 
-void TestPlaylist::removeSong_thenReadd_persistsSingleRowAtEnd() {
+void TestPlaylist::removeSongs_thenReadd_persistsSingleRowAtEnd() {
   QSqlQuery q(databaseManager_->db());
   QVERIFY(q.exec("INSERT INTO playlists(playlist_id, name, last_played, "
                  "tab_order) VALUES (1, 'Default', 1, 0)"));
@@ -471,8 +496,8 @@ void TestPlaylist::removeSong_thenReadd_persistsSingleRowAtEnd() {
 
   // Stored: S3 at position 3. A row-count position for re-added S1 would be
   // 2 and load before S3.
-  playlist.removeSong(0);
-  playlist.removeSong(0);
+  playlist.removeSongs({0});
+  playlist.removeSongs({0});
   QVERIFY(playlist.addSongByPk(pk1));
 
   Playlist reloaded(1, *library_, *databaseManager_);
@@ -512,7 +537,7 @@ void TestPlaylist::operations_emitBeforeAndAfterSignals() {
   playlist.emitSongDataChangedBySongPk(pkA + 1000);
   QCOMPARE(dataChangedSpy.count(), 1);
 
-  playlist.removeSong(0);
+  playlist.removeSongs({0});
   QCOMPARE(aboutToRemoveSpy.count(), 1);
   QCOMPARE(removedSpy.count(), 1);
   QCOMPARE(removedSpy.at(0).at(0).toInt(), 0);

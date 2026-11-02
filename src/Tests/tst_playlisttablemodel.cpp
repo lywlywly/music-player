@@ -219,7 +219,7 @@ void TestPlaylistTableModel::playlistSignals_mapToRowInsertRemoveAndReset() {
   QCOMPARE(insertedSpy.at(0).at(1).toInt(), 0);
   QCOMPARE(insertedSpy.at(0).at(2).toInt(), 1);
 
-  playlist.removeSong(0);
+  playlist.removeSongs({0});
   QCOMPARE(model.rowCount(), 1);
   QCOMPARE(removedSpy.count(), 1);
   QCOMPARE(removedSpy.at(0).at(1).toInt(), 0);

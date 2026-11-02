@@ -49,6 +49,8 @@ private slots:
   void removePlaylist_rejectsLastAndEmitsInOrder();
   void renamePlaylist_trimsAndRejectsEmpty();
   void notifySongChanged_reachesEveryPlaylist();
+  void removeSongsAndClear_removeSongsInNoOtherPlaylistFromLibrary();
+  void removePlaylist_removesSongsInNoOtherPlaylistFromLibrary();
 
 private:
   ColumnRegistry *registry_ = nullptr;
@@ -196,6 +198,49 @@ void TestPlaylistCollection::notifySongChanged_reachesEveryPlaylist() {
 
   collection_->notifySongChanged(-1);
   QCOMPARE(firstSpy.count(), 1);
+}
+
+void TestPlaylistCollection::
+    removeSongsAndClear_removeSongsInNoOtherPlaylistFromLibrary() {
+  collection_->loadAll();
+  const int s1 = library_->addTolibrary(makeSong("S1", "/tmp/pc-rm-1.mp3"));
+  const int s2 = library_->addTolibrary(makeSong("S2", "/tmp/pc-rm-2.mp3"));
+  const int s3 = library_->addTolibrary(makeSong("S3", "/tmp/pc-rm-3.mp3"));
+  Playlist *first = collection_->playlist(1);
+  first->addSongByPk(s1);
+  first->addSongByPk(s2);
+  Playlist *second =
+      collection_->playlist(collection_->createPlaylist("Second", {s2, s3}));
+  std::vector<std::vector<int>> removed;
+  connect(collection_, &PlaylistCollection::songsRemovedFromLibrary, this,
+          [&](const std::vector<int> &songPks) { removed.push_back(songPks); });
+
+  // s2 is still in the second playlist.
+  first->removeSongs({0, 1});
+  QCOMPARE(removed, std::vector<std::vector<int>>{{s1}});
+  QVERIFY(library_->getSongByPK(s1).empty());
+  QVERIFY(!library_->getSongByPK(s2).empty());
+
+  second->clear();
+  QCOMPARE(removed, (std::vector<std::vector<int>>{{s1}, {s2, s3}}));
+}
+
+void TestPlaylistCollection::
+    removePlaylist_removesSongsInNoOtherPlaylistFromLibrary() {
+  collection_->loadAll();
+  const int s1 = library_->addTolibrary(makeSong("S1", "/tmp/pc-rmpl-1.mp3"));
+  const int s2 = library_->addTolibrary(makeSong("S2", "/tmp/pc-rmpl-2.mp3"));
+  collection_->playlist(1)->addSongByPk(s1);
+  const int playlistId = collection_->createPlaylist("Second", {s1, s2});
+  std::vector<std::vector<int>> removed;
+  connect(collection_, &PlaylistCollection::songsRemovedFromLibrary, this,
+          [&](const std::vector<int> &songPks) { removed.push_back(songPks); });
+
+  QVERIFY(collection_->removePlaylist(playlistId));
+
+  QCOMPARE(removed, std::vector<std::vector<int>>{{s2}});
+  QVERIFY(!library_->getSongByPK(s1).empty());
+  QVERIFY(library_->getSongByPK(s2).empty());
 }
 
 QTEST_MAIN(TestPlaylistCollection)

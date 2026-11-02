@@ -4,6 +4,7 @@
 #include <QSqlError>
 #include <QSqlQuery>
 #include <algorithm>
+#include <iterator>
 
 namespace {
 struct PlaylistDefinition {
@@ -146,6 +147,11 @@ bool PlaylistCollection::removePlaylist(int playlistId) {
     return false;
   }
 
+  std::vector<int> songPks;
+  songPks.reserve(it->second->songCount());
+  for (int row = 0; row < it->second->songCount(); ++row) {
+    songPks.push_back(it->second->getPkByIndex(row));
+  }
   emit playlistAboutToBeRemoved(playlistId);
   order_.erase(std::remove(order_.begin(), order_.end(), playlistId),
                order_.end());
@@ -156,6 +162,7 @@ bool PlaylistCollection::removePlaylist(int playlistId) {
         << "PlaylistCollection::removePlaylist failed to persist tab_order";
   }
   emit playlistRemoved(playlistId);
+  removeSongsInNoPlaylist(songPks);
   return true;
 }
 
@@ -212,9 +219,28 @@ Playlist &PlaylistCollection::addLoadedPlaylist(int playlistId,
   if (!inserted) {
     qFatal("PlaylistCollection::addLoadedPlaylist: duplicate playlist id");
   }
+  connect(it->second.get(), &Playlist::songPksRemoved, this,
+          &PlaylistCollection::removeSongsInNoPlaylist);
   order_.push_back(playlistId);
   names_[playlistId] = name;
   return *it->second;
+}
+
+void PlaylistCollection::removeSongsInNoPlaylist(
+    const std::vector<int> &songPks) {
+  std::vector<int> unused;
+  std::copy_if(songPks.begin(), songPks.end(), std::back_inserter(unused),
+               [this](int songPk) {
+                 return std::none_of(playlists_.begin(), playlists_.end(),
+                                     [songPk](const auto &entry) {
+                                       return entry.second->containsPk(songPk);
+                                     });
+               });
+  if (unused.empty()) {
+    return;
+  }
+  library_.removeSongs(unused);
+  emit songsRemovedFromLibrary(unused);
 }
 
 bool PlaylistCollection::updatePlaylistTabOrder(

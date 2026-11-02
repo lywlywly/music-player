@@ -151,6 +151,10 @@ The in-memory song store and reading/writing audio file tags.
   * Parses/imports files, refreshes metadata, evaluates computed fields, and
     evaluates library search expressions.
   * Maintains identity-based play stats using normalized `title|artist|album`.
+  * `removeSongs(songPks)` deletes songs from `songs` (attributes and
+    `playlist_items` cascade) and from memory, including registered queries.
+    Identities and play stats are kept, so a re-added file gets its play count
+    back under a new pk (`song_id` is `AUTOINCREMENT`, never reused).
   * Exposes a plain-data `Snapshot` used to transfer worker-loaded library
     state back to the main-thread instance.
 * `SongParser`
@@ -174,10 +178,12 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
   * Owns playlist metadata behavior (`playlists` table): load, create/delete playlist rows, rename, persist/repair `tab_order`. Refuses to remove the last playlist.
   * `loadAll()` emits no signals; after it, `playlistCreated` / `playlistAboutToBeRemoved` / `playlistRemoved` / `playlistRenamed` report changes. `playlistAboutToBeRemoved` is sent while the `Playlist` still exists.
   * `notifySongChanged(songPk)` refreshes a song's rows in every playlist after non-playlist song writes (play stats, cloud sync, Song Properties).
+  * Removes from `SongLibrary` the songs that leave their last playlist: on each playlist's `songPksRemoved` (Remove from Playlist, Clear Playlist) and in `removePlaylist` (Remove Tab). Then emits `songsRemovedFromLibrary(songPks)`.
 * `PlaylistTabs` (frontend)
   * Builds tabs from a loaded `PlaylistCollection` and follows its signals; delegates create/remove/rename/reorder to it.
   * Creates one `PlaylistTableModel` per tab (parented to the tab's table view) and connects UI interactions.
   * Opens per-song Properties dialog from row context menu and refreshes playlist rows after successful save.
+  * Remove from Playlist (row context menu) removes the selected rows with `Playlist::removeSongs`.
   * The Properties context-menu action carries shortcut metadata so the menu can
     display the platform binding (`Command+I` on macOS, `Alt+Enter` elsewhere),
     but the actual keyboard handling is registered with `QShortcut` on each
@@ -186,10 +192,10 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
     the selected/current row rather than the right-click row stored on the
     context-menu action.
 * `Playlist` (backend)
-  * One playlist: song-id ordering, sorting, `last_played`, and per-playlist operations (`addFiles`, `addSong`, `addSongByPk`, `removeSong`, `clear`, `sortByField`, `refreshMetadataFromFiles`).
+  * One playlist: song-id ordering, sorting, `last_played`, and per-playlist operations (`addFiles`, `addSong`, `addSongByPk`, `removeSongs`, `clear`, `sortByField`, `refreshMetadataFromFiles`).
   * A song appears at most once per playlist. Adding a song already present is a silent no-op (`addSong` / `addSongByPk` return `false`; `addFiles` skips it and returns only the appended pks). `playlist_items` enforces this with `UNIQUE (playlist_id, song_id)`.
   * Ingests/refreshes songs through `SongLibrary`; owns `playlist_items` and `playlists.last_played` persistence. `playlistId <= 0` is non-persistent (used by tests).
-  * Sends before/after signals for insert, remove and reset, and after-only signals for reorder and song-data changes. `addFiles` parses and ingests all paths first, then sends one insert pair for the batch. Does not know playback status.
+  * Sends before/after signals for insert, remove and reset, and after-only signals for reorder and song-data changes. `addFiles` parses and ingests all paths first, then sends one insert pair for the batch. `removeSongs` sends one remove pair per row; after it and `clear`, `songPksRemoved(songPks)` reports the songs that left. Does not know playback status.
 * `PlaylistTableModel` (frontend)
   * `QAbstractTableModel` adapter for one `Playlist`: columns, header, cell text, sortable-column check (`sortByColumnId`).
   * Renders the status column from `PlaybackQueue::statusOf` and refreshes only the status cell on `PlaybackQueue::statusChanged` for its own playlist.
@@ -258,6 +264,9 @@ unplayable songs are skipped, and the audio backends.
   * Next with nothing to play (the shown playlist is empty) stops playback.
   * Removing the playlist that is playing stops playback before
     `PlaybackQueue::removePlaylist` drops its current song.
+  * Removing the current song from the library
+    (`PlaylistCollection::songsRemovedFromLibrary`) stops playback if it is
+    playing or paused, and resets `currentSongPk()` to -1.
   * A song that cannot be played is skipped with `next()`: its file is
     missing (checked in `playSong` before the play stats are updated), or the
     backend reports `InvalidMedia` (`GstAudioPlayer` reports bus errors that
@@ -567,8 +576,9 @@ What is saved per playlist, and which class writes each table.
 * Writers: `PlaylistCollection` owns `playlists` rows (insert, delete, `name`,
   `tab_order`); `Playlist` owns `playlist_items` and `playlists.last_played`.
 * Playlist metadata writes (`playlists` row create/update/delete) stay synchronous.
-* Removing a row from a playlist also deletes its `playlist_items` row. Sort
-  order is not persisted.
+* Removing a row from a playlist also deletes its `playlist_items` row; a
+  song left in no playlist is also deleted from `songs` (see
+  `PlaylistCollection`). Sort order is not persisted.
 * New `playlist_items` rows get a position above every stored one, so
   positions may have gaps but never collide.
 

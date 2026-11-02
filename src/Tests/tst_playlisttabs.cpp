@@ -131,6 +131,7 @@ private slots:
   void navigateIndex_selectsTargetRow();
   void notifySongDataChangedInAllPlaylists_notifiesMatchingRows();
   void customContextMenu_bindsRowIntoQueueActions();
+  void removeFromPlaylistAction_removesSelectedRows();
   void propertiesShortcut_isInstalledOnTable();
   void propertiesDialog_showsRefreshedAndRemainingFields();
   void propertiesDialog_editSave_writesDirtyFieldAndEmitsSongUpdated();
@@ -317,6 +318,7 @@ void TestPlaylistTabs::customContextMenu_bindsRowIntoQueueActions() {
   tabs_->onCustomContextMenuRequested(validPos);
   QVERIFY(tabs_->playNextAction()->isEnabled());
   QVERIFY(tabs_->playEndAction()->isEnabled());
+  QVERIFY(tabs_->removeFromPlaylistAction()->isEnabled());
   QVERIFY(tabs_->propertiesAction()->isEnabled());
   QCOMPARE(tabs_->playNextAction()->data().value<QModelIndex>().row(), 0);
   QCOMPARE(tabs_->playEndAction()->data().value<QModelIndex>().row(), 0);
@@ -340,7 +342,28 @@ void TestPlaylistTabs::customContextMenu_bindsRowIntoQueueActions() {
   tabs_->onCustomContextMenuRequested(QPoint(-100, -100));
   QVERIFY(!tabs_->playNextAction()->isEnabled());
   QVERIFY(!tabs_->playEndAction()->isEnabled());
+  QVERIFY(!tabs_->removeFromPlaylistAction()->isEnabled());
   QVERIFY(!tabs_->propertiesAction()->isEnabled());
+}
+
+void TestPlaylistTabs::removeFromPlaylistAction_removesSelectedRows() {
+  Playlist *pl = tabs_->currentPlaylist();
+  QVERIFY(pl != nullptr);
+  pl->addSong(makeSong("A", "Artist", "/tmp/pt-remove-a.mp3", "1"));
+  pl->addSong(makeSong("B", "Artist", "/tmp/pt-remove-b.mp3", "2"));
+  pl->addSong(makeSong("C", "Artist", "/tmp/pt-remove-c.mp3", "3"));
+  QTableView *table =
+      tabs_->tabWidget()->currentWidget()->findChild<QTableView *>();
+  QVERIFY(table != nullptr);
+  table->selectRow(0);
+  table->selectionModel()->select(table->model()->index(2, 0),
+                                  QItemSelectionModel::Select |
+                                      QItemSelectionModel::Rows);
+
+  tabs_->removeFromPlaylistAction()->trigger();
+
+  QCOMPARE(pl->songCount(), 1);
+  QCOMPARE(pl->getSongByIndex(0).at("title").text, std::string("B"));
 }
 
 void TestPlaylistTabs::propertiesShortcut_isInstalledOnTable() {

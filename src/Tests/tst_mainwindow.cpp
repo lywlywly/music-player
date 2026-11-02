@@ -121,7 +121,6 @@ private slots:
   void startup_displayExpressionResolvesCustomField();
   void sliderReleased_invokesSeekFlow();
   void volumeSlider_defaultsPropagatesAndPersists();
-  void playlistTableBackspace_removesSelectedRow();
   void queueActions_fromContextMenu_areWired();
   void playbackOrderMenuActions_areExclusive();
   void playbackOrderMenuActions_persistToSettings();
@@ -675,30 +674,6 @@ void TestMainWindow::volumeSlider_defaultsPropagatesAndPersists() {
   dummyPlayer = qobject_cast<DummyAudioPlayer *>(backend->player());
   QVERIFY(dummyPlayer != nullptr);
   QCOMPARE(dummyPlayer->volumeForTest(), 37);
-}
-
-void TestMainWindow::playlistTableBackspace_removesSelectedRow() {
-  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
-  QVERIFY(tabs != nullptr);
-  Playlist *playlist = tabs->currentPlaylist();
-  QVERIFY(playlist != nullptr);
-  QTableView *table =
-      tabs->tabWidget()->currentWidget()->findChild<QTableView *>();
-  QVERIFY(table != nullptr);
-
-  const QString wav1 = workDir_->filePath("remove-1.wav");
-  const QString wav2 = workDir_->filePath("remove-2.wav");
-  QVERIFY(writeSilentWav(wav1));
-  QVERIFY(writeSilentWav(wav2));
-  playlist->addSong(makeSong("Song1", "Artist", wav1));
-  playlist->addSong(makeSong("Song2", "Artist", wav2));
-  QCOMPARE(playlist->songCount(), 2);
-
-  table->setCurrentIndex(table->model()->index(0, 0));
-  table->setFocus();
-  QTest::keyClick(table, Qt::Key_Backspace);
-  QTRY_COMPARE(playlist->songCount(), 1);
-  QCOMPARE(playlist->getSongByIndex(0).at("title").text, std::string("Song2"));
 }
 
 void TestMainWindow::queueActions_fromContextMenu_areWired() {

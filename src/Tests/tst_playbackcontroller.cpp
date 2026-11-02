@@ -56,6 +56,7 @@ private slots:
   void next_onEmptyShownPlaylist_stops();
   void next_afterRemovingPlaylistWithQueuedSong_playsShownPlaylist();
   void removingPlayingPlaylist_stops();
+  void removingCurrentSongFromLibrary_stopsAndClearsIt();
 
   void setBackend_stopsAndMovesSignalsAndVolumeToNewPlayer();
 
@@ -162,7 +163,7 @@ void TestPlaybackController::play_afterLastPlayedRowRemoved_startsFirstRow() {
   addSong("Song1");
   addSong("Song2");
   playlist_->setLastPlayed(playlist_->getPkByIndex(0));
-  playlist_->removeSong(0);
+  playlist_->removeSongs({0});
 
   controller_->play();
 
@@ -382,6 +383,31 @@ void TestPlaybackController::removingPlayingPlaylist_stops() {
   controller_->manager().setView(*playlist_);
   QVERIFY(playlists_->removePlaylist(idB));
   QCOMPARE(controller_->status(), PlaybackQueue::PlaybackStatus::None);
+}
+
+void TestPlaybackController::removingCurrentSongFromLibrary_stopsAndClearsIt() {
+  addSong("Song0");
+  addSong("Song1");
+  addSong("Song2");
+  controller_->play();
+  const int currentPk = playlist_->getPkByIndex(0);
+  QCOMPARE(controller_->currentSongPk(), currentPk);
+
+  // In no other playlist, so each removal also removes it from the library.
+  playlist_->removeSongs({1});
+  QCOMPARE(controller_->status(), PlaybackQueue::PlaybackStatus::Playing);
+  QCOMPARE(controller_->currentSongPk(), currentPk);
+
+  playlist_->removeSongs({0});
+  QCOMPARE(controller_->status(), PlaybackQueue::PlaybackStatus::None);
+  QCOMPARE(controller_->currentSongPk(), -1);
+
+  // Stopped: the song is kept as current until it is removed.
+  controller_->play();
+  controller_->stop();
+  QCOMPARE(controller_->currentSongPk(), playlist_->getPkByIndex(0));
+  playlist_->removeSongs({0});
+  QCOMPARE(controller_->currentSongPk(), -1);
 }
 
 void TestPlaybackController::

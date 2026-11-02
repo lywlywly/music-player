@@ -3,11 +3,13 @@
 #include "fieldformatter.h"
 #include <QSqlError>
 #include <QSqlQuery>
+#include <algorithm>
 #include <optional>
 #include <stdexcept>
 #include <unicode/coll.h>
 #include <unicode/locid.h>
 #include <unordered_set>
+#include <utility>
 
 UErrorCode status = U_ZERO_ERROR;
 icu::Locale loc = icu::Locale::forLanguageTag("zh-u-kr-latn-hani-hrkt", status);
@@ -181,25 +183,39 @@ bool Playlist::addSongByPk(int songId) {
   return true;
 }
 
-void Playlist::removeSong(int row) {
-  emit aboutToRemoveSongs(row, row);
-  const int songId = songPKs_.at(row);
-  songPKs_.erase(songPKs_.begin() + row);
-  rebuildIndices();
-  if (playlistId_ > 0) {
-    removePlaylistItemInDb(songId);
+void Playlist::removeSongs(std::vector<int> rows) {
+  // From the last row, so the rows not yet removed keep their numbers.
+  std::sort(rows.begin(), rows.end(), std::greater<>());
+  rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
+  std::vector<int> removedPks;
+  removedPks.reserve(rows.size());
+  for (int row : rows) {
+    emit aboutToRemoveSongs(row, row);
+    const int songId = songPKs_.at(row);
+    songPKs_.erase(songPKs_.begin() + row);
+    rebuildIndices();
+    if (playlistId_ > 0) {
+      removePlaylistItemInDb(songId);
+    }
+    emit songsRemoved(row, row);
+    removedPks.push_back(songId);
   }
-  emit songsRemoved(row, row);
+  if (!removedPks.empty()) {
+    emit songPksRemoved(removedPks);
+  }
 }
 
 void Playlist::clear() {
   emit aboutToResetSongs();
-  songPKs_.clear();
+  const std::vector<int> removedPks = std::exchange(songPKs_, {});
   indices_.clear();
   if (playlistId_ > 0) {
     removePlaylistItemsInDb();
   }
   emit songsReset();
+  if (!removedPks.empty()) {
+    emit songPksRemoved(removedPks);
+  }
 }
 
 void Playlist::sortByField(const std::string &f, int order) {

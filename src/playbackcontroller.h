@@ -35,7 +35,7 @@ public:
   PlaybackManager &manager() { return manager_; }
   PlaybackQueue::PlaybackStatus status() { return manager_.getStatus(); }
   // The song most recently started (kept after stop), or -1 before any song
-  // has played.
+  // has played or after that song was removed from the library.
   int currentSongPk() const { return currentSongPk_; }
 
   // The playlist the window shows: Play starts it when nothing is playing,

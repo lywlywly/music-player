@@ -26,6 +26,19 @@ PlaybackController::PlaybackController(SongLibrary &library,
             }
             queue_.removePlaylist(removed);
           });
+  connect(&playlists_, &PlaylistCollection::songsRemovedFromLibrary, this,
+          [this](const std::vector<int> &songPks) {
+            if (std::find(songPks.begin(), songPks.end(), currentSongPk_) ==
+                songPks.end()) {
+              return;
+            }
+            // The current song no longer exists: do not keep playing it.
+            // Reset first, so stop's listeners see no current song.
+            currentSongPk_ = -1;
+            if (manager_.getStatus() != PlaybackQueue::PlaybackStatus::None) {
+              stop();
+            }
+          });
 }
 
 void PlaybackController::setShownPlaylist(

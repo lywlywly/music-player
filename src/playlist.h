@@ -49,10 +49,13 @@ public:
   // Appends a song already in SongLibrary if not already in the playlist.
   // Returns whether it was appended.
   bool addSongByPk(int songPk);
-  // Removes one row (current order) and its `playlist_items` row.
-  void removeSong(int row);
-  // Clears this playlist and its `playlist_items` rows. Song rows in DB table
-  // `songs` are not deleted.
+  // Removes the rows (current order; duplicates ignored) and their
+  // `playlist_items` rows, then emits songPksRemoved. Song rows in DB table
+  // `songs` are not deleted here; see PlaylistCollection.
+  void removeSongs(std::vector<int> rows);
+  // Clears this playlist and its `playlist_items` rows, then emits
+  // songPksRemoved if it was not empty. Song rows in DB table `songs` are not
+  // deleted here; see PlaylistCollection.
   void clear();
   // order: 0 ascending, otherwise descending.
   void sortByField(const std::string &fieldId, int order = 0);
@@ -71,6 +74,8 @@ signals:
   void songsInserted(int first, int last);
   void aboutToRemoveSongs(int first, int last);
   void songsRemoved(int first, int last);
+  // After removeSongs or clear: the pks of the songs that left the playlist.
+  void songPksRemoved(const std::vector<int> &songPks);
   void aboutToResetSongs();
   void songsReset();
   void songsReordered();

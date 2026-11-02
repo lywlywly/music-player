@@ -7,6 +7,7 @@
 #include <QSqlError>
 #include <QSqlQuery>
 #include <algorithm>
+#include <utility>
 
 #ifdef MYPLAYER_TESTING
 SongLibrary::SongLibrary(const ColumnRegistry &columnRegistry,
@@ -217,6 +218,46 @@ int SongLibrary::addTolibrary(MSong &&s) {
   syncComputedValuesBySongId(songId, songs[songId]);
 
   return songId;
+}
+
+void SongLibrary::removeSongs(const std::vector<int> &songPks) {
+  QSqlDatabase &db = databaseManager_.db();
+  if (!db.transaction()) {
+    qFatal("removeSongs: failed to start transaction: %s",
+           db.lastError().text().toUtf8().data());
+  }
+  QSqlQuery q(db);
+  q.prepare("DELETE FROM songs WHERE song_id=:song_id");
+  for (int songPk : songPks) {
+    q.bindValue(":song_id", songPk);
+    if (!q.exec()) {
+      qFatal("removeSongs delete failed: %s",
+             q.lastError().text().toUtf8().data());
+    }
+  }
+  if (!db.commit()) {
+    qFatal("removeSongs commit failed: %s",
+           db.lastError().text().toUtf8().data());
+  }
+
+  for (int songPk : songPks) {
+    removeSongFromIdentityIndex(songPk, songIdentityIdBySongId(songPk));
+    const MSong removed = std::exchange(songs.at(songPk), MSong{});
+    paths.erase(removed.at("filepath").text);
+    for (auto &[artist, songIds] : registeredQueries) {
+      std::erase(songIds, songPk);
+    }
+    for (auto &[field, values] : registeredQueryFields) {
+      const std::string &value = removed.at(field).text;
+      const bool valueStillUsed =
+          std::any_of(songs.begin(), songs.end(), [&](const MSong &song) {
+            return !song.empty() && song.at(field).text == value;
+          });
+      if (!valueStillUsed) {
+        values.erase(value);
+      }
+    }
+  }
 }
 
 ExprParseResult

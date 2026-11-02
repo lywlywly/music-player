@@ -87,6 +87,8 @@ void PlaylistTabs::setUpPlaylist() {
   playNextAction_ = playlistContextMenu.addAction("Play Next");
   playEndAction_ = playlistContextMenu.addAction("Add to Playback Queue");
   playlistContextMenu.addSeparator();
+  removeFromPlaylistAction_ =
+      playlistContextMenu.addAction("Remove from Playlist");
   clearPlaylistAction_ = playlistContextMenu.addAction("Clear Playlist");
   playlistContextMenu.addSeparator();
   openContainingFolderAction_ =
@@ -181,6 +183,15 @@ void PlaylistTabs::setUpPlaybackManager() {
     QModelIndex index = playEndAction_->data().value<QModelIndex>();
     control->queueEnd(index.row());
   });
+  connect(removeFromPlaylistAction_, &QAction::triggered, this, [this]() {
+    // The selected rows; right-clicking an unselected row selects it.
+    std::vector<int> rows;
+    for (const QModelIndex &index :
+         currentTableView->selectionModel()->selectedRows()) {
+      rows.push_back(index.row());
+    }
+    currentPlaylist_->removeSongs(std::move(rows));
+  });
   connect(clearPlaylistAction_, &QAction::triggered, this,
           [this]() { currentPlaylist_->clear(); });
   connect(openContainingFolderAction_, &QAction::triggered, this,
@@ -194,6 +205,7 @@ void PlaylistTabs::onCustomContextMenuRequested(const QPoint &pos) {
   const bool hasRow = index.isValid();
   playNextAction_->setEnabled(hasRow);
   playEndAction_->setEnabled(hasRow);
+  removeFromPlaylistAction_->setEnabled(hasRow);
   openContainingFolderAction_->setEnabled(hasRow);
   propertiesAction_->setEnabled(hasRow);
   if (hasRow) {
@@ -303,7 +315,6 @@ void PlaylistTabs::setUpTableView(Playlist *pl, QTableView *tbv) {
   tbv->setSortingEnabled(true);
   tbv->setEditTriggers(QAbstractItemView::NoEditTriggers);
   tbv->setSelectionBehavior(QAbstractItemView::SelectRows);
-  tbv->installEventFilter(this);
   tbv->setContextMenuPolicy(Qt::CustomContextMenu);
   connect(tbv, &QTableView::customContextMenuRequested, this,
           &PlaylistTabs::onCustomContextMenuRequested);
@@ -483,6 +494,10 @@ Policy PlaylistTabs::selectedPlaybackPolicy() const {
 QAction *PlaylistTabs::playNextAction() const { return playNextAction_; }
 
 QAction *PlaylistTabs::playEndAction() const { return playEndAction_; }
+
+QAction *PlaylistTabs::removeFromPlaylistAction() const {
+  return removeFromPlaylistAction_;
+}
 
 QAction *PlaylistTabs::propertiesAction() const { return propertiesAction_; }
 
@@ -672,16 +687,6 @@ bool PlaylistTabs::eventFilter(QObject *obj, QEvent *event) {
     QKeyEvent *keyEvent = static_cast<QKeyEvent *>(event);
     if (keyEvent->key() == Qt::Key_Escape) {
       cancelInlineRename();
-      return true;
-    }
-  }
-  if (obj == currentTableView && event->type() == QEvent::KeyPress) {
-    QKeyEvent *keyEvent = static_cast<QKeyEvent *>(event);
-    if (keyEvent->key() == Qt::Key_Backspace) {
-      QModelIndex index = currentTableView->currentIndex();
-      if (index.isValid()) {
-        currentPlaylist_->removeSong(index.row());
-      }
       return true;
     }
   }
