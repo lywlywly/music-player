@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Format tracked C++ sources with clang-format, using the repo's .clang-format.
+# Format the C++ sources with clang-format, using the repo's .clang-format.
+# Covers tracked files and new files not yet added (anything .gitignore does
+# not exclude), so new sources are formatted before their first commit.
 # Usage: scripts/format.sh [--check]
 #   --check  report files that need formatting and exit non-zero; change nothing
 set -euo pipefail
@@ -11,4 +13,13 @@ case "${1:-}" in
 esac
 
 cd "$(git rev-parse --show-toplevel)"
-git ls-files -z 'src/*.cpp' 'src/*.h' 'src/*.mm' | xargs -0 clang-format "${args[@]}"
+files=()
+while IFS= read -r -d '' file; do
+  # Skip files deleted from the working tree but still in the index.
+  [[ -f "$file" ]] && files+=("$file")
+done < <(git ls-files -z --cached --others --exclude-standard \
+  'src/*.cpp' 'src/*.h' 'src/*.mm')
+if [[ ${#files[@]} -eq 0 ]]; then
+  exit 0
+fi
+clang-format "${args[@]}" "${files[@]}"
