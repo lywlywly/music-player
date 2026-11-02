@@ -3,6 +3,7 @@
 #include "./ui_mainwindow.h"
 #include "databasemanager.h"
 #include "gstaudioplayer.h"
+#include "libraryloader.h"
 #include "librarysearchdialog.h"
 #include "playbackbuttonstyle.h"
 #include "settingsdialog.h"
@@ -12,18 +13,14 @@
 #include <QDir>
 #include <QEvent>
 #include <QFileDialog>
-#include <QFutureWatcher>
 #include <QKeySequence>
 #include <QMessageBox>
 #include <QProgressDialog>
 #include <QResource>
 #include <QSettings>
-#include <QSqlDatabase>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QStyleHints>
-#include <QThread>
-#include <QtConcurrent>
 #include <algorithm>
 #include <utility>
 
@@ -46,29 +43,6 @@ const QStringList &audioFileNameFilters() {
 
 int clampVolumePercent(int volumePercent) {
   return std::clamp(volumePercent, kMinVolumePercent, kMaxVolumePercent);
-}
-
-SongLibrary::Snapshot loadSongLibrarySnapshot(const QString &databaseName) {
-  // TODO: Extract DB-only library loading so startup does not need to construct
-  // temporary full ColumnRegistry/SongLibrary instances on the worker thread.
-#ifdef MYPLAYER_TESTING
-  if (const int delayMs =
-          qEnvironmentVariableIntValue("MYPLAYER_TEST_LIBRARY_LOAD_DELAY_MS");
-      delayMs > 0) {
-    QThread::msleep(static_cast<unsigned long>(delayMs));
-  }
-#endif
-  ColumnRegistry registry;
-  DatabaseManager databaseManager(
-      registry, databaseName,
-      QStringLiteral("playlist_loader_%1")
-          .arg(reinterpret_cast<quintptr>(QThread::currentThread())));
-  if (!registry.loadDynamicColumns(databaseManager.db())) {
-    qFatal("loadSongLibrarySnapshot: failed to load dynamic columns");
-  }
-  SongLibrary library(registry, databaseManager);
-  library.loadFromDatabase();
-  return library.snapshot();
 }
 
 PlaybackBackendManager::Backend savedPlaybackBackend() {
@@ -228,37 +202,15 @@ void MainWindow::setUpPlaylist() {
   playlistTabs = ui->playlistTabs;
   setPlaylistDependentActionsEnabled(false);
   statusBar()->showMessage(tr("Loading library..."));
-
-  if (databaseManager_.db().databaseName() == QStringLiteral(":memory:")) {
-    QSqlDatabase &db = databaseManager_.db();
-    if (!columnRegistry_.loadDynamicColumns(db)) {
-      qFatal("setUpPlaylist: failed to load dynamic columns");
-    }
-    songLibrary.loadFromDatabase();
-    finishSetUpPlaylist(songLibrary.snapshot());
-    return;
-  }
-
-  auto *watcher = new QFutureWatcher<SongLibrary::Snapshot>(this);
-  connect(watcher, &QFutureWatcher<SongLibrary::Snapshot>::finished, this,
-          [this, watcher]() {
-            SongLibrary::Snapshot snapshot = watcher->result();
-            finishSetUpPlaylist(std::move(snapshot));
-            watcher->deleteLater();
-          });
-  watcher->setFuture(QtConcurrent::run(loadSongLibrarySnapshot,
-                                       databaseManager_.db().databaseName()));
+  loadLibrary(columnRegistry_, databaseManager_, songLibrary, this,
+              [this]() { finishSetUpPlaylist(); });
 }
 
-void MainWindow::finishSetUpPlaylist(SongLibrary::Snapshot &&snapshot) {
-  if (!columnRegistry_.loadDynamicColumns(databaseManager_.db())) {
-    qFatal("finishSetUpPlaylist: failed to load dynamic columns");
-  }
-  // The expressions were parsed in the constructor, before the custom
-  // columns above were loaded, so their custom fields were unresolved.
+void MainWindow::finishSetUpPlaylist() {
+  // The expressions were parsed in the constructor, before loadLibrary loaded
+  // the custom columns, so their custom fields were unresolved.
   nowPlayingDisplay_.loadExpressions();
   columnLayoutManager_.refreshFromRegistry();
-  songLibrary.replaceWithSnapshot(std::move(snapshot));
   playlists_->loadAll();
   playlistTabs->init(&songLibrary, &playback_->queue(), &playback_->manager(),
                      playbackOrderMenuActionGroup, &columnRegistry_,

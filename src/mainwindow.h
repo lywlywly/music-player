@@ -68,7 +68,7 @@ private:
   void initVolumeControl();
   void setUpPlaybackActions();
   void setUpPlaylist();
-  void finishSetUpPlaylist(SongLibrary::Snapshot &&snapshot);
+  void finishSetUpPlaylist();
   void setPlaylistDependentActionsEnabled(bool enabled);
   void initCloudSync();
   void setUpMenuBar();

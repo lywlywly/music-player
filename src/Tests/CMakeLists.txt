@@ -20,6 +20,7 @@ set(TEST_NAMES
     playbackmanager
     playbackcontroller
     songlibrary
+    libraryloader
     columnregistry
     columnlayout
     databasemanager

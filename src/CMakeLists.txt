@@ -112,6 +112,8 @@ set(PROJECT_SOURCES
   libraryexpression_parser.cpp
   libraryexpression_ops.h
   libraryexpression_ops.cpp
+  libraryloader.h
+  libraryloader.cpp
   librarysearchdialog.ui
   librarysearchdialog.h
   librarysearchdialog.cpp

@@ -113,8 +113,8 @@ The top-level window and what it owns.
     `QObject`s right after `ui->setupUi(...)`. Children are destroyed in
     creation order, so the UI (tabs, views, models) is destroyed before the
     playlists and playback state it shows.
-  * Starts file-backed library loading on a worker thread during startup and
-    hydrates UI state after the library snapshot is ready.
+  * Starts the library load (`loadLibrary`) during startup and builds the
+    playlists, tabs and actions once it calls back.
 
 ### Persistence and schema
 
@@ -447,17 +447,20 @@ is ready.
 
 * File-backed startup keeps library-dependent actions disabled until playlist
   hydration finishes and shows `Loading library...` in the status bar.
-* The worker path creates its own `ColumnRegistry`, `DatabaseManager`, and
-  `SongLibrary` with a separate SQLite connection, then returns a
-  `SongLibrary::Snapshot`.
-* The main thread applies the snapshot to the app-owned `SongLibrary`, loads
-  playlists (`PlaylistCollection::loadAll()`), creates playlist tabs/models,
-  re-enables actions, restores the normal status-bar message, and starts cloud
-  sync.
+* `loadLibrary` (libraryloader.h) loads the custom columns and the songs. For a
+  file-backed database, a worker thread creates its own `ColumnRegistry`,
+  `DatabaseManager`, and `SongLibrary` with a separate SQLite connection and
+  returns a `SongLibrary::Snapshot`; on the main thread `loadLibrary` then
+  loads the custom columns into the app's `ColumnRegistry`, applies the
+  snapshot to the app-owned `SongLibrary`, and calls back. The watcher for the
+  worker is a child of `MainWindow`, so destroying the window during the load
+  drops the result.
+* In the callback, `MainWindow` loads playlists
+  (`PlaylistCollection::loadAll()`), creates playlist tabs/models, re-enables
+  actions, restores the normal status-bar message, and starts cloud sync.
 * Custom (`attr:`) columns enter `ColumnRegistry` through
-  `ColumnRegistry::loadDynamicColumns` (at the start of `finishSetUpPlaylist`,
-  or in `setUpPlaylist` for `:memory:`), but the display expressions are
-  parsed earlier, in the `MainWindow` constructor.
+  `ColumnRegistry::loadDynamicColumns` in `loadLibrary`, but the display
+  expressions are parsed earlier, in the `MainWindow` constructor.
   Field names are resolved at parse time, so `finishSetUpPlaylist` re-parses
   them (`NowPlayingDisplay::loadExpressions()`); without that, a custom field
   showed its name inside `${}` (`[mood]` instead of `[happy]`), or the
@@ -468,7 +471,8 @@ is ready.
   direct/system-media requests cannot play, seek, load songs, or manually rebase
   before playlist hydration finishes.
 * `:memory:` databases keep the synchronous path for tests because separate
-  SQLite in-memory connections do not share state.
+  SQLite in-memory connections do not share state: `loadLibrary` loads on the
+  calling thread and calls back before it returns.
 
 ### Song ingest and metadata refresh
 
