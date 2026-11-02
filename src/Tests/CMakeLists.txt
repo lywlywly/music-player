@@ -18,6 +18,7 @@ set(TEST_NAMES
     lyrics
     # checksum    # temporarily disabled
     playbackmanager
+    playbackcontroller
     songlibrary
     columnregistry
     columnlayout

@@ -9,16 +9,13 @@
 #include "isystemmediainterface.h"
 #include "lyricspresenter.h"
 #include "nowplayingdisplay.h"
-#include "playbackbackendmanager.h"
-#include "playbackmanager.h"
-#include "playcompletiontracker.h"
+#include "playbackcontroller.h"
 #include "playlist.h"
 #include "playlistcollection.h"
 #include "playlisttabs.h"
 #include "songlibrary.h"
 #include <QMainWindow>
 #include <QString>
-#include <QTimer>
 
 class SettingsDialog;
 
@@ -45,8 +42,7 @@ private:
   void positionChanged(qint64 progress);
   void durationChanged(qint64 duration);
   void bitrateChanged(qint64 bitsPerSecond);
-  void statusChanged(QMediaPlayer::MediaStatus status);
-  // The song most recently started by playSong (kept after stop), or nullptr
+  // The song most recently started (kept after stop), or nullptr
   // before any song has played.
   const MSong *currentSong() const;
   // Gives an open Settings dialog (nullptr: none) the current song and
@@ -55,29 +51,21 @@ private:
   void updatePlaybackTimeStatus();
   void open();
   void openFolder();
-  void seek(int mseconds);
-  void next();
-  void prev();
-  void playRandom();
-  void play();
-  void pause();
-  void toggle();
-  void stop();
-  void playSong(const MSong &, int row, Playlist *pl);
-  // Called when a song cannot be played (missing file, or the backend reports
-  // InvalidMedia). Skips to the next song, or stops and reports the file once
-  // as many consecutive songs as the current playlist holds have failed.
-  void handlePlaybackFailure(const QString &filepath);
+  // Updates the status bar, window title and system media; on stop, also
+  // clears the now-playing display, lyrics and cover.
+  void playbackStateChanged(PlaybackQueue::PlaybackStatus status);
+  // Selects and scrolls to the row that started playing, if Cursor follows
+  // playback is on.
   void navigateIndex(int row, Playlist *);
   void setUpSplitter();
   void applyDisplayThemeFromSettings();
   void applyDisplayThemeMode(const QString &mode);
   void setupSystemMediaInterface();
   void initSettings();
-  void initPlaybackBackend();
-  void setUpPlaybackBackend();
+  // Creates the audio backend and connects the playback controller's signals
+  // to the window.
+  void setUpPlayback();
   void initVolumeControl();
-  void applyVolumeToCurrentBackend();
   void setUpPlaybackActions();
   void setUpPlaylist();
   void finishSetUpPlaylist(SongLibrary::Snapshot &&snapshot);
@@ -85,18 +73,12 @@ private:
   void initCloudSync();
   void setUpMenuBar();
   void openLibrarySearchDialog();
-  // Counts the current song's play once PlayCompletionTracker says so.
-  void maybeCountCompletedPlay();
   void triggerManualCloudRebase();
   void refreshManualCloudRebaseActionEnabled();
-  static qint64 unixNowSeconds();
   // TODO: remove song from current playlist, check if any other playlist
   // references the song, if no, remove from library
   void removeSong();
   Ui::MainWindow *ui;
-  PlaybackBackendManager *backendManager;
-  PlaybackQueue playbackQueue_;
-  PlaybackManager control;
   ColumnRegistry columnRegistry_;
   GlobalColumnLayoutManager columnLayoutManager_;
   DatabaseManager databaseManager_;
@@ -104,6 +86,7 @@ private:
   // Child QObject created after ui->setupUi, so UI widgets (tabs, views,
   // models) are destroyed before the playlists they show.
   PlaylistCollection *playlists_ = nullptr;
+  PlaybackController *playback_ = nullptr;
   PlaylistTabs *playlistTabs;
   CoverArtPresenter *coverArt_ = nullptr;
   LyricsPresenter *lyrics_ = nullptr;
@@ -111,16 +94,7 @@ private:
   ISystemMediaInterface *sysMedia;
   NowPlayingDisplay nowPlayingDisplay_;
   QString defaultWindowTitle_;
-  // The song most recently passed to the backend by playSong, or -1.
-  int currentTrackPk_ = -1;
-  PlayCompletionTracker playCompletionTracker_;
   CloudPlayStatsSyncCoordinator cloudPlayStatsSyncCoordinator_;
   bool playlistReady_ = false;
-  int consecutivePlaybackFailures_ = 0;
-  // Runs next() after a failure from the event loop rather than recursively:
-  // the next() that hit the failure finishes first, so its selection update
-  // does not override the skip's, and a long run of unplayable songs cannot
-  // overflow the stack. stop() cancels a pending skip.
-  QTimer skipFailedSongTimer_;
 };
 #endif // MAINWINDOW_H

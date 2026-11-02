@@ -132,6 +132,8 @@ set(PROJECT_SOURCES
   playbackbackendmanager.cpp
   playbackbuttonstyle.h
   playbackbuttonstyle.cpp
+  playbackcontroller.h
+  playbackcontroller.cpp
   playbackmanager.h
   playbackmanager.cpp
   playbackpolicy.h

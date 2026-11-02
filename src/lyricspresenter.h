@@ -23,9 +23,9 @@ public:
 
   // Loads the song's lyrics (see LyricsLoader::resolveLyrics).
   // remainingFields are the tag fields from the refresh that have no column.
-  void showSong(
-      const MSong &song,
-      const std::unordered_map<std::string, std::string> &remainingFields);
+  void
+  showSong(const MSong &song,
+           const std::unordered_map<std::string, std::string> &remainingFields);
   void clear();
   // Highlights the lyrics line for the playback position.
   void setPositionMs(qint64 positionMs);

@@ -15,8 +15,9 @@ Two topics have their own files:
 `MainWindow` wires the subsystems together. Songs and play stats live in
 `SongLibrary`, stored in SQLite (`DatabaseManager`) and described by
 `ColumnRegistry`. Playlists (`Playlist`, `PlaylistCollection`) order songs,
-`PlaybackQueue` and `PlaybackManager` decide what plays, and an `AudioPlayer`
-backend (Qt Multimedia or GStreamer) plays it. Qt models, widgets and dialogs
+`PlaybackQueue` and `PlaybackManager` decide what plays, `PlaybackController`
+runs playback on top of them, and an `AudioPlayer` backend (Qt Multimedia or
+GStreamer) plays it. Qt models, widgets and dialogs
 (`PlaylistTableModel`, `PlaylistTabs`, ...) only present backend state.
 
 * Startup: load the library on a worker thread, then build playlists and tabs
@@ -36,7 +37,7 @@ The backend must not depend on how (or whether) it is displayed.
 
 * Backend: `SongLibrary`, `DatabaseManager`, `Playlist`, `PlaylistCollection`,
   `PlaybackQueue`, `PlaybackManager`, playback policies,
-  `PlayCompletionTracker`.
+  `PlayCompletionTracker`, `PlaybackController`.
 * Frontend (Qt view adapters and widgets): `PlaylistTableModel`,
   `PlaylistTabs`, `LibrarySearchResultsModel`, dialogs, `MainWindow`.
 
@@ -105,10 +106,13 @@ The top-level window and what it owns.
 
 * `MainWindow`
   * Wires the app’s major subsystems.
-  * Owns playback actions, settings integration, and top-level UI flows.
-  * Owns `PlaylistCollection`, created as a child `QObject` right after
-    `ui->setupUi(...)`. Children are destroyed in creation order, so the UI
-    (tabs, views, models) is destroyed before the playlists it shows.
+  * Owns settings integration and top-level UI flows, and connects the
+    playback actions, buttons and system media requests to
+    `PlaybackController`.
+  * Owns `PlaylistCollection` and then `PlaybackController`, created as child
+    `QObject`s right after `ui->setupUi(...)`. Children are destroyed in
+    creation order, so the UI (tabs, views, models) is destroyed before the
+    playlists and playback state it shows.
   * Starts file-backed library loading on a worker thread during startup and
     hydrates UI state after the library snapshot is ready.
 
@@ -220,7 +224,7 @@ unplayable songs are skipped, and the audio backends.
     playlist)` reports changes.
   * Stores `Playlist` pointers but only compares them, never dereferences
     them. `removePlaylist(playlist)` drops that playlist's current song and
-    queued entries; `MainWindow` calls it on
+    queued entries; `PlaybackController` calls it on
     `PlaylistCollection::playlistAboutToBeRemoved`, while the id still resolves
     to the `Playlist`.
 * `PlaybackManager` (backend)
@@ -230,7 +234,27 @@ unplayable songs are skipped, and the audio backends.
     songs no longer in their playlist, and the policies treat a current song no
     longer in the playlist as no current song (sequential Next starts at the
     first row, Prev at the last).
-* Playback stop and failure handling (`MainWindow`)
+* `PlaybackController` (backend)
+  * Runs playback: the transport commands (play, pause, toggle, stop, next,
+    prev, random, play a row, seek), starting a song on the backend, skipping
+    unplayable songs and counting completed plays. Owns `PlaybackQueue`,
+    `PlaybackManager` and `PlaybackBackendManager`. The first `setBackend`
+    creates the backend; `MainWindow` calls it after starting the library
+    load, so creating the backend (about 250 ms for Qt Multimedia on a cold
+    start) overlaps the load on the worker thread.
+  * Knows nothing about widgets. `MainWindow` gives it the shown playlist and
+    the `Playback follows cursor` row as callbacks, and shows what its signals
+    report: `songAboutToStart` (before the source is set, since the backend
+    may report duration and position during `setSource`), `songStarted`,
+    `playbackStateChanged` (resume, pause, stop), `movedToRow` (Next, Prev,
+    Random), `playbackFailed`, `playCounted`, and the backend's position,
+    duration and bitrate. The backend's signals reach `MainWindow` only
+    through it, so a backend switch (`setBackend`) needs no reconnecting in
+    the window. A backend switch stops playback like `stop()`.
+  * Transport commands are ignored until `setReady(true)`, which
+    `MainWindow` calls once the library and playlists are loaded, and until
+    the backend exists.
+* Playback stop and failure handling (`PlaybackController`)
   * Next with nothing to play (the shown playlist is empty) stops playback.
   * Removing the playlist that is playing stops playback before
     `PlaybackQueue::removePlaylist` drops its current song.
@@ -243,11 +267,12 @@ unplayable songs are skipped, and the audio backends.
     first, then `Playback follows cursor`, then the playback order, and with
     `Cursor follows playback` on the selection moves to the song that plays.
     It runs from a zero-delay timer, not recursively, so the `next()` that hit
-    the failure finishes (including its selection update) before the skip
+    the failure finishes (including its `movedToRow`) before the skip
     starts; `stop()` cancels a pending skip.
   * After as many consecutive failures as the shown playlist has songs,
-    playback stops and the status bar shows `Cannot play file: <path>`. The
-    count resets when playback position advances or on stop.
+    playback stops and `playbackFailed(path)` is emitted; `MainWindow` shows
+    `Cannot play file: <path>` in the status bar. The count resets when
+    playback position advances or on stop.
 * Playback policies (`PlaybackPolicySequential`, `PlaybackPolicyShuffle`)
   * `PlaybackPolicyShuffle` sizes its history to half the playlist and follows
     size changes through `Playlist` insert/remove/reset signals; it
@@ -257,12 +282,13 @@ unplayable songs are skipped, and the audio backends.
     playlist and the history holds at most half the rows, so a candidate
     always exists.
   * `Playback -> Playback follows cursor` passes the first selected row from
-    `MainWindow` into `PlaybackManager::next(...)`: queued songs still take
+    `MainWindow` (through `PlaybackController`) into
+    `PlaybackManager::next(...)`: queued songs still take
     priority, then the selected row may be played once if it is not already
     current.
-  * `Playback -> Cursor follows playback` gates whether playback-driven song
-    changes call `PlaylistTabs::navigateIndex(...)` to select and scroll to the
-    new row.
+  * `Playback -> Cursor follows playback` gates whether `MainWindow` answers
+    `PlaybackController::movedToRow` by calling
+    `PlaylistTabs::navigateIndex(...)` to select and scroll to the new row.
   * The toolbar random button is a one-shot random jump within the current
     playlist: it picks a random row directly, calls `playIndex(...)`, and does
     not use shuffle policy history or guarantee non-duplicate selections.
@@ -274,7 +300,8 @@ unplayable songs are skipped, and the audio backends.
     macOS output-device result is startup-only; later output refreshes query
     CoreAudio directly.
 * `AudioPlayer` (+ concrete backends)
-  * Transport and volume control consumed by `MainWindow`.
+  * Transport and volume control consumed by `PlaybackController`, which
+    re-applies the volume after a backend switch.
   * Exposes `bitrateChanged(bitsPerSecond)` for playback-time bitrate updates.
   * `AudioPlayer` stores clamped volume as an integer percentage (`0..100`);
     `QtAudioPlayer` maps it to `QAudioOutput::setVolume(...)`, and
@@ -299,21 +326,23 @@ Where lyrics and cover images come from, and the lyrics panel settings.
 * `LyricsPresenter` (frontend)
   * Shows the playing song's lyrics in `LyricsPanel`, owns the
     `LyricsManager`, and applies the lyrics panel style settings.
-  * `MainWindow` calls `showSong(...)` from `playSong`, `clear()` on stop,
-    and `setPositionMs(...)` from its `positionChanged` handler. The position
-    goes through `MainWindow` because that handler is reconnected when the
-    playback backend changes; a direct connection to the player would stay on
-    the old player.
+  * `MainWindow` calls `showSong(...)` on `PlaybackController::songStarted`,
+    `clear()` on stop, and `setPositionMs(...)` on
+    `PlaybackController::positionChanged`. The position comes from the
+    controller, not the player, because a backend switch replaces the player;
+    a direct connection would stay on the old one.
 * `CoverArtPresenter` (frontend)
   * Shows the playing song's embedded cover in the cover label, scaled to the
     label on resize and splitter moves.
-  * `MainWindow` calls `showSong(...)` from `playSong` and `clear()` on stop.
+  * `MainWindow` calls `showSong(...)` on `PlaybackController::songStarted`
+    (after `setTitleAndArtist`, which clears the system artwork) and
+    `clear()` on stop.
   * Emits `artworkChanged(imageData)` for a song with an embedded cover;
     `MainWindow` connects it to `ISystemMediaInterface::setArtwork`.
 * The two presenters do not know about each other; `MainWindow` drives both.
 * `LyricsLoader` / `LyricsManager`
   * Lyrics fetch + timed line updates from playback position.
-  * On play, `MainWindow` refreshes song metadata once;
+  * On play, `PlaybackController` refreshes song metadata once;
     `LyricsLoader::resolveLyrics(...)` then picks the first non-empty of the
     `attr:unsynced_lyrics` and `attr:lyrics` fields, then of the
     `unsynced_lyrics` and `lyrics` tag fields with no column. If none is set
@@ -511,10 +540,10 @@ When a play counts, and where last-played and play counts are stored.
     while playing; a seek adds no listened time. It keeps only the session
     and keeps the duration across sessions, since the backend may not
     report an unchanged duration again (replaying the same song).
-  * `MainWindow::maybeCountCompletedPlay()` reacts, on position updates and
-    `EndOfMedia`: `SongLibrary::incrementPlayCount`, then
-    `markCounted()`, `PlaylistCollection::notifySongChanged` and the cloud
-    push.
+  * `PlaybackController` reacts, on position updates and `EndOfMedia`:
+    `SongLibrary::incrementPlayCount`, then `markCounted()`,
+    `PlaylistCollection::notifySongChanged` and `playCounted(songPk)`, which
+    `MainWindow` connects to the cloud push.
 * Stats are stored by song identity, so multiple files with the same normalized identity share counters.
 
 ### Playlist persistence

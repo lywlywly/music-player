@@ -9,16 +9,13 @@
 #include "systemmediainterfacefactory.h"
 #include <QActionGroup>
 #include <QApplication>
-#include <QDateTime>
 #include <QDir>
 #include <QEvent>
 #include <QFileDialog>
-#include <QFileInfo>
 #include <QFutureWatcher>
 #include <QKeySequence>
 #include <QMessageBox>
 #include <QProgressDialog>
-#include <QRandomGenerator>
 #include <QResource>
 #include <QSettings>
 #include <QSqlDatabase>
@@ -26,7 +23,6 @@
 #include <QStatusBar>
 #include <QStyleHints>
 #include <QThread>
-#include <QTimer>
 #include <QtConcurrent>
 #include <algorithm>
 #include <utility>
@@ -75,16 +71,18 @@ SongLibrary::Snapshot loadSongLibrarySnapshot(const QString &databaseName) {
   return library.snapshot();
 }
 
-void prewarmSelectedPlaybackBackend() {
+PlaybackBackendManager::Backend savedPlaybackBackend() {
   QSettings settings;
-  const int backendIndex =
+  return static_cast<PlaybackBackendManager::Backend>(
       settings
           .value(
               "playback/backend",
               static_cast<int>(PlaybackBackendManager::Backend::QMediaPlayer))
-          .toInt();
-  if (static_cast<PlaybackBackendManager::Backend>(backendIndex) ==
-      PlaybackBackendManager::Backend::GStreamer) {
+          .toInt());
+}
+
+void prewarmSelectedPlaybackBackend() {
+  if (savedPlaybackBackend() == PlaybackBackendManager::Backend::GStreamer) {
     GstAudioPlayer::prewarmStartup();
   }
 }
@@ -111,7 +109,7 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::MainWindow(QString databaseName, QString connectionName,
                        QWidget *parent)
-    : QMainWindow(parent), ui(new Ui::MainWindow), control{playbackQueue_},
+    : QMainWindow(parent), ui(new Ui::MainWindow),
       columnLayoutManager_(columnRegistry_, this),
       databaseManager_(columnRegistry_, std::move(databaseName),
                        std::move(connectionName)),
@@ -122,6 +120,7 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
   Q_INIT_RESOURCE(resources);
   ui->setupUi(this);
   playlists_ = new PlaylistCollection(songLibrary, databaseManager_, this);
+  playback_ = new PlaybackController(songLibrary, *playlists_, this);
   coverArt_ = new CoverArtPresenter(ui->label, this);
   lyrics_ = new LyricsPresenter(ui->lyricsPanel, this);
   applyDisplayThemeFromSettings();
@@ -132,7 +131,7 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
   initCloudSync();
   setUpPlaylist();
   initSettings();
-  initPlaybackBackend();
+  setUpPlayback();
   initVolumeControl();
   setUpPlaybackActions();
   lyrics_->applySettings();
@@ -149,18 +148,18 @@ void MainWindow::initCloudSync() {
 
 void MainWindow::setupSystemMediaInterface() {
   sysMedia = createSystemMediaInterface(this);
-  connect(sysMedia, &ISystemMediaInterface::playRequested, this,
-          &MainWindow::play);
-  connect(sysMedia, &ISystemMediaInterface::pauseRequested, this,
-          &MainWindow::pause);
-  connect(sysMedia, &ISystemMediaInterface::toggleRequested, this,
-          &MainWindow::toggle);
-  connect(sysMedia, &ISystemMediaInterface::nextRequested, this,
-          &MainWindow::next);
-  connect(sysMedia, &ISystemMediaInterface::previousRequested, this,
-          &MainWindow::prev);
-  connect(sysMedia, &ISystemMediaInterface::seekRequested, this,
-          [this](qint64 positionMs) { seek(positionMs); });
+  connect(sysMedia, &ISystemMediaInterface::playRequested, playback_,
+          &PlaybackController::play);
+  connect(sysMedia, &ISystemMediaInterface::pauseRequested, playback_,
+          &PlaybackController::pause);
+  connect(sysMedia, &ISystemMediaInterface::toggleRequested, playback_,
+          &PlaybackController::toggle);
+  connect(sysMedia, &ISystemMediaInterface::nextRequested, playback_,
+          &PlaybackController::next);
+  connect(sysMedia, &ISystemMediaInterface::previousRequested, playback_,
+          &PlaybackController::prev);
+  connect(sysMedia, &ISystemMediaInterface::seekRequested, playback_,
+          &PlaybackController::seek);
   connect(coverArt_, &CoverArtPresenter::artworkChanged, sysMedia,
           &ISystemMediaInterface::setArtwork);
 }
@@ -261,23 +260,11 @@ void MainWindow::finishSetUpPlaylist(SongLibrary::Snapshot &&snapshot) {
   columnLayoutManager_.refreshFromRegistry();
   songLibrary.replaceWithSnapshot(std::move(snapshot));
   playlists_->loadAll();
-  connect(playlists_, &PlaylistCollection::playlistAboutToBeRemoved, this,
-          [this](int playlistId) {
-            const Playlist *removed = playlists_->playlist(playlistId);
-            // Removing the playing playlist stops playback; otherwise the
-            // queue would drop the current song while audio keeps playing.
-            if (playbackQueue_.getCurrentPk().second == removed) {
-              stop();
-            }
-            playbackQueue_.removePlaylist(removed);
-          });
-  playlistTabs->init(&songLibrary, &playbackQueue_, &control,
+  playlistTabs->init(&songLibrary, &playback_->queue(), &playback_->manager(),
                      playbackOrderMenuActionGroup, &columnRegistry_,
                      &columnLayoutManager_, playlists_);
-  connect(playlistTabs, &PlaylistTabs::doubleClicked, [this](QModelIndex i) {
-    MSong song = control.playIndex(i.row());
-    playSong(song, i.row(), playlistTabs->currentPlaylist());
-  });
+  connect(playlistTabs, &PlaylistTabs::doubleClicked, playback_,
+          [this](QModelIndex i) { playback_->playRow(i.row()); });
   // playlist operations
   connect(ui->actionOpen, &QAction::triggered, this, &MainWindow::open);
   connect(ui->actionAdd_folder, &QAction::triggered, this,
@@ -289,6 +276,7 @@ void MainWindow::finishSetUpPlaylist(SongLibrary::Snapshot &&snapshot) {
     }
   });
   playlistReady_ = true;
+  playback_->setReady(true);
   setPlaylistDependentActionsEnabled(true);
   updatePlaybackTimeStatus();
   cloudPlayStatsSyncCoordinator_.startSync();
@@ -320,12 +308,7 @@ void MainWindow::initSettings() {
     dialog->setModal(true);
     connect(dialog, &SettingsDialog::backendChanged, this,
             [this](PlaybackBackendManager::Backend backend) {
-              if (backendManager->currentBackend() != backend) {
-                backendManager->setBackend(backend);
-                control.stop();
-                setUpPlaybackBackend();
-                applyVolumeToCurrentBackend();
-              }
+              playback_->setBackend(backend);
             });
     connect(dialog, &SettingsDialog::customFieldsChanged, this, [this]() {
       if (!columnRegistry_.loadDynamicColumns(databaseManager_.db())) {
@@ -369,38 +352,82 @@ void MainWindow::initSettings() {
   });
 }
 
-void MainWindow::initPlaybackBackend() {
-  QSettings settings;
-  int backendIndex =
-      settings
-          .value(
-              "playback/backend",
-              static_cast<int>(PlaybackBackendManager::Backend::QMediaPlayer))
-          .toInt();
-  auto backend = static_cast<PlaybackBackendManager::Backend>(backendIndex);
-  backendManager = new PlaybackBackendManager(backend, this);
-  setUpPlaybackBackend();
+void MainWindow::setUpPlayback() {
+  // Created after setUpPlaylist, so a file-backed library loads on its worker
+  // thread meanwhile.
+  playback_->setBackend(savedPlaybackBackend());
+  playback_->setShownPlaylist(
+      [this]() { return playlistTabs->currentPlaylist(); });
+  playback_->setPreferredNextRow([this]() {
+    return ui->actionPlayback_follows_cursor->isChecked()
+               ? playlistTabs->firstSelectedRow()
+               : -1;
+  });
+  connect(playback_, &PlaybackController::songAboutToStart, this,
+          [this](const MSong &song) { nowPlayingDisplay_.startSong(song); });
+  connect(
+      playback_, &PlaybackController::songStarted, this,
+      [this](
+          const MSong &song,
+          const std::unordered_map<std::string, std::string> &remainingFields) {
+        sysMedia->setTitleAndArtist(
+            QString::fromStdString(song.at("title").text),
+            QString::fromStdString(song.at("artist").text));
+        lyrics_->showSong(song, remainingFields);
+        // After setTitleAndArtist, which clears the system artwork.
+        coverArt_->showSong(song);
+        updatePlaybackTimeStatus();
+      });
+  connect(playback_, &PlaybackController::playbackStateChanged, this,
+          &MainWindow::playbackStateChanged);
+  connect(playback_, &PlaybackController::movedToRow, this,
+          &MainWindow::navigateIndex);
+  connect(playback_, &PlaybackController::seeking, this,
+          [this](qint64 positionMs) { sysMedia->setPosition(positionMs); });
+  connect(playback_, &PlaybackController::songFinished, this,
+          [this]() { QApplication::alert(this); });
+  connect(playback_, &PlaybackController::playCounted,
+          &cloudPlayStatsSyncCoordinator_,
+          &CloudPlayStatsSyncCoordinator::pushIncrementForSongPk);
+  connect(
+      playback_, &PlaybackController::playbackFailed, this,
+      [this](const QString &filepath) {
+        statusBar()->showMessage(
+            tr("Cannot play file: %1").arg(QDir::toNativeSeparators(filepath)));
+      });
+  connect(playback_, &PlaybackController::positionChanged, this,
+          &MainWindow::positionChanged);
+  connect(playback_, &PlaybackController::durationChanged, this,
+          &MainWindow::durationChanged);
+  connect(playback_, &PlaybackController::bitrateChanged, this,
+          &MainWindow::bitrateChanged);
 }
 
 void MainWindow::setUpPlaybackActions() {
-  connect(ui->actionPlay, &QAction::triggered, this, &MainWindow::play);
-  connect(ui->play_button, &QAbstractButton::clicked, this, &MainWindow::play);
-  connect(ui->actionPause, &QAction::triggered, this, &MainWindow::pause);
-  connect(ui->pause_button, &QAbstractButton::clicked, this,
-          &MainWindow::pause);
-  connect(ui->actionStop, &QAction::triggered, this, &MainWindow::stop);
-  connect(ui->actionNext, &QAction::triggered, this, &MainWindow::next);
-  connect(ui->actionPrevious, &QAction::triggered, this, &MainWindow::prev);
-  connect(ui->stop_button, &QAbstractButton::clicked, this, &MainWindow::stop);
-  connect(ui->next_button, &QAbstractButton::clicked, this, &MainWindow::next);
-  connect(ui->prev_button, &QAbstractButton::clicked, this, &MainWindow::prev);
-  connect(ui->random_button, &QAbstractButton::clicked, this,
-          &MainWindow::playRandom);
-  skipFailedSongTimer_.setSingleShot(true);
-  skipFailedSongTimer_.setInterval(0);
-  connect(&skipFailedSongTimer_, &QTimer::timeout, this, &MainWindow::next);
-  connect(ui->horizontalSlider, &QSlider::sliderReleased, this,
-          [this]() { seek(ui->horizontalSlider->value()); });
+  connect(ui->actionPlay, &QAction::triggered, playback_,
+          &PlaybackController::play);
+  connect(ui->play_button, &QAbstractButton::clicked, playback_,
+          &PlaybackController::play);
+  connect(ui->actionPause, &QAction::triggered, playback_,
+          &PlaybackController::pause);
+  connect(ui->pause_button, &QAbstractButton::clicked, playback_,
+          &PlaybackController::pause);
+  connect(ui->actionStop, &QAction::triggered, playback_,
+          &PlaybackController::stop);
+  connect(ui->stop_button, &QAbstractButton::clicked, playback_,
+          &PlaybackController::stop);
+  connect(ui->actionNext, &QAction::triggered, playback_,
+          &PlaybackController::next);
+  connect(ui->next_button, &QAbstractButton::clicked, playback_,
+          &PlaybackController::next);
+  connect(ui->actionPrevious, &QAction::triggered, playback_,
+          &PlaybackController::prev);
+  connect(ui->prev_button, &QAbstractButton::clicked, playback_,
+          &PlaybackController::prev);
+  connect(ui->random_button, &QAbstractButton::clicked, playback_,
+          &PlaybackController::playRandom);
+  connect(ui->horizontalSlider, &QSlider::sliderReleased, playback_,
+          [this]() { playback_->seek(ui->horizontalSlider->value()); });
 }
 
 void MainWindow::applyDisplayThemeFromSettings() {
@@ -435,200 +462,39 @@ void MainWindow::setUpSplitter() {
           &CoverArtPresenter::updateCoverSize);
 }
 
-void MainWindow::setUpPlaybackBackend() {
-  connect(backendManager->player(), &AudioPlayer::mediaStatusChanged, this,
-          &MainWindow::statusChanged);
-  connect(backendManager->player(), &AudioPlayer::durationChanged, this,
-          &MainWindow::durationChanged);
-  connect(backendManager->player(), &AudioPlayer::positionChanged, this,
-          &MainWindow::positionChanged);
-  connect(backendManager->player(), &AudioPlayer::bitrateChanged, this,
-          &MainWindow::bitrateChanged);
-}
-
 void MainWindow::initVolumeControl() {
   QSettings settings;
   const int savedVolume = clampVolumePercent(
       settings.value(kVolumeSettingsKey, kDefaultVolumePercent).toInt());
   ui->volumeSlider->setValue(savedVolume);
-  applyVolumeToCurrentBackend();
+  playback_->setVolume(savedVolume);
 
   connect(ui->volumeSlider, &QSlider::valueChanged, this, [this](int volume) {
     const int clampedVolume = clampVolumePercent(volume);
     QSettings settings;
     settings.setValue(kVolumeSettingsKey, clampedVolume);
-    if (backendManager && backendManager->player()) {
-      backendManager->player()->setVolume(clampedVolume);
-    }
+    playback_->setVolume(clampedVolume);
   });
 }
 
-void MainWindow::applyVolumeToCurrentBackend() {
-  if (!backendManager || !backendManager->player()) {
-    return;
+void MainWindow::playbackStateChanged(PlaybackQueue::PlaybackStatus status) {
+  ISystemMediaInterface::PlaybackState systemState =
+      ISystemMediaInterface::PlaybackState::Stopped;
+  switch (status) {
+  case PlaybackQueue::PlaybackStatus::Playing:
+    systemState = ISystemMediaInterface::PlaybackState::Playing;
+    break;
+  case PlaybackQueue::PlaybackStatus::Paused:
+    systemState = ISystemMediaInterface::PlaybackState::Paused;
+    break;
+  case PlaybackQueue::PlaybackStatus::None:
+    nowPlayingDisplay_.stopSong();
+    lyrics_->clear();
+    coverArt_->clear();
+    break;
   }
-  backendManager->player()->setVolume(
-      clampVolumePercent(ui->volumeSlider->value()));
-}
-
-void MainWindow::playSong(const MSong &song, int row, Playlist *pl) {
-  const int songPk = pl->getPkByIndex(row);
-  const std::string filepath = song.at("filepath").text;
-  if (filepath.empty()) {
-    qFatal("playSong: filepath is empty");
-  }
-  const QString filepathText = QString::fromStdString(filepath);
-  if (!QFileInfo::exists(filepathText)) {
-    handlePlaybackFailure(filepathText);
-    return;
-  }
-  std::unordered_map<std::string, std::string> remainingFields;
-  const MSong &activeSong =
-      songLibrary.refreshSongFromFile(filepath, &remainingFields);
-  nowPlayingDisplay_.startSong(activeSong);
-  // Set before setSource: InvalidMedia handling reads it (see statusChanged).
-  currentTrackPk_ = songPk;
-  playCompletionTracker_.startSession();
-  songLibrary.markSongPlayedAtStart(songPk, unixNowSeconds());
-  playlists_->notifySongChanged(songPk);
-
-  backendManager->player()->setSource(
-      QString::fromStdString(activeSong.at("filepath").text));
-  backendManager->player()->play();
-  sysMedia->setTitleAndArtist(
-      QString::fromStdString(activeSong.at("title").text),
-      QString::fromStdString(activeSong.at("artist").text));
-  lyrics_->showSong(activeSong, remainingFields);
-  coverArt_->showSong(activeSong);
-  control.play();
   updatePlaybackTimeStatus();
-}
-
-void MainWindow::handlePlaybackFailure(const QString &filepath) {
-  qWarning() << "Cannot play file:" << filepath;
-  // Like switching songs, the previous song stops right away. Otherwise its
-  // position updates would reset the failure count and its EndOfMedia could
-  // start another skip.
-  backendManager->player()->stop();
-  ++consecutivePlaybackFailures_;
-  const Playlist *pl = playlistTabs->currentPlaylist();
-  const int maxFailures = std::max(1, pl != nullptr ? pl->songCount() : 0);
-  if (consecutivePlaybackFailures_ < maxFailures) {
-    skipFailedSongTimer_.start();
-    return;
-  }
-  stop();
-  statusBar()->showMessage(
-      tr("Cannot play file: %1").arg(QDir::toNativeSeparators(filepath)));
-}
-
-void MainWindow::next() {
-  if (!playlistReady_) {
-    return;
-  }
-
-  const int preferredRow = ui->actionPlayback_follows_cursor->isChecked()
-                               ? playlistTabs->firstSelectedRow()
-                               : -1;
-  const auto &[song, row, pl] = control.next(preferredRow);
-  // Nothing to play (the current playlist is empty): stop instead of leaving
-  // the previous song playing with no current song.
-  if (row < 0) {
-    stop();
-    return;
-  }
-
-  playSong(song, row, pl);
-  navigateIndex(row, pl);
-}
-
-void MainWindow::prev() {
-  if (!playlistReady_) {
-    return;
-  }
-  const auto &[song, row, pl] = control.prev();
-  if (row < 0)
-    return;
-
-  playSong(song, row, pl);
-  navigateIndex(row, pl);
-}
-
-void MainWindow::playRandom() {
-  if (!playlistReady_) {
-    return;
-  }
-
-  Playlist *pl = playlistTabs->currentPlaylist();
-  if (pl == nullptr || pl->empty()) {
-    return;
-  }
-
-  const int row = QRandomGenerator::global()->bounded(pl->songCount());
-  MSong song = control.playIndex(row);
-  playSong(song, row, pl);
-  navigateIndex(row, pl);
-}
-
-void MainWindow::play() {
-  if (!playlistReady_) {
-    return;
-  }
-  if (control.getStatus() == PlaybackQueue::PlaybackStatus::None) {
-    Playlist *pl = playlistTabs->currentPlaylist();
-    if (pl->empty()) {
-      return;
-    }
-    // Resume the last played song, or start from the top if it is not in
-    // this playlist (new playlist, or the song was removed).
-    const int lastPlayedPk = pl->getLastPlayed();
-    const int row =
-        pl->containsPk(lastPlayedPk) ? pl->getIndexByPk(lastPlayedPk) : 0;
-    MSong song = control.playIndex(row);
-    playSong(song, row, pl);
-  } else {
-    backendManager->player()->play();
-    control.play();
-    updatePlaybackTimeStatus();
-    sysMedia->setPlaybackState(ISystemMediaInterface::PlaybackState::Playing);
-  }
-}
-
-void MainWindow::pause() {
-  if (!playlistReady_) {
-    return;
-  }
-  if (control.getStatus() == PlaybackQueue::PlaybackStatus::None)
-    return;
-  backendManager->player()->pause();
-  control.pause();
-  updatePlaybackTimeStatus();
-  sysMedia->setPlaybackState(ISystemMediaInterface::PlaybackState::Paused);
-}
-
-void MainWindow::toggle() {
-  if (!playlistReady_) {
-    return;
-  }
-  if (control.getStatus() == PlaybackQueue::PlaybackStatus::Playing)
-    pause();
-  else
-    play();
-}
-
-void MainWindow::stop() {
-  if (!playlistReady_) {
-    return;
-  }
-  skipFailedSongTimer_.stop();
-  consecutivePlaybackFailures_ = 0;
-  backendManager->player()->stop();
-  control.stop();
-  nowPlayingDisplay_.stopSong();
-  lyrics_->clear();
-  coverArt_->clear();
-  updatePlaybackTimeStatus();
-  sysMedia->setPlaybackState(ISystemMediaInterface::PlaybackState::Stopped);
+  sysMedia->setPlaybackState(systemState);
 }
 
 void MainWindow::navigateIndex(int row, Playlist *pl) {
@@ -652,7 +518,6 @@ void MainWindow::resizeEvent(QResizeEvent *event) {
 
 void MainWindow::durationChanged(qint64 newDuration) {
   nowPlayingDisplay_.setDurationMs(newDuration);
-  playCompletionTracker_.setDurationMs(newDuration);
   ui->horizontalSlider->setMaximum(newDuration);
   updatePlaybackTimeStatus();
   sysMedia->setDuration(newDuration);
@@ -660,14 +525,6 @@ void MainWindow::durationChanged(qint64 newDuration) {
 
 void MainWindow::positionChanged(qint64 progress) {
   nowPlayingDisplay_.setPositionMs(progress);
-  // Playback is progressing, so the current song is playable.
-  if (progress > 0) {
-    consecutivePlaybackFailures_ = 0;
-  }
-  playCompletionTracker_.recordPositionMs(
-      progress, control.getStatus() == PlaybackQueue::PlaybackStatus::Playing);
-  maybeCountCompletedPlay();
-
   if (!ui->horizontalSlider->isSliderDown())
     ui->horizontalSlider->setValue(progress);
   updatePlaybackTimeStatus();
@@ -682,10 +539,11 @@ void MainWindow::bitrateChanged(qint64 bitsPerSecond) {
 }
 
 const MSong *MainWindow::currentSong() const {
-  if (currentTrackPk_ < 0) {
+  const int songPk = playback_->currentSongPk();
+  if (songPk < 0) {
     return nullptr;
   }
-  return &songLibrary.getSongByPK(currentTrackPk_);
+  return &songLibrary.getSongByPK(songPk);
 }
 
 void MainWindow::updateSettingsDisplayPreviewContext(SettingsDialog *dialog) {
@@ -693,59 +551,16 @@ void MainWindow::updateSettingsDisplayPreviewContext(SettingsDialog *dialog) {
     return;
   }
   dialog->setDisplayExpressionPreviewContext(
-      currentSong(), nowPlayingDisplay_.runtimeSymbols(control.getStatus()));
+      currentSong(), nowPlayingDisplay_.runtimeSymbols(playback_->status()));
 }
 
 void MainWindow::updatePlaybackTimeStatus() {
-  const PlaybackQueue::PlaybackStatus status = control.getStatus();
+  const PlaybackQueue::PlaybackStatus status = playback_->status();
   const MSong *song = currentSong();
   updateSettingsDisplayPreviewContext(findChild<SettingsDialog *>());
   statusBar()->showMessage(nowPlayingDisplay_.statusBarText(status, song));
   setWindowTitle(
       nowPlayingDisplay_.windowTitle(status, song, defaultWindowTitle_));
-}
-
-void MainWindow::seek(int mseconds) {
-  if (!playlistReady_) {
-    return;
-  }
-  playCompletionTracker_.seeked();
-  sysMedia->setPosition(mseconds);
-  backendManager->player()->setPosition(mseconds);
-}
-
-void MainWindow::statusChanged(QMediaPlayer::MediaStatus status) {
-  // TODO
-  // handleCursor(status);
-  switch (status) {
-  case QMediaPlayer::NoMedia:
-    break;
-  case QMediaPlayer::LoadedMedia:
-    break;
-  case QMediaPlayer::LoadingMedia:
-    break;
-  case QMediaPlayer::BufferingMedia:
-    break;
-  case QMediaPlayer::BufferedMedia:
-    break;
-  case QMediaPlayer::StalledMedia:
-    break;
-  case QMediaPlayer::EndOfMedia:
-    maybeCountCompletedPlay();
-    QApplication::alert(this);
-    this->next();
-    break;
-  case QMediaPlayer::InvalidMedia:
-    // InvalidMedia does not say which source failed. currentTrackPk_ is the
-    // song passed to setSource: playSong sets it before calling setSource,
-    // so keep that order.
-    if (control.getStatus() != PlaybackQueue::PlaybackStatus::None &&
-        currentTrackPk_ >= 0) {
-      handlePlaybackFailure(QString::fromStdString(
-          songLibrary.getSongByPK(currentTrackPk_).at("filepath").text));
-    }
-    break;
-  }
 }
 
 void MainWindow::open() {
@@ -818,22 +633,6 @@ void MainWindow::openLibrarySearchDialog() {
 }
 
 MainWindow::~MainWindow() { delete ui; }
-
-void MainWindow::maybeCountCompletedPlay() {
-  if (currentTrackPk_ < 0 || !playCompletionTracker_.shouldCount()) {
-    return;
-  }
-  if (!songLibrary.incrementPlayCount(currentTrackPk_)) {
-    return;
-  }
-  playCompletionTracker_.markCounted();
-  playlists_->notifySongChanged(currentTrackPk_);
-  cloudPlayStatsSyncCoordinator_.pushIncrementForSongPk(currentTrackPk_);
-}
-
-qint64 MainWindow::unixNowSeconds() {
-  return QDateTime::currentSecsSinceEpoch();
-}
 
 void MainWindow::triggerManualCloudRebase() {
   if (!playlistReady_) {

@@ -122,8 +122,7 @@ for the rest of the app.
     symbols: position, duration and the bitrate chosen for the song (see
     "Bitrate display behavior").
   * Playback status and the current song are passed in on each call, not
-    stored, so they cannot go stale; `PlaybackQueue` and `MainWindow` own
-    them.
+    stored, so they cannot go stale; `PlaybackController` owns them.
 * `displayexpression.{h,cpp}`
   * The rules both `NowPlayingDisplay` and `SettingsDialog` use: settings
     keys, the default expressions, "blank means default", parsing with

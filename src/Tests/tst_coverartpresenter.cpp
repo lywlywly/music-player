@@ -35,7 +35,8 @@ private slots:
   void showSong_withoutCover_showsNoCoverText();
 };
 
-void TestCoverArtPresenter::showSong_withCover_showsScaledCoverAndReportsArtwork() {
+void TestCoverArtPresenter::
+    showSong_withCover_showsScaledCoverAndReportsArtwork() {
   QTemporaryDir dir;
   QVERIFY(dir.isValid());
   const QString wav = dir.filePath("cover.wav");
