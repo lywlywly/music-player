@@ -308,8 +308,6 @@ private slots:
   void parse_unqualifiedComputedField_resolvesQualified();
   void parse_runtimeSymbolField_rejectsLengthAlias();
   void runtimeSymbolTable_registersFieldTypesInPool();
-  void parse_defaultStatusBarExpression_withRuntimeSymbols();
-  void parse_defaultWindowTitleExpression_withRuntimeSymbols();
   void evaluate_ifThenElse();
   void evaluate_ifThenElseBooleanBranch();
   void evaluate_ifThenElseNumericBranch();
@@ -856,24 +854,6 @@ void TestLibraryExpression::runtimeSymbolTable_registersFieldTypesInPool() {
       FieldTypePool::instance().find("status:isplaying");
   QVERIFY(isPlaying != nullptr);
   QCOMPARE(isPlaying->valueType, ValueType::Boolean);
-}
-
-void TestLibraryExpression::
-    parse_defaultStatusBarExpression_withRuntimeSymbols() {
-  ColumnRegistry registry;
-  ExprParseResult result = parseLibraryExpression(
-      StatusRuntimeSymbolTable::defaultStatusBarExpression(), registry,
-      StatusRuntimeSymbolTable::expressionSymbols());
-  QVERIFY(result.ok());
-}
-
-void TestLibraryExpression::
-    parse_defaultWindowTitleExpression_withRuntimeSymbols() {
-  ColumnRegistry registry;
-  ExprParseResult result = parseLibraryExpression(
-      StatusRuntimeSymbolTable::defaultWindowTitleExpression(), registry,
-      StatusRuntimeSymbolTable::expressionSymbols());
-  QVERIFY(result.ok());
 }
 
 void TestLibraryExpression::evaluate_ifThenElse() {

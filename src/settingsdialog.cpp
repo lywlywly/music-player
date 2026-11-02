@@ -1,8 +1,5 @@
 #include "settingsdialog.h"
-#include "displayexpressionevalcontext.h"
-#include "libraryexpression_ops.h"
-#include "libraryexpression_parser.h"
-#include "statusruntimesymboltable.h"
+#include "displayexpression.h"
 #include "ui_settingsdialog.h"
 #include "utils.h"
 #include <QApplication>
@@ -46,18 +43,10 @@ SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
           .toBool();
   const int initialLyricsFontSize =
       settings.value("lyrics/font_size", defaultLyricsFontSize).toInt();
-  const QString defaultStatusExpression =
-      StatusRuntimeSymbolTable::defaultStatusBarExpression();
   const QString initialStatusExpression =
-      settings.value("status_bar/expression", defaultStatusExpression)
-          .toString()
-          .trimmed();
-  const QString defaultWindowTitleExpression =
-      StatusRuntimeSymbolTable::defaultWindowTitleExpression();
+      loadDisplayExpressionSetting(DisplayExpressionKind::StatusBar);
   const QString initialWindowTitleExpression =
-      settings.value("window_title/expression", defaultWindowTitleExpression)
-          .toString()
-          .trimmed();
+      loadDisplayExpressionSetting(DisplayExpressionKind::WindowTitle);
   const QString initialDisplayThemeMode =
       settings.value("display/theme_mode", QStringLiteral("system"))
           .toString()
@@ -144,10 +133,9 @@ SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
   statusExpressionEdit_->setMinimumHeight(140);
   statusExpressionEdit_->setSizePolicy(QSizePolicy::Expanding,
                                        QSizePolicy::Expanding);
-  statusExpressionEdit_->setPlainText(initialStatusExpression.isEmpty()
-                                          ? defaultStatusExpression
-                                          : initialStatusExpression);
-  statusExpressionEdit_->setPlaceholderText(defaultStatusExpression);
+  statusExpressionEdit_->setPlainText(initialStatusExpression);
+  statusExpressionEdit_->setPlaceholderText(
+      defaultDisplayExpression(DisplayExpressionKind::StatusBar));
   statusLayout->addWidget(statusExpressionEdit_);
   QLabel *windowTitleExprLabel =
       new QLabel("Window title expression:", statusTab);
@@ -157,10 +145,9 @@ SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
   windowTitleExpressionEdit_->setMinimumHeight(80);
   windowTitleExpressionEdit_->setSizePolicy(QSizePolicy::Expanding,
                                             QSizePolicy::Expanding);
-  windowTitleExpressionEdit_->setPlainText(
-      initialWindowTitleExpression.isEmpty() ? defaultWindowTitleExpression
-                                             : initialWindowTitleExpression);
-  windowTitleExpressionEdit_->setPlaceholderText(defaultWindowTitleExpression);
+  windowTitleExpressionEdit_->setPlainText(initialWindowTitleExpression);
+  windowTitleExpressionEdit_->setPlaceholderText(
+      defaultDisplayExpression(DisplayExpressionKind::WindowTitle));
   statusLayout->addWidget(windowTitleExpressionEdit_);
   QLabel *previewLabel = new QLabel("Preview (active expression):", statusTab);
   statusLayout->addWidget(previewLabel);
@@ -176,9 +163,9 @@ SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
   connect(resetDisplayExpressionsButton_, &QPushButton::clicked, this,
           [this]() {
             statusExpressionEdit_->setPlainText(
-                StatusRuntimeSymbolTable::defaultStatusBarExpression());
+                defaultDisplayExpression(DisplayExpressionKind::StatusBar));
             windowTitleExpressionEdit_->setPlainText(
-                StatusRuntimeSymbolTable::defaultWindowTitleExpression());
+                defaultDisplayExpression(DisplayExpressionKind::WindowTitle));
           });
   const auto bindDisplayExpressionEditor = [this](QPlainTextEdit *editor) {
     connect(editor, &QPlainTextEdit::cursorPositionChanged, this,
@@ -608,14 +595,9 @@ void SettingsDialog::setActiveDisplayExpressionEditor(QPlainTextEdit *editor) {
 }
 
 QString SettingsDialog::evaluateDisplayExpressionPreview(
-    const QString &expressionText, const QString &fallbackExpression) const {
-  const QString expression =
-      expressionText.trimmed().isEmpty() ? fallbackExpression : expressionText;
-  const ExprSymbolResolver resolver(
-      mergeExprSymbols(std::vector<ExprSymbolInfo>(
-                           StatusRuntimeSymbolTable::expressionSymbols()),
-                       columnRegistry_.expressionSymbols()));
-  const ExprParseResult parsed = parseLibraryExpression(expression, resolver);
+    const QString &expressionText, DisplayExpressionKind kind) const {
+  const ExprParseResult parsed = parseDisplayExpression(
+      effectiveDisplayExpression(kind, expressionText), columnRegistry_);
   if (!parsed.ok()) {
     return QStringLiteral("Invalid expression: %1").arg(parsed.error.message);
   }
@@ -637,22 +619,20 @@ QString SettingsDialog::evaluateDisplayExpressionPreview(
     song.insert_or_assign("channels", FieldValue("2", "channels"));
   }
 
-  DisplayExpressionEvalContext context(runtimeSymbols, &song);
-  return runtimeValueToQString(parsed.expr->evaluateValue(context));
+  return evaluateDisplayExpression(*parsed.expr, runtimeSymbols, &song);
 }
 
 void SettingsDialog::updateActiveDisplayExpressionPreview() {
   if (!activeDisplayExpressionPreviewLabel_ || !activeDisplayExpressionEdit_) {
     return;
   }
-  const bool isStatusEditor =
-      activeDisplayExpressionEdit_ == statusExpressionEdit_;
-  const QString fallback =
-      isStatusEditor ? StatusRuntimeSymbolTable::defaultStatusBarExpression()
-                     : StatusRuntimeSymbolTable::defaultWindowTitleExpression();
+  const DisplayExpressionKind kind =
+      activeDisplayExpressionEdit_ == statusExpressionEdit_
+          ? DisplayExpressionKind::StatusBar
+          : DisplayExpressionKind::WindowTitle;
   activeDisplayExpressionPreviewLabel_->setText(
       evaluateDisplayExpressionPreview(
-          activeDisplayExpressionEdit_->toPlainText(), fallback));
+          activeDisplayExpressionEdit_->toPlainText(), kind));
 }
 
 void SettingsDialog::applySettings() {
@@ -679,18 +659,11 @@ void SettingsDialog::applySettings() {
   settings.setValue("lyrics/font_size", lyricsFontSizeSpin_->value());
   settings.setValue("lyrics/highlight_color",
                     lyricsHighlightColor_.name(QColor::HexRgb));
-  QString statusExpression = statusExpressionEdit_->toPlainText().trimmed();
-  if (statusExpression.isEmpty()) {
-    statusExpression = StatusRuntimeSymbolTable::defaultStatusBarExpression();
-  }
-  QString windowTitleExpression =
-      windowTitleExpressionEdit_->toPlainText().trimmed();
-  if (windowTitleExpression.isEmpty()) {
-    windowTitleExpression =
-        StatusRuntimeSymbolTable::defaultWindowTitleExpression();
-  }
-  settings.setValue("status_bar/expression", statusExpression);
-  settings.setValue("window_title/expression", windowTitleExpression);
+  const QString statusExpression = saveDisplayExpressionSetting(
+      DisplayExpressionKind::StatusBar, statusExpressionEdit_->toPlainText());
+  const QString windowTitleExpression =
+      saveDisplayExpressionSetting(DisplayExpressionKind::WindowTitle,
+                                   windowTitleExpressionEdit_->toPlainText());
   settings.setValue("display/theme_mode",
                     displayThemeModeCombo_->currentData().toString());
   const QString emittedFamily =

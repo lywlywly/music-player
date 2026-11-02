@@ -4,6 +4,7 @@
 #include "columndefinition.h"
 #include "columnregistry.h"
 #include "databasemanager.h"
+#include "displayexpression.h"
 #include "libraryexpression.h"
 #include "playbackbackendmanager.h"
 #include "statusruntimesymboltable.h"
@@ -56,9 +57,8 @@ private:
   void updateLyricsHighlightColorButton();
   void setActiveDisplayExpressionEditor(QPlainTextEdit *editor);
   void updateActiveDisplayExpressionPreview();
-  QString
-  evaluateDisplayExpressionPreview(const QString &expressionText,
-                                   const QString &fallbackExpression) const;
+  QString evaluateDisplayExpressionPreview(const QString &expressionText,
+                                           DisplayExpressionKind kind) const;
   void applySettings();
   ColumnDefinition buildCustomFieldDefinitionFromForm() const;
   ColumnDefinition buildComputedFieldDefinitionFromForm() const;

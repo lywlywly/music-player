@@ -11,7 +11,8 @@ Backend classes hold app state and operations; frontend classes present them.
 The backend must not depend on how (or whether) it is displayed.
 
 * Backend: `SongLibrary`, `DatabaseManager`, `Playlist`, `PlaylistCollection`,
-  `PlaybackQueue`, `PlaybackManager`, playback policies.
+  `PlaybackQueue`, `PlaybackManager`, playback policies,
+  `PlayCompletionTracker`.
 * Frontend (Qt view adapters and widgets): `PlaylistTableModel`,
   `PlaylistTabs`, `LibrarySearchResultsModel`, dialogs, `MainWindow`.
 
@@ -366,6 +367,26 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
     widget font. With another app font size, menu bar gaps change but the
     text does not. Other sizes would need a `QProxyStyle` override of
     `CE_MenuBarItem` or the `windowsvista` style.
+* `NowPlayingDisplay` (no widgets, owned by `MainWindow`)
+  * Builds the status bar text and window title from the display
+    expressions, the playback status and the current song; `MainWindow`
+    only applies the strings. Nothing playing: no status text and the
+    window's original title.
+  * Owns the parsed expressions (`setExpression(kind, text)` with the text
+    each Settings signal carries) and the values behind the `status:*`
+    symbols: position, duration and the bitrate chosen for the song (see
+    "Bitrate display behavior").
+  * Playback status and the current song are passed in on each call, not
+    stored, so they cannot go stale; `PlaybackQueue` and `MainWindow` own
+    them.
+* `displayexpression.{h,cpp}`
+  * The rules both `NowPlayingDisplay` and `SettingsDialog` use: settings
+    keys, the default expressions, "blank means default", parsing with
+    runtime symbols first, and evaluation (its eval context is private to
+    `displayexpression.cpp`).
+* Song field lookup for expressions (`builtin:<name>` stored as `<name>`) is
+  `findSongFieldValue` (`songlibrary.h`), shared by
+  `SongLibraryExprEvalContext` and `DisplayExpressionEvalContext`.
 * Display settings (`SettingsDialog` + `MainWindow`)
   * Display theme mode is persisted as `display/theme_mode` with values:
     `system`, `light`, `dark`.
@@ -376,9 +397,10 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
   * Settings dialog shows a live preview for the currently active display
     expression editor, using current playback/runtime song context when
     available (fallback sample values otherwise).
-  * Default expression comes from `StatusRuntimeSymbolTable::defaultStatusBarExpression()`.
-  * Default window title expression comes from
-    `StatusRuntimeSymbolTable::defaultWindowTitleExpression()`.
+  * Default expressions come from `defaultDisplayExpression(kind)`.
+  * A blank expression is stored and used as the default one; a stored
+    expression that does not parse is used as the default one (with a
+    warning), while the Settings preview shows the parse error.
   * `StatusRuntimeSymbolTable` also registers its runtime field definitions into
     `FieldTypePool`, so runtime fields (for example `playback_time` and
     `duration`) use the same `FieldValue::display()` formatting pipeline.
@@ -466,14 +488,24 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
 
 * `last_played_timestamp` is set at playback start.
 * `play_count` increments once per play session with near-end + listened-duration gating.
+  * `PlayCompletionTracker` decides when: the song reached
+    `min(90%, end - 5 s)` and two thirds of its duration were listened to
+    while playing; a seek adds no listened time. It keeps only the session
+    and keeps the duration across sessions, since the backend may not
+    report an unchanged duration again (replaying the same song).
+  * `MainWindow::maybeCountCompletedPlay()` reacts, on position updates and
+    `EndOfMedia`: `SongLibrary::incrementPlayCount`, then
+    `markCounted()`, `PlaylistCollection::notifySongChanged` and the cloud
+    push.
 * Stats are stored by song identity, so multiple files with the same normalized identity share counters.
 
 ### Bitrate display behavior
 
-* `MainWindow` evaluates both status bar and window title from display
+* `NowPlayingDisplay` evaluates both status bar and window title from display
   expressions (same expression engine + runtime symbols).
 * `${bitrate}` in display expressions reads runtime symbol `status:bitrate`.
-* `status:bitrate` is updated from `MainWindow::effectiveBitrateKbps()`:
+* `status:bitrate` comes from `NowPlayingDisplay` (`startSong` reads the
+  tag bitrate and CBR detection, `setStreamBitrateBps` the backend's):
   * if track is treated as CBR and parsed tag bitrate is available, use tag bitrate
   * otherwise use runtime playback bitrate when available
   * otherwise fall back to parsed tag bitrate (or `0`)
@@ -511,16 +543,17 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
   * Interpolation is supported in backtick strings only.
   * In interpolation, `${field}` display comes from `FieldValue::display()`.
   * Known issue: a bare field used as the whole expression is not formatted.
-    `MainWindow` (status bar, window title) and the `SettingsDialog` preview
-    turn the result into text with `runtimeValueToQString(evaluateValue(...))`,
+    `evaluateDisplayExpression` (status bar, window title and the
+    `SettingsDialog` preview) turns the result into text with
+    `runtimeValueToQString(evaluateValue(...))`,
     which gives the raw typed value, while interpolation parts use
     `evaluateDisplayText(...)`, and `FieldRefExpr::evaluateDisplayText` returns
     `FieldValue::display()`. So `duration` shows `125` but `` `${duration}` ``
     shows `02:05`, and `channels` shows `2` but `` `${channels}` `` shows
     `stereo`. A field returned from an `IF` branch is raw in both forms,
     because `IfExpr` uses the base `evaluateDisplayText`, which converts
-    `evaluateValue`. Possible fix: have those three callers use
-    `QString::fromStdString(expr->evaluateDisplayText(context))`; only bare-field
+    `evaluateValue`. Possible fix: have `evaluateDisplayExpression` use
+    `QString::fromStdString(expr.evaluateDisplayText(context))`; only bare-field
     expressions would change, and no test covers that case yet.
 * Comparison AST/eval shape is unified as `leftExpr op rightExpr`.
   * The comparison type is resolved from the left expression:

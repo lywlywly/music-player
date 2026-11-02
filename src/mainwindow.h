@@ -7,18 +7,21 @@
 #include "globalcolumnlayoutmanager.h"
 #include "isystemmediainterface.h"
 #include "lyricsmanager.h"
+#include "nowplayingdisplay.h"
 #include "playbackbackendmanager.h"
 #include "playbackmanager.h"
+#include "playcompletiontracker.h"
 #include "playlist.h"
 #include "playlistcollection.h"
 #include "playlisttabs.h"
 #include "songlibrary.h"
-#include "statusruntimesymboltable.h"
 #include <QColor>
 #include <QMainWindow>
 #include <QString>
 #include <QTimer>
 #include <unordered_map>
+
+class SettingsDialog;
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -44,16 +47,12 @@ private:
   void durationChanged(qint64 duration);
   void bitrateChanged(qint64 bitsPerSecond);
   void statusChanged(QMediaPlayer::MediaStatus status);
-  void initStatusBarExpression();
-  void initWindowTitleExpression();
   // The song most recently started by playSong (kept after stop), or nullptr
   // before any song has played.
   const MSong *currentSong() const;
-  void updateStatusRuntimeSymbols();
-  qint64 effectiveBitrateKbps() const;
-  QString evaluateStatusBarExpression() const;
-  QString evaluateWindowTitleExpression() const;
-  void updateOpenSettingsDisplayPreviewContext();
+  // Gives an open Settings dialog (nullptr: none) the current song and
+  // runtime symbols for its display expression preview.
+  void updateSettingsDisplayPreviewContext(SettingsDialog *dialog);
   void updatePlaybackTimeStatus();
   void updateImageSize();
   void setUpImageAndLyrics(
@@ -97,7 +96,7 @@ private:
   void initCloudSync();
   void setUpMenuBar();
   void openLibrarySearchDialog();
-  void resetPlayStatsSession(int songPk);
+  // Counts the current song's play once PlayCompletionTracker says so.
   void maybeCountCompletedPlay();
   void triggerManualCloudRebase();
   void refreshManualCloudRebaseActionEnabled();
@@ -121,21 +120,11 @@ private:
   QPixmap pixmap;
   QActionGroup *playbackOrderMenuActionGroup;
   ISystemMediaInterface *sysMedia;
-  qint64 currentDurationMs_ = 0;
-  qint64 currentPositionMs_ = 0;
-  qint64 currentBitrateBps_ = 0;
-  qint64 currentTagBitrateBps_ = 0;
-  bool useTagBitrateForCurrentTrack_ = false;
-  StatusRuntimeSymbolTable statusRuntimeSymbols_;
-  ExprPtr statusBarExpr_;
-  ExprPtr windowTitleExpr_;
+  NowPlayingDisplay nowPlayingDisplay_;
   QString defaultWindowTitle_;
+  // The song most recently passed to the backend by playSong, or -1.
   int currentTrackPk_ = -1;
-  qint64 sessionDurationMs_ = 0;
-  qint64 sessionMaxPositionMs_ = 0;
-  qint64 sessionListenedMs_ = 0;
-  qint64 lastPositionSampleMs_ = -1;
-  bool completionCounted_ = false;
+  PlayCompletionTracker playCompletionTracker_;
   CloudPlayStatsSyncCoordinator cloudPlayStatsSyncCoordinator_;
   bool playlistReady_ = false;
   int consecutivePlaybackFailures_ = 0;

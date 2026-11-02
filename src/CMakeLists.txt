@@ -80,6 +80,8 @@ set(PROJECT_SOURCES
   columnregistry.cpp
   databasemanager.h
   databasemanager.cpp
+  displayexpression.h
+  displayexpression.cpp
   exprsymbolinfo.h
   fieldformatter.h
   fieldformatter.cpp
@@ -120,6 +122,8 @@ set(PROJECT_SOURCES
   lyricspanel.ui
   lyricspanel.h
   lyricspanel.cpp
+  nowplayingdisplay.h
+  nowplayingdisplay.cpp
   playbackbackendmanager.h
   playbackbackendmanager.cpp
   playbackbuttonstyle.h
@@ -134,6 +138,8 @@ set(PROJECT_SOURCES
   playbackpolicyshuffle.cpp
   playbackqueue.h
   playbackqueue.cpp
+  playcompletiontracker.h
+  playcompletiontracker.cpp
   playlist.h
   playlist.cpp
   playlistcollection.h

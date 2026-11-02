@@ -2,10 +2,7 @@
 
 #include "./ui_mainwindow.h"
 #include "databasemanager.h"
-#include "displayexpressionevalcontext.h"
 #include "gstaudioplayer.h"
-#include "libraryexpression_ops.h"
-#include "libraryexpression_parser.h"
 #include "librarysearchdialog.h"
 #include "lyricsloader.h"
 #include "playbackbuttonstyle.h"
@@ -56,39 +53,6 @@ const QStringList &audioFileNameFilters() {
 
 int clampVolumePercent(int volumePercent) {
   return std::clamp(volumePercent, kMinVolumePercent, kMaxVolumePercent);
-}
-
-ExprSymbolResolver makeDisplayExprResolver(const ColumnRegistry &registry) {
-  return ExprSymbolResolver(
-      mergeExprSymbols(std::vector<ExprSymbolInfo>(
-                           StatusRuntimeSymbolTable::expressionSymbols()),
-                       registry.expressionSymbols()));
-}
-
-// Parses the display expression stored at settingsKey, or defaultExpression
-// when the stored one is missing, blank, or does not parse.
-ExprPtr loadDisplayExpression(const ColumnRegistry &registry,
-                              const char *settingsKey,
-                              const QString &defaultExpression,
-                              const QString &logPrefix) {
-  QSettings settings;
-  QString expression =
-      settings.value(settingsKey, defaultExpression).toString().trimmed();
-  if (expression.isEmpty()) {
-    expression = defaultExpression;
-  }
-  const ExprSymbolResolver resolver = makeDisplayExprResolver(registry);
-  ExprParseResult parsed = parseLibraryExpression(expression, resolver);
-  if (!parsed.ok()) {
-    qWarning() << logPrefix << "parse failed:" << parsed.error.message << "at"
-               << parsed.error.position;
-    parsed = parseLibraryExpression(defaultExpression, resolver);
-    if (!parsed.ok()) {
-      qFatal("%s: failed to parse default expression",
-             logPrefix.toUtf8().constData());
-    }
-  }
-  return std::move(parsed.expr);
 }
 
 SongLibrary::Snapshot loadSongLibrarySnapshot(const QString &databaseName) {
@@ -171,6 +135,7 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
       databaseManager_(columnRegistry_, std::move(databaseName),
                        std::move(connectionName)),
       songLibrary(columnRegistry_, databaseManager_), lyricsManager{this},
+      nowPlayingDisplay_(columnRegistry_),
       cloudPlayStatsSyncCoordinator_(songLibrary, this) {
   prewarmSelectedPlaybackBackend();
   Q_INIT_RESOURCE(resources);
@@ -179,8 +144,6 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
   applyDisplayThemeFromSettings();
   setUpPlaybackButtonIcons(ui);
   defaultWindowTitle_ = windowTitle();
-  initStatusBarExpression();
-  initWindowTitleExpression();
   updatePlaybackTimeStatus();
   setUpMenuBar();
   initCloudSync();
@@ -398,20 +361,20 @@ void MainWindow::initSettings() {
         dialog, &SettingsDialog::lyricsHighlightColorChanged, this,
         [this](const QColor &color) { setLyricsPanelHighlightColor(color); });
     connect(dialog, &SettingsDialog::statusBarExpressionChanged, this,
-            [this](const QString &) {
-              initStatusBarExpression();
+            [this](const QString &expression) {
+              nowPlayingDisplay_.setExpression(DisplayExpressionKind::StatusBar,
+                                               expression);
               updatePlaybackTimeStatus();
             });
     connect(dialog, &SettingsDialog::windowTitleExpressionChanged, this,
-            [this](const QString &) {
-              initWindowTitleExpression();
+            [this](const QString &expression) {
+              nowPlayingDisplay_.setExpression(
+                  DisplayExpressionKind::WindowTitle, expression);
               updatePlaybackTimeStatus();
             });
     connect(dialog, &SettingsDialog::displayThemeModeChanged, this,
             [this](const QString &mode) { applyDisplayThemeMode(mode); });
-    updateStatusRuntimeSymbols();
-    dialog->setDisplayExpressionPreviewContext(currentSong(),
-                                               statusRuntimeSymbols_);
+    updateSettingsDisplayPreviewContext(dialog);
     dialog->show();
   });
 }
@@ -585,21 +548,10 @@ void MainWindow::playSong(const MSong &song, int row, Playlist *pl) {
   std::unordered_map<std::string, std::string> remainingFields;
   const MSong &activeSong =
       songLibrary.refreshSongFromFile(filepath, &remainingFields);
-  currentBitrateBps_ = 0;
-  currentTagBitrateBps_ = 0;
-  useTagBitrateForCurrentTrack_ = false;
-  if (const auto bitrateIt = activeSong.find("bitrate");
-      bitrateIt != activeSong.end()) {
-    const FieldValue &bitrate = bitrateIt->second;
-    if (bitrate.valueType() == ValueType::Number) {
-      currentTagBitrateBps_ = static_cast<qint64>(bitrate.typed.numberDouble *
-                                                  static_cast<double>(1000));
-    }
-  }
-  if (currentTagBitrateBps_ > 0) {
-    useTagBitrateForCurrentTrack_ = SongParser::isLikelyCbrAudioFile(filepath);
-  }
-  resetPlayStatsSession(songPk);
+  nowPlayingDisplay_.startSong(activeSong);
+  // Set before setSource: InvalidMedia handling reads it (see statusChanged).
+  currentTrackPk_ = songPk;
+  playCompletionTracker_.startSession();
   songLibrary.markSongPlayedAtStart(songPk, unixNowSeconds());
   playlists_->notifySongChanged(songPk);
 
@@ -734,9 +686,7 @@ void MainWindow::stop() {
   consecutivePlaybackFailures_ = 0;
   backendManager->player()->stop();
   control.stop();
-  currentBitrateBps_ = 0;
-  currentTagBitrateBps_ = 0;
-  useTagBitrateForCurrentTrack_ = false;
+  nowPlayingDisplay_.stopSong();
   clearImageAndLyrics();
   updatePlaybackTimeStatus();
   sysMedia->setPlaybackState(ISystemMediaInterface::PlaybackState::Stopped);
@@ -824,30 +774,21 @@ void MainWindow::updateImageSize() {
 }
 
 void MainWindow::durationChanged(qint64 newDuration) {
-  currentDurationMs_ = newDuration;
-  sessionDurationMs_ = newDuration;
+  nowPlayingDisplay_.setDurationMs(newDuration);
+  playCompletionTracker_.setDurationMs(newDuration);
   ui->horizontalSlider->setMaximum(newDuration);
   updatePlaybackTimeStatus();
   sysMedia->setDuration(newDuration);
 }
 
 void MainWindow::positionChanged(qint64 progress) {
-  currentPositionMs_ = progress;
+  nowPlayingDisplay_.setPositionMs(progress);
   // Playback is progressing, so the current song is playable.
   if (progress > 0) {
     consecutivePlaybackFailures_ = 0;
   }
-  if (progress > sessionMaxPositionMs_) {
-    sessionMaxPositionMs_ = progress;
-  }
-  if (control.getStatus() == PlaybackQueue::PlaybackStatus::Playing &&
-      lastPositionSampleMs_ >= 0) {
-    const qint64 delta = progress - lastPositionSampleMs_;
-    if (delta > 0) {
-      sessionListenedMs_ += delta;
-    }
-  }
-  lastPositionSampleMs_ = progress;
+  playCompletionTracker_.recordPositionMs(
+      progress, control.getStatus() == PlaybackQueue::PlaybackStatus::Playing);
   maybeCountCompletedPlay();
 
   if (!ui->horizontalSlider->isSliderDown())
@@ -857,25 +798,9 @@ void MainWindow::positionChanged(qint64 progress) {
 }
 
 void MainWindow::bitrateChanged(qint64 bitsPerSecond) {
-  if (useTagBitrateForCurrentTrack_ && currentTagBitrateBps_ > 0) {
-    return;
+  if (nowPlayingDisplay_.setStreamBitrateBps(bitsPerSecond)) {
+    updatePlaybackTimeStatus();
   }
-  currentBitrateBps_ = std::max<qint64>(0, bitsPerSecond);
-  updatePlaybackTimeStatus();
-}
-
-void MainWindow::initStatusBarExpression() {
-  statusBarExpr_ = loadDisplayExpression(
-      columnRegistry_, "status_bar/expression",
-      StatusRuntimeSymbolTable::defaultStatusBarExpression(),
-      QStringLiteral("initStatusBarExpression"));
-}
-
-void MainWindow::initWindowTitleExpression() {
-  windowTitleExpr_ = loadDisplayExpression(
-      columnRegistry_, "window_title/expression",
-      StatusRuntimeSymbolTable::defaultWindowTitleExpression(),
-      QStringLiteral("initWindowTitleExpression"));
 }
 
 const MSong *MainWindow::currentSong() const {
@@ -885,74 +810,28 @@ const MSong *MainWindow::currentSong() const {
   return &songLibrary.getSongByPK(currentTrackPk_);
 }
 
-qint64 MainWindow::effectiveBitrateKbps() const {
-  const qint64 tagKbps = currentTagBitrateBps_ / static_cast<qint64>(1000);
-  if (useTagBitrateForCurrentTrack_ && tagKbps > 0) {
-    return tagKbps;
-  }
-
-  const qint64 runtimeKbps = currentBitrateBps_ / static_cast<qint64>(1000);
-  if (runtimeKbps > 0) {
-    return runtimeKbps;
-  }
-  return tagKbps > 0 ? tagKbps : 0;
-}
-
-void MainWindow::updateStatusRuntimeSymbols() {
-  const auto status = control.getStatus();
-  statusRuntimeSymbols_.setIsPlaying(status ==
-                                     PlaybackQueue::PlaybackStatus::Playing);
-  statusRuntimeSymbols_.setIsPaused(status ==
-                                    PlaybackQueue::PlaybackStatus::Paused);
-  statusRuntimeSymbols_.setPlaybackTimeSeconds(currentPositionMs_ / 1000);
-  statusRuntimeSymbols_.setDurationSeconds(currentDurationMs_ / 1000);
-  statusRuntimeSymbols_.setBitrateKbps(effectiveBitrateKbps());
-}
-
-QString MainWindow::evaluateStatusBarExpression() const {
-  if (!statusBarExpr_) {
-    return {};
-  }
-  DisplayExpressionEvalContext context(statusRuntimeSymbols_, currentSong());
-  return runtimeValueToQString(statusBarExpr_->evaluateValue(context));
-}
-
-QString MainWindow::evaluateWindowTitleExpression() const {
-  if (!windowTitleExpr_) {
-    return defaultWindowTitle_;
-  }
-  DisplayExpressionEvalContext context(statusRuntimeSymbols_, currentSong());
-  return runtimeValueToQString(windowTitleExpr_->evaluateValue(context));
-}
-
-void MainWindow::updateOpenSettingsDisplayPreviewContext() {
-  SettingsDialog *dialog = findChild<SettingsDialog *>();
+void MainWindow::updateSettingsDisplayPreviewContext(SettingsDialog *dialog) {
   if (!dialog) {
     return;
   }
-  dialog->setDisplayExpressionPreviewContext(currentSong(),
-                                             statusRuntimeSymbols_);
+  dialog->setDisplayExpressionPreviewContext(
+      currentSong(), nowPlayingDisplay_.runtimeSymbols(control.getStatus()));
 }
 
 void MainWindow::updatePlaybackTimeStatus() {
-  if (control.getStatus() == PlaybackQueue::PlaybackStatus::None) {
-    statusBar()->clearMessage();
-    setWindowTitle(defaultWindowTitle_);
-    updateStatusRuntimeSymbols();
-    updateOpenSettingsDisplayPreviewContext();
-    return;
-  }
-  updateStatusRuntimeSymbols();
-  updateOpenSettingsDisplayPreviewContext();
-  statusBar()->showMessage(evaluateStatusBarExpression());
-  setWindowTitle(evaluateWindowTitleExpression());
+  const PlaybackQueue::PlaybackStatus status = control.getStatus();
+  const MSong *song = currentSong();
+  updateSettingsDisplayPreviewContext(findChild<SettingsDialog *>());
+  statusBar()->showMessage(nowPlayingDisplay_.statusBarText(status, song));
+  setWindowTitle(
+      nowPlayingDisplay_.windowTitle(status, song, defaultWindowTitle_));
 }
 
 void MainWindow::seek(int mseconds) {
   if (!playlistReady_) {
     return;
   }
-  lastPositionSampleMs_ = -1;
+  playCompletionTracker_.seeked();
   sysMedia->setPosition(mseconds);
   backendManager->player()->setPosition(mseconds);
 }
@@ -980,8 +859,8 @@ void MainWindow::statusChanged(QMediaPlayer::MediaStatus status) {
     break;
   case QMediaPlayer::InvalidMedia:
     // InvalidMedia does not say which source failed. currentTrackPk_ is the
-    // song passed to setSource: playSong sets it (resetPlayStatsSession)
-    // before calling setSource, so keep that order.
+    // song passed to setSource: playSong sets it before calling setSource,
+    // so keep that order.
     if (control.getStatus() != PlaybackQueue::PlaybackStatus::None &&
         currentTrackPk_ >= 0) {
       handlePlaybackFailure(QString::fromStdString(
@@ -1062,34 +941,14 @@ void MainWindow::openLibrarySearchDialog() {
 
 MainWindow::~MainWindow() { delete ui; }
 
-void MainWindow::resetPlayStatsSession(int songPk) {
-  currentTrackPk_ = songPk;
-  sessionDurationMs_ = currentDurationMs_;
-  sessionMaxPositionMs_ = 0;
-  sessionListenedMs_ = 0;
-  lastPositionSampleMs_ = -1;
-  completionCounted_ = false;
-}
-
 void MainWindow::maybeCountCompletedPlay() {
-  if (completionCounted_ || currentTrackPk_ < 0) {
-    return;
-  }
-  const qint64 duration = sessionDurationMs_;
-  if (duration <= 0) {
-    return;
-  }
-  const qint64 nearEndThreshold =
-      std::max<qint64>(0, std::min((duration * 9) / 10, duration - 5000));
-  const qint64 listenedThreshold = (duration * 2) / 3;
-  if (sessionMaxPositionMs_ < nearEndThreshold ||
-      sessionListenedMs_ < listenedThreshold) {
+  if (currentTrackPk_ < 0 || !playCompletionTracker_.shouldCount()) {
     return;
   }
   if (!songLibrary.incrementPlayCount(currentTrackPk_)) {
     return;
   }
-  completionCounted_ = true;
+  playCompletionTracker_.markCounted();
   playlists_->notifySongChanged(currentTrackPk_);
   cloudPlayStatsSyncCoordinator_.pushIncrementForSongPk(currentTrackPk_);
 }

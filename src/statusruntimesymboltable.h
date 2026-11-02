@@ -12,8 +12,6 @@ class StatusRuntimeSymbolTable {
 public:
   StatusRuntimeSymbolTable();
 
-  static const QString &defaultStatusBarExpression();
-  static const QString &defaultWindowTitleExpression();
   // Returns runtime expression symbols in two forms per field:
   // - unqualified alias (e.g. `bitrate`)
   // - qualified alias (e.g. `status:bitrate`)

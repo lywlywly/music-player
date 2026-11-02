@@ -31,22 +31,6 @@ StatusRuntimeSymbolTable::StatusRuntimeSymbolTable() {
       .assign("false", statusFieldId("ispaused"));
 }
 
-const QString &StatusRuntimeSymbolTable::defaultStatusBarExpression() {
-  static const QString kDefaultStatusBarExpression = QStringLiteral(
-      "`"
-      "${codec} | ${bitrate} kbps | ${sample_rate} Hz | ${channels} | "
-      "${playback_time}${IF duration > 0 THEN ` / ${duration}` ELSE ''} | "
-      "${IF ispaused IS true THEN 'Paused' ELSE IF isplaying IS true THEN "
-      "'Playing' ELSE 'Stopped'}`");
-  return kDefaultStatusBarExpression;
-}
-
-const QString &StatusRuntimeSymbolTable::defaultWindowTitleExpression() {
-  static const QString kDefaultWindowTitleExpression = QStringLiteral(
-      "`${IF artist IS '' THEN title ELSE `${artist} - ${title}`}`");
-  return kDefaultWindowTitleExpression;
-}
-
 const std::vector<FieldDefinition> &
 StatusRuntimeSymbolTable::fieldDefinitions() {
   static const std::vector<FieldDefinition> kDefinitions = {

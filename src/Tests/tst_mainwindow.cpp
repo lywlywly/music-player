@@ -1,9 +1,7 @@
 #include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
-#include <QDataStream>
 #include <QDir>
-#include <QFile>
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
@@ -34,44 +32,9 @@
 #include "../playlisttabs.h"
 #include "../settingsdialog.h"
 #include "../utils.h"
+#include "testaudiofiles.h"
 
 namespace {
-bool writeSilentWav(const QString &path) {
-  QFile file(path);
-  if (!file.open(QIODevice::WriteOnly)) {
-    return false;
-  }
-
-  constexpr quint32 sampleRate = 8000;
-  constexpr quint16 channels = 1;
-  constexpr quint16 bitsPerSample = 8;
-  const QByteArray pcm(800, static_cast<char>(0x80));
-  const quint32 dataSize = static_cast<quint32>(pcm.size());
-  const quint32 byteRate = sampleRate * channels * (bitsPerSample / 8);
-  const quint16 blockAlign = channels * (bitsPerSample / 8);
-  const quint32 chunkSize = 36 + dataSize;
-
-  QDataStream out(&file);
-  out.setByteOrder(QDataStream::LittleEndian);
-
-  file.write("RIFF", 4);
-  out << chunkSize;
-  file.write("WAVE", 4);
-  file.write("fmt ", 4);
-  out << quint32(16);
-  out << quint16(1);
-  out << channels;
-  out << sampleRate;
-  out << byteRate;
-  out << blockAlign;
-  out << bitsPerSample;
-  file.write("data", 4);
-  out << dataSize;
-  file.write(pcm);
-
-  return out.status() == QDataStream::Ok;
-}
-
 MSong makeSong(const QString &title, const QString &artist,
                const QString &filepath) {
   MSong song;
@@ -148,6 +111,7 @@ private slots:
   void systemMediaToggleRequest_togglesPlayback();
   void windowTitleExpression_updatesOnPlaybackAndResetsOnStop();
   void settingsDisplayPreview_usesCurrentSongContext();
+  void settingsApply_updatesStatusBarAndWindowTitle();
   void sliderReleased_invokesSeekFlow();
   void volumeSlider_defaultsPropagatesAndPersists();
   void playlistTableBackspace_removesSelectedRow();
@@ -203,11 +167,7 @@ void TestMainWindow::init() {
   qputenv("MYPLAYER_USE_DUMMY_MEDIA_INTERFACE", "1");
   {
     QSettings settings;
-    settings.clear();
-    settings.setValue("window_title/expression",
-                      StatusRuntimeSymbolTable::defaultWindowTitleExpression());
-    settings.setValue("status_bar/expression",
-                      StatusRuntimeSymbolTable::defaultStatusBarExpression());
+    settings.clear(); // default display expressions
     settings.sync();
   }
 
@@ -585,6 +545,43 @@ void TestMainWindow::settingsDisplayPreview_usesCurrentSongContext() {
   statusEdit->setPlainText("`${playback_time}`");
   backend->player()->setPosition(65000);
   QTRY_COMPARE(preview->text(), QString("01:05"));
+}
+
+void TestMainWindow::settingsApply_updatesStatusBarAndWindowTitle() {
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(tabs != nullptr);
+  Playlist *playlist = tabs->currentPlaylist();
+  QVERIFY(playlist != nullptr);
+  QStatusBar *statusBar = window_->findChild<QStatusBar *>("statusbar");
+  QVERIFY(statusBar != nullptr);
+
+  const QString wav = workDir_->filePath("settings-apply-song.wav");
+  QVERIFY(writeSilentWav(wav));
+  playlist->addSong(makeSong("Song", "Artist", wav));
+  playlist->setLastPlayed(playlist->getPkByIndex(0));
+  QAction *playAction = window_->findChild<QAction *>("actionPlay");
+  QVERIFY(playAction != nullptr);
+  playAction->trigger();
+  const QString title =
+      QString::fromStdString(playlist->getSongByIndex(0).at("title").text);
+
+  QAction *settingsAction = window_->findChild<QAction *>("actionPreferences");
+  QVERIFY(settingsAction != nullptr);
+  settingsAction->trigger();
+  SettingsDialog *dialog = window_->findChild<SettingsDialog *>();
+  QTRY_VERIFY(dialog != nullptr);
+  QPlainTextEdit *statusEdit =
+      dialog->findChild<QPlainTextEdit *>("status_expression_edit");
+  QPlainTextEdit *titleEdit =
+      dialog->findChild<QPlainTextEdit *>("window_title_expression_edit");
+  QVERIFY(statusEdit != nullptr);
+  QVERIFY(titleEdit != nullptr);
+  statusEdit->setPlainText("`status: ${title}`");
+  titleEdit->setPlainText("`title: ${title}`");
+  dialog->accept();
+
+  QTRY_COMPARE(statusBar->currentMessage(), "status: " + title);
+  QTRY_COMPARE(window_->windowTitle(), "title: " + title);
 }
 
 void TestMainWindow::sliderReleased_invokesSeekFlow() {

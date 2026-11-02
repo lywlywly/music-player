@@ -3,7 +3,8 @@ target_compile_definitions(MYLib PUBLIC MYPLAYER_TESTING)
 function(SETUP_TESTS)
     foreach(_testname ${ARGN})
         add_executable(${_testname} tst_${_testname}.cpp)
-        target_sources(${_testname} PRIVATE test_qsettings_bootstrap.cpp)
+        target_sources(${_testname} PRIVATE test_qsettings_bootstrap.cpp
+            testaudiofiles.cpp)
         add_test(NAME ${_testname} COMMAND ${_testname})
         target_compile_definitions(${_testname} PRIVATE MYPLAYER_TESTING)
         target_link_libraries(${_testname} Qt6::Test MYLib)
@@ -29,6 +30,9 @@ set(TEST_NAMES
     librarysearchdialog_ui
     mainwindow
     playbackqueue
+    playcompletiontracker
+    nowplayingdisplay
+    displayexpression
     settingsdialog_ui
     playlist
     playlisttablemodel

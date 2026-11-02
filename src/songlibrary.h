@@ -9,11 +9,17 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 using MSong = std::unordered_map<std::string, FieldValue>;
+
+// The song's value for an expression field id (`builtin:<name>` is stored
+// under `<name>`), or nullptr when the song has none.
+const FieldValue *findSongFieldValue(const MSong &song,
+                                     std::string_view fieldId);
 
 inline QString songFieldText(const MSong &song, const std::string &field) {
   auto it = song.find(field);

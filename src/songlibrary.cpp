@@ -50,27 +50,26 @@ void SongLibrary::replaceWithSnapshot(Snapshot &&snapshot) {
   registeredQueries.clear();
 }
 
+const FieldValue *findSongFieldValue(const MSong &song,
+                                     std::string_view fieldId) {
+  constexpr std::string_view kBuiltinPrefix = "builtin:";
+  if (fieldId.starts_with(kBuiltinPrefix)) {
+    fieldId.remove_prefix(kBuiltinPrefix.size());
+  }
+  const auto it = song.find(std::string(fieldId));
+  return it == song.end() ? nullptr : &it->second;
+}
+
 namespace {
 class SongLibraryExprEvalContext final : public LibraryExprEvalContext {
 public:
   explicit SongLibraryExprEvalContext(const MSong &song) : song_(song) {}
 
   const FieldValue *fieldValue(std::string_view fieldId) const override {
-    auto it = song_.find(songKeyForFieldId(fieldId));
-    if (it == song_.end()) {
-      return nullptr;
-    }
-    return &it->second;
+    return findSongFieldValue(song_, fieldId);
   }
 
 private:
-  static std::string songKeyForFieldId(std::string_view fieldId) {
-    if (fieldId.starts_with("builtin:")) {
-      return std::string(fieldId.substr(8));
-    }
-    return std::string(fieldId);
-  }
-
   const MSong &song_;
 };
 
