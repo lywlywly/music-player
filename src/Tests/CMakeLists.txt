@@ -41,6 +41,7 @@ set(TEST_NAMES
     playlisttablemodel
     playlistcollection
     playlisttabs
+    playlisttableview
 )
 
 if(NOT WIN32)
@@ -66,5 +67,9 @@ set_tests_properties(librarysearchdialog_ui PROPERTIES
 )
 
 set_tests_properties(playlisttabs PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
+
+set_tests_properties(playlisttableview PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
 )

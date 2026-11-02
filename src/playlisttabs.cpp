@@ -1,46 +1,13 @@
 #include "playlisttabs.h"
-#include "filemanagerutils.h"
 #include "playlistdialogs.h"
-#include "playlisttablemodel.h"
-#include "songpropertiesdialog.h"
+#include "playlisttableview.h"
+#include "songdialogs.h"
 #include "ui_playlisttabs.h"
 #include <QActionGroup>
-#include <QFileInfo>
-#include <QHeaderView>
 #include <QKeyEvent>
-#include <QMessageBox>
 #include <QSettings>
-#include <QShortcut>
 #include <QSignalBlocker>
 #include <QtGlobal>
-#include <algorithm>
-
-namespace {
-constexpr const char *kOpenContainingFolderTitle = "Open Containing Folder";
-
-QList<QKeySequence> openPropertiesShortcuts() {
-#ifdef Q_OS_MACOS
-  return {QKeySequence(Qt::CTRL | Qt::Key_I)};
-#else
-  return {QKeySequence(Qt::ALT | Qt::Key_Return),
-          QKeySequence(Qt::ALT | Qt::Key_Enter)};
-#endif
-}
-
-int selectedOrCurrentRow(QTableView *tableView) {
-  const QModelIndexList selectedRows =
-      tableView->selectionModel()->selectedRows();
-  if (selectedRows.isEmpty()) {
-    return tableView->currentIndex().row();
-  }
-
-  int row = selectedRows.front().row();
-  for (const QModelIndex &index : selectedRows) {
-    row = std::min(row, index.row());
-  }
-  return row;
-}
-} // namespace
 
 PlaylistTabs::PlaylistTabs(QWidget *parent)
     : QWidget(parent), ui(new Ui::PlaylistTabs) {
@@ -93,7 +60,7 @@ void PlaylistTabs::setUpPlaylist() {
   openContainingFolderAction_ =
       playlistContextMenu.addAction("Open Containing Folder");
   propertiesAction_ = playlistContextMenu.addAction("Properties");
-  propertiesAction_->setShortcuts(openPropertiesShortcuts());
+  propertiesAction_->setShortcuts(PlaylistTableView::propertiesShortcuts());
   propertiesAction_->setShortcutVisibleInContextMenu(true);
   // tabs
   QTabBar *tabBar = ui->tabWidget->tabBar();
@@ -136,22 +103,8 @@ void PlaylistTabs::navigateIndex(int row, Playlist *pl) {
 }
 
 int PlaylistTabs::firstSelectedRow() const {
-  if (currentTableView == nullptr ||
-      currentTableView->selectionModel() == nullptr) {
-    return -1;
-  }
-
-  const QModelIndexList selectedRows =
-      currentTableView->selectionModel()->selectedRows();
-  if (selectedRows.isEmpty()) {
-    return -1;
-  }
-
-  int firstRow = selectedRows.front().row();
-  for (const QModelIndex &index : selectedRows) {
-    firstRow = std::min(firstRow, index.row());
-  }
-  return firstRow;
+  return currentTableView == nullptr ? -1
+                                     : currentTableView->firstSelectedRow();
 }
 
 Playlist *PlaylistTabs::currentPlaylist() const { return currentPlaylist_; }
@@ -169,10 +122,6 @@ void PlaylistTabs::createNewPlaylistTabFromSongIds(const QList<int> &songIds) {
 
   collection_->createPlaylist(getNewPlaylistName(),
                               std::vector<int>(songIds.begin(), songIds.end()));
-}
-
-void PlaylistTabs::notifySongDataChangedInAllPlaylists(int songPk) {
-  collection_->notifySongChanged(songPk);
 }
 
 void PlaylistTabs::setUpPlaybackManager() {
@@ -199,10 +148,16 @@ void PlaylistTabs::setUpPlaybackManager() {
   });
   connect(clearPlaylistAction_, &QAction::triggered, this,
           &PlaylistTabs::clearCurrentPlaylist);
-  connect(openContainingFolderAction_, &QAction::triggered, this,
-          &PlaylistTabs::openContainingFolderForCurrentContextRow);
-  connect(propertiesAction_, &QAction::triggered, this,
-          &PlaylistTabs::openPropertiesForCurrentContextRow);
+  connect(openContainingFolderAction_, &QAction::triggered, this, [this]() {
+    const int row =
+        openContainingFolderAction_->data().value<QModelIndex>().row();
+    if (isSongRow(row)) {
+      revealSongFile(this, currentPlaylist_->getSongByIndex(row));
+    }
+  });
+  connect(propertiesAction_, &QAction::triggered, this, [this]() {
+    openPropertiesForRow(propertiesAction_->data().value<QModelIndex>().row());
+  });
 }
 
 void PlaylistTabs::onCustomContextMenuRequested(const QPoint &pos) {
@@ -265,7 +220,7 @@ void PlaylistTabs::onTabChanged(int index) {
   }
   currentPlaylist_ = playlistForTabIndex(index);
   QWidget *tab = ui->tabWidget->widget(index);
-  currentTableView = tab->findChild<QTableView *>();
+  currentTableView = tab->findChild<PlaylistTableView *>();
 
   setUpCurrentPlaylist();
   QSettings settings;
@@ -311,95 +266,20 @@ void PlaylistTabs::initializePlaylists() {
   persistPlaylistTabOrder();
 }
 
-void PlaylistTabs::setUpTableView(Playlist *pl, QTableView *tbv) {
-  auto *model =
-      new PlaylistTableModel(*pl, *playbackQueue_, *columnLayoutManager_, tbv);
-  tbv->setModel(model);
-  tbv->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
-  tbv->setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
-  tbv->setSortingEnabled(true);
-  tbv->setEditTriggers(QAbstractItemView::NoEditTriggers);
-  tbv->setSelectionBehavior(QAbstractItemView::SelectRows);
-  tbv->setContextMenuPolicy(Qt::CustomContextMenu);
-  connect(tbv, &QTableView::customContextMenuRequested, this,
-          &PlaylistTabs::onCustomContextMenuRequested);
-  // QAction shortcuts on the popup context menu are metadata/display only here:
-  // Qt does not dispatch them reliably from a transient QMenu. Register the
-  // real shortcut on each table so Properties works while browsing rows.
-  for (const QKeySequence &shortcutSequence : openPropertiesShortcuts()) {
-    auto *shortcut = new QShortcut(shortcutSequence, tbv);
-    shortcut->setContext(Qt::WidgetWithChildrenShortcut);
-    connect(shortcut, &QShortcut::activated, this,
-            [this, tbv]() { openPropertiesForRow(selectedOrCurrentRow(tbv)); });
-  }
-
-  QHeaderView *header = tbv->horizontalHeader();
-  header->setSortIndicatorShown(false);
-  header->setSectionsMovable(true);
-  header->setContextMenuPolicy(Qt::CustomContextMenu);
-
-  connect(header, &QHeaderView::sectionClicked, this,
-          [this, tbv, model](int idx) {
-            const QList<QString> visibleIds =
-                columnLayoutManager_->visibleColumnIds();
-            if (idx < 0 || idx >= visibleIds.size()) {
-              tbv->horizontalHeader()->setSortIndicatorShown(false);
-              return;
-            }
-
-            const QString &columnId = visibleIds[idx];
-            const ColumnDefinition *definition =
-                columnRegistry_->findColumn(columnId);
-            if (!definition || !definition->sortable) {
-              tbv->horizontalHeader()->setSortIndicatorShown(false);
-              return;
-            }
-
-            tbv->horizontalHeader()->setSortIndicatorShown(true);
-            model->sortByColumnId(
-                columnId, tbv->horizontalHeader()->sortIndicatorOrder());
-          });
-
-  connect(header, &QHeaderView::sectionMoved, this, [this, tbv](int, int, int) {
-    if (applyingColumnLayout_) {
-      return;
-    }
-    persistVisibleOrder(tbv);
-  });
-
-  connect(header, &QHeaderView::sectionResized, this,
-          [this](int logicalIndex, int, int newSize) {
-            if (applyingColumnLayout_) {
-              return;
-            }
-            const QList<QString> visibleIds =
-                columnLayoutManager_->visibleColumnIds();
-            if (logicalIndex < 0 || logicalIndex >= visibleIds.size()) {
-              return;
-            }
-            const QString &columnId = visibleIds[logicalIndex];
-            columnLayoutManager_->setColumnWidth(columnId, newSize);
-          });
-
-  connect(header, &QHeaderView::customContextMenuRequested, this,
-          [this, tbv](const QPoint &pos) { showHeaderColumnsMenu(tbv, pos); });
-
-  connect(columnLayoutManager_, &GlobalColumnLayoutManager::layoutChanged, tbv,
-          [this, tbv]() { applyLayoutToTableView(tbv); });
-
-  connect(tbv, &QTableView::doubleClicked, this, &PlaylistTabs::doubleClicked);
-
-  applyLayoutToTableView(tbv);
-}
-
 void PlaylistTabs::addPlaylistTab(const QString &playlistName, int playlistId) {
   Playlist *playlist = collection_->playlist(playlistId);
   Q_ASSERT(playlist != nullptr);
   QWidget *newTab = new QWidget;
   QGridLayout *layout = new QGridLayout(newTab);
-  QTableView *tbv = new QTableView(this);
-  layout->addWidget(tbv);
-  setUpTableView(playlist, tbv);
+  auto *table = new PlaylistTableView(*playlist, *playbackQueue_,
+                                      *columnRegistry_, *columnLayoutManager_);
+  layout->addWidget(table);
+  connect(table, &QTableView::customContextMenuRequested, this,
+          &PlaylistTabs::onCustomContextMenuRequested);
+  connect(table, &QTableView::doubleClicked, this,
+          &PlaylistTabs::doubleClicked);
+  connect(table, &PlaylistTableView::propertiesRequested, this,
+          &PlaylistTabs::openPropertiesForRow);
   qDebug() << "add playlist:" << playlistName;
   ui->tabWidget->addTab(newTab, playlistName);
   const int tabIndex = ui->tabWidget->indexOf(newTab);
@@ -508,72 +388,15 @@ QAction *PlaylistTabs::propertiesAction() const { return propertiesAction_; }
 
 QTabWidget *PlaylistTabs::tabWidget() const { return ui->tabWidget; }
 
-void PlaylistTabs::openPropertiesForCurrentContextRow() {
-  const QModelIndex index = propertiesAction_->data().value<QModelIndex>();
-  openPropertiesForRow(index.row());
+bool PlaylistTabs::isSongRow(int row) const {
+  Q_ASSERT(currentPlaylist_ != nullptr);
+  return row >= 0 && row < currentPlaylist_->songCount();
 }
 
 void PlaylistTabs::openPropertiesForRow(int row) {
-  Q_ASSERT(currentPlaylist_ != nullptr);
-  Q_ASSERT(songLibrary != nullptr);
-  Q_ASSERT(columnRegistry_ != nullptr);
-  if (row < 0 || row >= currentPlaylist_->songCount()) {
-    return;
-  }
-  const MSong &song = currentPlaylist_->getSongByIndex(row);
-  const int songPk = currentPlaylist_->getPkByIndex(row);
-  auto filepathIt = song.find("filepath");
-  if (filepathIt == song.end() || filepathIt->second.text.empty()) {
-    return;
-  }
-
-  std::unordered_map<std::string, std::string> remainingFields;
-  const MSong &refreshedSong = songLibrary->refreshSongFromFile(
-      filepathIt->second.text, &remainingFields);
-
-  auto *dialog = new SongPropertiesDialog(
-      songPk, filepathIt->second.text, *songLibrary, refreshedSong,
-      remainingFields, *columnRegistry_, this);
-  dialog->setAttribute(Qt::WA_DeleteOnClose);
-  dialog->setModal(true);
-  connect(dialog, &SongPropertiesDialog::songUpdated, this,
-          [this](int updatedSongPk) {
-            notifySongDataChangedInAllPlaylists(updatedSongPk);
-          });
-  dialog->show();
-}
-
-void PlaylistTabs::openContainingFolderForCurrentContextRow() {
-  const QModelIndex index =
-      openContainingFolderAction_->data().value<QModelIndex>();
-  openContainingFolderForRow(index.row());
-}
-
-void PlaylistTabs::openContainingFolderForRow(int row) {
-  Q_ASSERT(currentPlaylist_ != nullptr);
-  if (row < 0 || row >= currentPlaylist_->songCount()) {
-    return;
-  }
-
-  const MSong &song = currentPlaylist_->getSongByIndex(row);
-  const auto filepathIt = song.find("filepath");
-  const QString filepath =
-      filepathIt == song.end()
-          ? QString()
-          : QString::fromStdString(filepathIt->second.text).trimmed();
-  const QFileInfo fileInfo(filepath);
-  if (filepath.isEmpty() || !fileInfo.exists() || !fileInfo.isFile()) {
-    QMessageBox::warning(
-        this, kOpenContainingFolderTitle,
-        QStringLiteral("The selected file does not exist:\n%1").arg(filepath));
-    return;
-  }
-
-  if (!FileManagerUtils::revealFile(fileInfo.absoluteFilePath())) {
-    QMessageBox::warning(
-        this, kOpenContainingFolderTitle,
-        QStringLiteral("Could not open the containing folder for:\n%1")
-            .arg(fileInfo.absoluteFilePath()));
+  if (isSongRow(row)) {
+    openSongProperties(this, currentPlaylist_->getPkByIndex(row), *songLibrary,
+                       *columnRegistry_, *collection_);
   }
 }
 
@@ -605,86 +428,6 @@ void PlaylistTabs::persistPlaylistTabOrder() {
   if (!collection_->setPlaylistOrder(playlistIdsInOrder)) {
     qWarning() << "persistPlaylistTabOrder failed";
   }
-}
-
-void PlaylistTabs::applyLayoutToTableView(QTableView *tbv) {
-  QHeaderView *header = tbv->horizontalHeader();
-  applyingColumnLayout_ = true;
-  {
-    QSignalBlocker blocker(header);
-    const QList<QString> visibleIds = columnLayoutManager_->visibleColumnIds();
-    for (int col = 0; col < visibleIds.size(); ++col) {
-      const QString &columnId = visibleIds[col];
-      tbv->setColumnWidth(col, columnLayoutManager_->columnWidth(columnId));
-    }
-    header->setSortIndicatorShown(false);
-  }
-  applyingColumnLayout_ = false;
-}
-
-void PlaylistTabs::persistVisibleOrder(QTableView *tbv) {
-  const QList<QString> currentVisibleIds =
-      columnLayoutManager_->visibleColumnIds();
-  const int count = currentVisibleIds.size();
-  if (count <= 0) {
-    return;
-  }
-
-  QList<QString> visibleByVisualIndex;
-  visibleByVisualIndex.resize(count);
-
-  QHeaderView *header = tbv->horizontalHeader();
-  for (int logical = 0; logical < count; ++logical) {
-    const int visual = header->visualIndex(logical);
-    if (visual < 0 || visual >= count) {
-      continue;
-    }
-    visibleByVisualIndex[visual] = currentVisibleIds[logical];
-  }
-
-  QList<QString> newOrder;
-  for (const QString &id : visibleByVisualIndex) {
-    if (!id.isEmpty()) {
-      newOrder.push_back(id);
-    }
-  }
-
-  for (const QString &id : columnLayoutManager_->allOrderedColumnIds()) {
-    if (!columnLayoutManager_->isColumnVisible(id)) {
-      newOrder.push_back(id);
-    }
-  }
-
-  columnLayoutManager_->setOrder(newOrder);
-}
-
-void PlaylistTabs::showHeaderColumnsMenu(QTableView *tbv, const QPoint &pos) {
-
-  QMenu menu(this);
-  for (const QString &id : columnLayoutManager_->allOrderedColumnIds()) {
-    const ColumnDefinition *definition = columnRegistry_->findColumn(id);
-    const QString title = definition ? definition->title : id;
-
-    QAction *action = menu.addAction(title);
-    action->setCheckable(true);
-    action->setChecked(columnLayoutManager_->isColumnVisible(id));
-    action->setData(id);
-  }
-
-  QAction *selected = menu.exec(tbv->horizontalHeader()->mapToGlobal(pos));
-  if (!selected) {
-    return;
-  }
-
-  const QString selectedId = selected->data().toString();
-  const bool shouldBeVisible = selected->isChecked();
-
-  if (!shouldBeVisible &&
-      columnLayoutManager_->visibleColumnIds().size() <= 1) {
-    return;
-  }
-
-  columnLayoutManager_->setColumnVisible(selectedId, shouldBeVisible);
 }
 
 bool PlaylistTabs::eventFilter(QObject *obj, QEvent *event) {

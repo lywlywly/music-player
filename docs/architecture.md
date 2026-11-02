@@ -39,7 +39,8 @@ The backend must not depend on how (or whether) it is displayed.
   `PlaybackQueue`, `PlaybackManager`, playback policies,
   `PlayCompletionTracker`, `PlaybackController`.
 * Frontend (Qt view adapters and widgets): `PlaylistTableModel`,
-  `PlaylistTabs`, `LibrarySearchResultsModel`, dialogs, `MainWindow`.
+  `PlaylistTableView`, `PlaylistTabs`, `LibrarySearchResultsModel`, dialogs,
+  `MainWindow`.
 
 | Backend classes may use | Backend classes must not use |
 |---|---|
@@ -82,7 +83,7 @@ reach the views.
 ```
 per-playlist:     caller -> Playlist -> SongLibrary
 lifecycle/cross:  caller -> PlaylistCollection -> Playlist -> SongLibrary
-view updates:     Playlist / PlaybackQueue / layout signals -> PlaylistTableModel -> QTableView
+view updates:     Playlist / PlaybackQueue / layout signals -> PlaylistTableModel -> PlaylistTableView
 ```
 
 * Callers (`MainWindow`, `PlaylistTabs`, dialogs) perform playlist operations
@@ -173,7 +174,8 @@ The in-memory song store and reading/writing audio file tags.
 ### Playlist domain
 
 `Playlist` and `PlaylistCollection` are backend classes (see "Backend classes
-do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
+do not leak UI"); `PlaylistTableModel`, `PlaylistTableView` and `PlaylistTabs`
+are the Qt frontend.
 
 * `PlaylistCollection` (backend, owned by `MainWindow`)
   * Owns all `Playlist`s (`std::map<int, std::unique_ptr<Playlist>>`; each is
@@ -184,18 +186,14 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
   * Removes from `SongLibrary` the songs that leave their last playlist: on each playlist's `songPksRemoved` (Remove from Playlist, Clear Playlist) and in `removePlaylist` (Remove Tab). Then emits `songsRemovedFromLibrary(songPks)`.
 * `PlaylistTabs` (frontend)
   * Builds tabs from a loaded `PlaylistCollection` and follows its signals; delegates create/remove/rename/reorder to it.
-  * Creates one `PlaylistTableModel` per tab (parented to the tab's table view) and connects UI interactions.
-  * Opens per-song Properties dialog from row context menu and refreshes playlist rows after successful save.
+  * Creates one `PlaylistTableView` per tab and handles its row context menu and double-click.
+  * Properties (row context menu, and the table's shortcut) and Open Containing Folder (row context menu) call `openSongProperties` and `revealSongFile` for the row's song.
   * Remove from Playlist (row context menu) removes the selected rows with `Playlist::removeSongs`.
   * Clear Playlist (row context menu, and the `MainWindow` menu action) calls `clearCurrentPlaylist`.
   * Refresh (tab context menu) re-reads the playlist's tags with `refreshMetadataWithProgress`.
-  * The Properties context-menu action carries shortcut metadata so the menu can
-    display the platform binding (`Command+I` on macOS, `Alt+Enter` elsewhere),
-    but the actual keyboard handling is registered with `QShortcut` on each
-    playlist table. Qt does not reliably dispatch arbitrary `QAction`
-    shortcuts from a transient popup `QMenu`, and keyboard activation must use
-    the selected/current row rather than the right-click row stored on the
-    context-menu action.
+  * The Properties context-menu action carries `PlaylistTableView::propertiesShortcuts()`
+    only so the menu can display the platform binding (`Command+I` on macOS,
+    `Alt+Enter` elsewhere); the table handles the keys (see `PlaylistTableView`).
 * `Playlist` (backend)
   * One playlist: song-id ordering, sorting, `last_played`, and per-playlist operations (`addFiles`, `addSong`, `addSongByPk`, `removeSongs`, `clear`, `sortByField`, `refreshMetadataFromFiles`).
   * A song appears at most once per playlist. Adding a song already present is a silent no-op (`addSong` / `addSongByPk` return `false`; `addFiles` skips it and returns only the appended pks). `playlist_items` enforces this with `UNIQUE (playlist_id, song_id)`.
@@ -205,11 +203,18 @@ do not leak UI"); `PlaylistTableModel` and `PlaylistTabs` are the Qt frontend.
   * `QAbstractTableModel` adapter for one `Playlist`: columns, header, cell text, sortable-column check (`sortByColumnId`).
   * Renders the status column from `PlaybackQueue::statusOf` and refreshes only the status cell on `PlaybackQueue::statusChanged` for its own playlist.
   * Holds the `Playlist` through a `QPointer`, so it reports no rows if the playlist is destroyed first.
+* `PlaylistTableView` (frontend)
+  * `QTableView` of one `Playlist` through its own `PlaylistTableModel`.
+  * Header: applies `GlobalColumnLayoutManager` widths on `layoutChanged`, and writes back column moves, resizes and the header menu's visibility changes. Clicking a sortable column sorts the playlist (`sortByColumnId`).
+  * Handles the Properties keys with a `QShortcut` per key and emits `propertiesRequested(row)` for the first selected row, or the current row when none is selected. Qt does not reliably dispatch `QAction` shortcuts from a transient popup `QMenu`, and the keys must act on the selection rather than the right-clicked row stored on the context-menu action.
 
 ### Song Properties UI
 
-The dialogs for viewing and editing one song's tags.
+The UI for one song: viewing and editing its tags, and revealing its file.
 
+* `songdialogs.h`
+  * `openSongProperties` refreshes the song from its file, opens `SongPropertiesDialog`, and calls `PlaylistCollection::notifySongChanged` after a save.
+  * `revealSongFile` shows the file in the file manager, with a warning when the file is missing or cannot be shown.
 * `SongPropertiesDialog`
   * Shows refreshed parsed/computed fields first, then remaining raw tag fields.
   * Buffers edits in-memory and writes once on `Save`.

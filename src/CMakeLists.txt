@@ -160,6 +160,8 @@ set(PROJECT_SOURCES
   playlistdialogs.cpp
   playlisttablemodel.h
   playlisttablemodel.cpp
+  playlisttableview.h
+  playlisttableview.cpp
   playlisttabs.ui
   playlisttabs.h
   playlisttabs.cpp
@@ -170,6 +172,8 @@ set(PROJECT_SOURCES
   settingsdialog.ui
   settingsdialog.h
   settingsdialog.cpp
+  songdialogs.h
+  songdialogs.cpp
   songlibrary.h
   songlibrary.cpp
   songpropertiesdialog.ui

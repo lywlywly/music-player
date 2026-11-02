@@ -9,7 +9,6 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
-#include <QShortcut>
 #include <QSignalSpy>
 #include <QSqlDatabase>
 #include <QSqlQuery>
@@ -27,6 +26,7 @@
 #include "../playbackmanager.h"
 #include "../playbackqueue.h"
 #include "../playlistcollection.h"
+#include "../playlisttableview.h"
 #include "../playlisttabs.h"
 #include "../songlibrary.h"
 #include "../songparser.h"
@@ -129,10 +129,11 @@ private slots:
   void init_persistsDefaultPlaylistMetadataRow();
   void helperMethods_mapAndFindPlaylist();
   void navigateIndex_selectsTargetRow();
-  void notifySongDataChangedInAllPlaylists_notifiesMatchingRows();
+  void tableDoubleClick_isForwarded();
   void customContextMenu_bindsRowIntoQueueActions();
   void removeFromPlaylistAction_removesSelectedRows();
-  void propertiesShortcut_isInstalledOnTable();
+  void propertiesAction_showsPropertiesShortcuts();
+  void propertiesShortcut_opensDialogForSongRow();
   void propertiesDialog_showsRefreshedAndRemainingFields();
   void propertiesDialog_editSave_writesDirtyFieldAndEmitsSongUpdated();
   void propertiesDialog_cancel_discardsBufferedEdits();
@@ -278,20 +279,19 @@ void TestPlaylistTabs::navigateIndex_selectsTargetRow() {
   QVERIFY(table->selectionModel()->isRowSelected(1, QModelIndex()));
 }
 
-void TestPlaylistTabs::
-    notifySongDataChangedInAllPlaylists_notifiesMatchingRows() {
+void TestPlaylistTabs::tableDoubleClick_isForwarded() {
   Playlist *pl = tabs_->currentPlaylist();
   QVERIFY(pl != nullptr);
-  pl->addSong(makeSong("A", "Artist", "/tmp/pt-notify-a.mp3", "1"));
-  const int songPk = pl->getPkByIndex(0);
+  pl->addSong(makeSong("A", "Artist", "/tmp/pt-double-click.mp3", "1"));
+  QTableView *table =
+      tabs_->tabWidget()->currentWidget()->findChild<QTableView *>();
+  QVERIFY(table != nullptr);
+  QSignalSpy spy(tabs_, &PlaylistTabs::doubleClicked);
 
-  QSignalSpy spy(pl, &Playlist::songDataChanged);
+  emit table->doubleClicked(table->model()->index(0, 0));
 
-  tabs_->notifySongDataChangedInAllPlaylists(songPk);
   QCOMPARE(spy.count(), 1);
-
-  tabs_->notifySongDataChangedInAllPlaylists(-1);
-  QCOMPARE(spy.count(), 1);
+  QCOMPARE(spy.at(0).at(0).value<QModelIndex>().row(), 0);
 }
 
 void TestPlaylistTabs::customContextMenu_bindsRowIntoQueueActions() {
@@ -315,7 +315,7 @@ void TestPlaylistTabs::customContextMenu_bindsRowIntoQueueActions() {
       popup->close();
     }
   });
-  tabs_->onCustomContextMenuRequested(validPos);
+  emit table->customContextMenuRequested(validPos);
   QVERIFY(tabs_->playNextAction()->isEnabled());
   QVERIFY(tabs_->playEndAction()->isEnabled());
   QVERIFY(tabs_->removeFromPlaylistAction()->isEnabled());
@@ -366,31 +366,27 @@ void TestPlaylistTabs::removeFromPlaylistAction_removesSelectedRows() {
   QCOMPARE(pl->getSongByIndex(0).at("title").text, std::string("B"));
 }
 
-void TestPlaylistTabs::propertiesShortcut_isInstalledOnTable() {
+void TestPlaylistTabs::propertiesAction_showsPropertiesShortcuts() {
+  QCOMPARE(tabs_->propertiesAction()->shortcuts(),
+           PlaylistTableView::propertiesShortcuts());
+  QVERIFY(tabs_->propertiesAction()->isShortcutVisibleInContextMenu());
+}
+
+void TestPlaylistTabs::propertiesShortcut_opensDialogForSongRow() {
   Playlist *pl = tabs_->currentPlaylist();
   QVERIFY(pl != nullptr);
-
-  QTableView *table =
-      tabs_->tabWidget()->currentWidget()->findChild<QTableView *>();
+  pl->addSong(makeSong("A", "Artist", "/tmp/pt-props-shortcut.mp3", "1"));
+  auto *table =
+      tabs_->tabWidget()->currentWidget()->findChild<PlaylistTableView *>();
   QVERIFY(table != nullptr);
 
-  const QList<QKeySequence> actionShortcuts =
-      tabs_->propertiesAction()->shortcuts();
-  QVERIFY(tabs_->propertiesAction()->isShortcutVisibleInContextMenu());
-  QList<QKeySequence> shortcutSequences;
-  for (QShortcut *shortcut : table->findChildren<QShortcut *>()) {
-    shortcutSequences.push_back(shortcut->key());
-    QCOMPARE(shortcut->context(), Qt::WidgetWithChildrenShortcut);
-  }
-#ifdef Q_OS_MACOS
-  QVERIFY(actionShortcuts.contains(QKeySequence(Qt::CTRL | Qt::Key_I)));
-  QVERIFY(shortcutSequences.contains(QKeySequence(Qt::CTRL | Qt::Key_I)));
-#else
-  QVERIFY(actionShortcuts.contains(QKeySequence(Qt::ALT | Qt::Key_Return)));
-  QVERIFY(actionShortcuts.contains(QKeySequence(Qt::ALT | Qt::Key_Enter)));
-  QVERIFY(shortcutSequences.contains(QKeySequence(Qt::ALT | Qt::Key_Return)));
-  QVERIFY(shortcutSequences.contains(QKeySequence(Qt::ALT | Qt::Key_Enter)));
-#endif
+  emit table->propertiesRequested(-1);
+  QVERIFY(tabs_->findChild<SongPropertiesDialog *>() == nullptr);
+
+  emit table->propertiesRequested(0);
+  auto *dialog = tabs_->findChild<SongPropertiesDialog *>();
+  QVERIFY(dialog != nullptr);
+  delete dialog;
 }
 
 void TestPlaylistTabs::propertiesDialog_showsRefreshedAndRemainingFields() {
@@ -545,6 +541,7 @@ void TestPlaylistTabs::
   }
   QVERIFY(dialog != nullptr);
   QSignalSpy updatedSpy(dialog, &SongPropertiesDialog::songUpdated);
+  QSignalSpy rowSpy(pl, &Playlist::songDataChanged);
 
   QTableView *propertiesTable =
       dialog->findChild<QTableView *>("properties_table");
@@ -604,6 +601,7 @@ void TestPlaylistTabs::
   QCOMPARE(updatedSpy.count(), 1);
   const QList<QVariant> args = updatedSpy.takeFirst();
   QCOMPARE(args.at(0).toInt(), songPk);
+  QCOMPARE(rowSpy.count(), 1);
 
   std::unordered_map<std::string, std::string> remainingAfter;
   const std::optional<MSong> parseResult =

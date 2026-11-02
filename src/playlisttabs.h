@@ -1,26 +1,27 @@
 #ifndef PLAYLISTTABS_H
 #define PLAYLISTTABS_H
 
-#include "globalcolumnlayoutmanager.h"
 #include "playbackmanager.h"
 #include "playlistcollection.h"
 #include <QLineEdit>
 #include <QMenu>
-#include <QTableView>
 #include <QWidget>
+
+class ColumnRegistry;
+class GlobalColumnLayoutManager;
+class PlaylistTableView;
+class QTabWidget;
 
 namespace Ui {
 class PlaylistTabs;
 }
 
-// UI coordinator for playlist tabs and table views. It creates one
-// PlaylistTableModel per tab, wires header/table interactions, handles tab
-// context actions, and keeps the active playlist synchronized with playback
-// control. Playlist lifecycle and `playlists` table writes are delegated to
-// PlaylistCollection; tabs follow its signals.
-// Tab identity:
-// each tab stores its DB `playlist_id` in QTabBar::tabData(index), and all
-// playlist lookup/removal/reorder persistence uses that id (not tab
+// UI coordinator for playlist tabs. It creates one PlaylistTableView per tab,
+// handles the row and tab context actions, and keeps the active playlist
+// synchronized with playback control. Playlist lifecycle and `playlists` table
+// writes are delegated to PlaylistCollection; tabs follow its signals. Tab
+// identity: each tab stores its DB `playlist_id` in QTabBar::tabData(index),
+// and all playlist lookup/removal/reorder persistence uses that id (not tab
 // text/index).
 class PlaylistTabs : public QWidget {
   Q_OBJECT
@@ -49,13 +50,9 @@ public:
   void clearCurrentPlaylist();
   void createNewPlaylistTabFromSongIds(const QList<int> &songIds);
   bool renamePlaylistTabByIndex(int index, const QString &newName);
-  void setUpTableView(Playlist *, QTableView *);
   void navigateIndex(int row, Playlist *pl);
+  // PlaylistTableView::firstSelectedRow of the current tab, or -1 without one.
   int firstSelectedRow() const;
-  // Emits row data-changed notifications for this songPk in every playlist
-  // model. This is a UI/model refresh signal path and does not mutate song
-  // data.
-  void notifySongDataChangedInAllPlaylists(int songPk);
 
 signals:
   void doubleClicked(const QModelIndex &index);
@@ -80,16 +77,12 @@ private:
   void commitInlineRename();
   void cancelInlineRename();
   Policy selectedPlaybackPolicy() const;
-  void applyLayoutToTableView(QTableView *tbv);
-  void persistVisibleOrder(QTableView *tbv);
-  void showHeaderColumnsMenu(QTableView *tbv, const QPoint &pos);
-  void openPropertiesForCurrentContextRow();
+  // Whether row is a row of the current playlist.
+  bool isSongRow(int row) const;
   void openPropertiesForRow(int row);
-  void openContainingFolderForCurrentContextRow();
-  void openContainingFolderForRow(int row);
   bool eventFilter(QObject *obj, QEvent *event) override;
   Ui::PlaylistTabs *ui;
-  QTableView *currentTableView;
+  PlaylistTableView *currentTableView;
   QMenu playlistContextMenu;
   QAction *playNextAction_;
   QAction *playEndAction_;
@@ -105,7 +98,6 @@ private:
   QActionGroup *playbackOrderMenuActionGroup;
   ColumnRegistry *columnRegistry_ = nullptr;
   GlobalColumnLayoutManager *columnLayoutManager_ = nullptr;
-  bool applyingColumnLayout_ = false;
   QLineEdit *tabRenameEditor_ = nullptr;
   int renamingTabIndex_ = -1;
 };
