@@ -32,6 +32,7 @@ set(TEST_NAMES
     playbackqueue
     playcompletiontracker
     nowplayingdisplay
+    coverartpresenter
     displayexpression
     settingsdialog_ui
     playlist
@@ -47,6 +48,10 @@ endif()
 SETUP_TESTS(${TEST_NAMES})
 
 set_tests_properties(mainwindow PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
+
+set_tests_properties(coverartpresenter PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
 )
 

@@ -97,3 +97,33 @@ LyricsLoader::parseLyricsText(std::string_view rawText) {
   std::istringstream stream{std::string(rawText)};
   return parseLyricsStream(stream);
 }
+
+std::map<int, std::string> LyricsLoader::resolveLyrics(
+    const std::unordered_map<std::string, FieldValue> &song,
+    const std::unordered_map<std::string, std::string> &remainingFields) {
+  std::string lyricsText;
+  for (const char *key : {"attr:unsynced_lyrics", "attr:lyrics"}) {
+    auto it = song.find(key);
+    if (it != song.end() && !it->second.text.empty()) {
+      lyricsText = it->second.text;
+      break;
+    }
+  }
+  if (lyricsText.empty()) {
+    for (const char *key : {"unsynced_lyrics", "lyrics"}) {
+      auto it = remainingFields.find(key);
+      if (it != remainingFields.end() && !it->second.empty()) {
+        lyricsText = it->second;
+        break;
+      }
+    }
+  }
+  std::map<int, std::string> lyrics;
+  if (!lyricsText.empty()) {
+    lyrics = parseLyricsText(lyricsText);
+  }
+  if (lyrics.empty()) {
+    lyrics = getLyrics(song.at("title").text, song.at("artist").text);
+  }
+  return lyrics;
+}

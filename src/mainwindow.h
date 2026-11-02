@@ -3,10 +3,11 @@
 
 #include "cloudplaystatssynccoordinator.h"
 #include "columnregistry.h"
+#include "coverartpresenter.h"
 #include "databasemanager.h"
 #include "globalcolumnlayoutmanager.h"
 #include "isystemmediainterface.h"
-#include "lyricsmanager.h"
+#include "lyricspresenter.h"
 #include "nowplayingdisplay.h"
 #include "playbackbackendmanager.h"
 #include "playbackmanager.h"
@@ -15,11 +16,9 @@
 #include "playlistcollection.h"
 #include "playlisttabs.h"
 #include "songlibrary.h"
-#include <QColor>
 #include <QMainWindow>
 #include <QString>
 #include <QTimer>
-#include <unordered_map>
 
 class SettingsDialog;
 
@@ -54,11 +53,6 @@ private:
   // runtime symbols for its display expression preview.
   void updateSettingsDisplayPreviewContext(SettingsDialog *dialog);
   void updatePlaybackTimeStatus();
-  void updateImageSize();
-  void setUpImageAndLyrics(
-      const MSong &song,
-      const std::unordered_map<std::string, std::string> &remainingFields);
-  void clearImageAndLyrics();
   void open();
   void openFolder();
   void seek(int mseconds);
@@ -76,11 +70,6 @@ private:
   void handlePlaybackFailure(const QString &filepath);
   void navigateIndex(int row, Playlist *);
   void setUpSplitter();
-  void setUpLyricsPanel();
-  void applyLyricsFontFromSettings();
-  void applyLyricsHighlightColorFromSettings();
-  void setLyricsPanelFont(const QString &fontFamily, int pointSize);
-  void setLyricsPanelHighlightColor(const QColor &color);
   void applyDisplayThemeFromSettings();
   void applyDisplayThemeMode(const QString &mode);
   void setupSystemMediaInterface();
@@ -116,8 +105,8 @@ private:
   // models) are destroyed before the playlists they show.
   PlaylistCollection *playlists_ = nullptr;
   PlaylistTabs *playlistTabs;
-  LyricsManager lyricsManager; // TODO: use value type
-  QPixmap pixmap;
+  CoverArtPresenter *coverArt_ = nullptr;
+  LyricsPresenter *lyrics_ = nullptr;
   QActionGroup *playbackOrderMenuActionGroup;
   ISystemMediaInterface *sysMedia;
   NowPlayingDisplay nowPlayingDisplay_;

@@ -2,6 +2,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QDir>
+#include <QFile>
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
@@ -29,6 +30,7 @@
 #include "../dummyaudioplayer.h"
 #include "../dummysystemmediainterface.h"
 #include "../librarysearchdialog.h"
+#include "../lyricsmanager.h"
 #include "../mainwindow.h"
 #include "../playbackbackendmanager.h"
 #include "../playlisttablemodel.h"
@@ -36,6 +38,7 @@
 #include "../settingsdialog.h"
 #include "../songparser.h"
 #include "../utils.h"
+#include "scopedhomedir.h"
 #include "testaudiofiles.h"
 
 namespace {
@@ -149,6 +152,7 @@ private slots:
   void next_onEmptyCurrentTab_stopsPlayback();
   void removingPlayingTab_stopsPlayback();
   void play_onEmptyPlaylist_doesNothing();
+  void lyrics_followPositionAfterBackendSwitch();
 
 private:
   void recreateWindow();
@@ -1635,6 +1639,64 @@ void TestMainWindow::play_onEmptyPlaylist_doesNothing() {
   QVERIFY(playAction != nullptr);
   QVERIFY_THROWS_NO_EXCEPTION(playAction->trigger());
   QVERIFY(playlist->empty());
+}
+
+void TestMainWindow::lyrics_followPositionAfterBackendSwitch() {
+  const ScopedHomeDir scopedHome(workDir_->path());
+
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(tabs != nullptr);
+  Playlist *playlist = tabs->currentPlaylist();
+  QVERIFY(playlist != nullptr);
+  auto *media = window_->findChild<DummySystemMediaInterface *>();
+  QVERIFY(media != nullptr);
+  auto *lyrics = window_->findChild<LyricsManager *>();
+  QVERIFY(lyrics != nullptr);
+  PlaybackBackendManager *backend =
+      window_->findChild<PlaybackBackendManager *>();
+  QVERIFY(backend != nullptr);
+
+  const QString wav = workDir_->filePath("lyrics-song.wav");
+  QVERIFY(writeSilentWav(wav));
+  playlist->addSong(makeSong("Song", "Artist", wav));
+  playlist->setLastPlayed(playlist->getPkByIndex(0));
+  // playSong refreshes the song from the untagged file, so look up the title
+  // and artist it plays with. The .lrc file is written after this first play,
+  // so only the play on the new backend loads it.
+  media->requestPlayForTest();
+  const MSong &played = playlist->getSongByIndex(0);
+  QVERIFY(QDir(workDir_->path()).mkpath("Music"));
+  QFile lrc(
+      QDir(workDir_->path())
+          .filePath(QStringLiteral("Music/%1 - %2.lrc")
+                        .arg(QString::fromStdString(played.at("artist").text),
+                             QString::fromStdString(played.at("title").text))));
+  QVERIFY(lrc.open(QIODevice::WriteOnly));
+  lrc.write("[00:01.00]first\n[00:02.00]second\n");
+  lrc.close();
+
+  QAction *settingsAction = window_->findChild<QAction *>("actionPreferences");
+  QVERIFY(settingsAction != nullptr);
+  settingsAction->trigger();
+  SettingsDialog *dialog = window_->findChild<SettingsDialog *>();
+  QTRY_VERIFY(dialog != nullptr);
+  const auto otherBackend =
+      backend->currentBackend() == PlaybackBackendManager::Backend::GStreamer
+          ? PlaybackBackendManager::Backend::QMediaPlayer
+          : PlaybackBackendManager::Backend::GStreamer;
+  emit dialog->backendChanged(otherBackend);
+  QCOMPARE(backend->currentBackend(), otherBackend);
+  dialog->close();
+
+  // The backend switch stopped playback, so Play starts the song again on the
+  // new player.
+  media->requestPlayForTest();
+  QTRY_VERIFY(!lyrics->getCurrentLyricsMap().empty());
+
+  QSignalSpy spy(lyrics, &LyricsManager::newLyricsLineIndex);
+  backend->player()->setPosition(2500);
+  QTRY_COMPARE(spy.size(), 1);
+  QCOMPARE(spy.at(0).at(0).toInt(), 1);
 }
 
 QTEST_MAIN(TestMainWindow)

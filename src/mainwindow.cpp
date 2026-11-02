@@ -4,10 +4,8 @@
 #include "databasemanager.h"
 #include "gstaudioplayer.h"
 #include "librarysearchdialog.h"
-#include "lyricsloader.h"
 #include "playbackbuttonstyle.h"
 #include "settingsdialog.h"
-#include "songparser.h"
 #include "systemmediainterfacefactory.h"
 #include <QActionGroup>
 #include <QApplication>
@@ -23,7 +21,6 @@
 #include <QRandomGenerator>
 #include <QResource>
 #include <QSettings>
-#include <QSize>
 #include <QSqlDatabase>
 #include <QStandardPaths>
 #include <QStatusBar>
@@ -107,22 +104,6 @@ void setUpPlaybackButtonIcons(Ui::MainWindow *ui) {
       ui->random_button, QStringLiteral(":/icons/media-playback-random.svg"));
 }
 
-QPixmap scaledCoverPixmap(const QPixmap &source, const QSize &logicalMaxSize,
-                          qreal devicePixelRatio) {
-  if (source.isNull() || logicalMaxSize.isEmpty()) {
-    return {};
-  }
-
-  const qreal renderScale = std::max<qreal>(1.0, devicePixelRatio);
-  const QSize physicalMaxSize = logicalMaxSize * renderScale;
-  const QSize physicalTargetSize =
-      source.size().scaled(physicalMaxSize, Qt::KeepAspectRatio);
-  QPixmap scaled = source.scaled(physicalTargetSize, Qt::KeepAspectRatio,
-                                 Qt::SmoothTransformation);
-  scaled.setDevicePixelRatio(renderScale);
-  return scaled;
-}
-
 } // namespace
 
 MainWindow::MainWindow(QWidget *parent)
@@ -134,13 +115,15 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
       columnLayoutManager_(columnRegistry_, this),
       databaseManager_(columnRegistry_, std::move(databaseName),
                        std::move(connectionName)),
-      songLibrary(columnRegistry_, databaseManager_), lyricsManager{this},
+      songLibrary(columnRegistry_, databaseManager_),
       nowPlayingDisplay_(columnRegistry_),
       cloudPlayStatsSyncCoordinator_(songLibrary, this) {
   prewarmSelectedPlaybackBackend();
   Q_INIT_RESOURCE(resources);
   ui->setupUi(this);
   playlists_ = new PlaylistCollection(songLibrary, databaseManager_, this);
+  coverArt_ = new CoverArtPresenter(ui->label, this);
+  lyrics_ = new LyricsPresenter(ui->lyricsPanel, this);
   applyDisplayThemeFromSettings();
   setUpPlaybackButtonIcons(ui);
   defaultWindowTitle_ = windowTitle();
@@ -152,7 +135,7 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
   initPlaybackBackend();
   initVolumeControl();
   setUpPlaybackActions();
-  setUpLyricsPanel();
+  lyrics_->applySettings();
   setUpSplitter();
   setupSystemMediaInterface();
 }
@@ -178,6 +161,8 @@ void MainWindow::setupSystemMediaInterface() {
           &MainWindow::prev);
   connect(sysMedia, &ISystemMediaInterface::seekRequested, this,
           [this](qint64 positionMs) { seek(positionMs); });
+  connect(coverArt_, &CoverArtPresenter::artworkChanged, sysMedia,
+          &ISystemMediaInterface::setArtwork);
 }
 
 void MainWindow::setUpMenuBar() {
@@ -361,11 +346,10 @@ void MainWindow::initSettings() {
             });
     connect(dialog, &SettingsDialog::lyricsFontChanged, this,
             [this](const QString &fontFamily, int pointSize) {
-              setLyricsPanelFont(fontFamily, pointSize);
+              lyrics_->setFont(fontFamily, pointSize);
             });
-    connect(
-        dialog, &SettingsDialog::lyricsHighlightColorChanged, this,
-        [this](const QColor &color) { setLyricsPanelHighlightColor(color); });
+    connect(dialog, &SettingsDialog::lyricsHighlightColorChanged, this,
+            [this](const QColor &color) { lyrics_->setHighlightColor(color); });
     connect(dialog, &SettingsDialog::statusBarExpressionChanged, this,
             [this](const QString &expression) {
               nowPlayingDisplay_.setExpression(DisplayExpressionKind::StatusBar,
@@ -419,59 +403,6 @@ void MainWindow::setUpPlaybackActions() {
           [this]() { seek(ui->horizontalSlider->value()); });
 }
 
-void MainWindow::setUpLyricsPanel() {
-  applyLyricsFontFromSettings();
-  applyLyricsHighlightColorFromSettings();
-  connect(backendManager->player(), &AudioPlayer::positionChanged,
-          &lyricsManager, &LyricsManager::onPlayerProgressChange);
-  connect(&lyricsManager, &LyricsManager::newLyricsLineIndex, ui->lyricsPanel,
-          &LyricsPanel::updateLyricsPanel);
-}
-
-void MainWindow::setLyricsPanelFont(const QString &fontFamily, int pointSize) {
-  // Start from the application font so its CJK fallback families are kept.
-  QFont font = QApplication::font();
-  font.setPointSize(pointSize);
-  if (!fontFamily.isEmpty()) {
-    QStringList families = font.families();
-    families.removeAll(fontFamily);
-    families.prepend(fontFamily);
-    font.setFamilies(families);
-  }
-  ui->lyricsPanel->setLyricsTextFont(font);
-}
-
-void MainWindow::setLyricsPanelHighlightColor(const QColor &color) {
-  ui->lyricsPanel->setHighlightTextColor(color);
-}
-
-void MainWindow::applyLyricsFontFromSettings() {
-  QSettings settings;
-  const QString fontFamily =
-      settings.value("lyrics/font_family", QString()).toString();
-  const bool useSystemDefaultFont =
-      settings.value("lyrics/use_system_default_font", fontFamily.isEmpty())
-          .toBool();
-  const int defaultLyricsFontSize = QApplication::font().pointSize();
-  const int fontSize =
-      settings.value("lyrics/font_size", defaultLyricsFontSize).toInt();
-  if (useSystemDefaultFont || fontFamily.isEmpty()) {
-    setLyricsPanelFont(QString(), fontSize);
-    return;
-  }
-  setLyricsPanelFont(fontFamily, fontSize);
-}
-
-void MainWindow::applyLyricsHighlightColorFromSettings() {
-  QSettings settings;
-  QColor color(
-      settings.value("lyrics/highlight_color", QString("#0064ff")).toString());
-  if (!color.isValid()) {
-    color = QColor(0, 100, 255);
-  }
-  setLyricsPanelHighlightColor(color);
-}
-
 void MainWindow::applyDisplayThemeFromSettings() {
   QSettings settings;
   applyDisplayThemeMode(
@@ -498,10 +429,10 @@ void MainWindow::applyDisplayThemeMode(const QString &mode) {
 }
 
 void MainWindow::setUpSplitter() {
-  connect(ui->splitter, &QSplitter::splitterMoved, this,
-          &MainWindow::updateImageSize);
-  connect(ui->splitter_2, &QSplitter::splitterMoved, this,
-          &MainWindow::updateImageSize);
+  connect(ui->splitter, &QSplitter::splitterMoved, coverArt_,
+          &CoverArtPresenter::updateCoverSize);
+  connect(ui->splitter_2, &QSplitter::splitterMoved, coverArt_,
+          &CoverArtPresenter::updateCoverSize);
 }
 
 void MainWindow::setUpPlaybackBackend() {
@@ -567,7 +498,8 @@ void MainWindow::playSong(const MSong &song, int row, Playlist *pl) {
   sysMedia->setTitleAndArtist(
       QString::fromStdString(activeSong.at("title").text),
       QString::fromStdString(activeSong.at("artist").text));
-  setUpImageAndLyrics(activeSong, remainingFields);
+  lyrics_->showSong(activeSong, remainingFields);
+  coverArt_->showSong(activeSong);
   control.play();
   updatePlaybackTimeStatus();
 }
@@ -693,7 +625,8 @@ void MainWindow::stop() {
   backendManager->player()->stop();
   control.stop();
   nowPlayingDisplay_.stopSong();
-  clearImageAndLyrics();
+  lyrics_->clear();
+  coverArt_->clear();
   updatePlaybackTimeStatus();
   sysMedia->setPlaybackState(ISystemMediaInterface::PlaybackState::Stopped);
 }
@@ -705,57 +638,6 @@ void MainWindow::navigateIndex(int row, Playlist *pl) {
   playlistTabs->navigateIndex(row, pl);
 }
 
-void MainWindow::setUpImageAndLyrics(
-    const MSong &song,
-    const std::unordered_map<std::string, std::string> &remainingFields) {
-  std::string lyricsText;
-  for (const char *key : {"attr:unsynced_lyrics", "attr:lyrics"}) {
-    auto it = song.find(key);
-    if (it != song.end() && !it->second.text.empty()) {
-      lyricsText = it->second.text;
-      break;
-    }
-  }
-  if (lyricsText.empty()) {
-    for (const char *key : {"unsynced_lyrics", "lyrics"}) {
-      auto it = remainingFields.find(key);
-      if (it != remainingFields.end() && !it->second.empty()) {
-        lyricsText = it->second;
-        break;
-      }
-    }
-  }
-  std::map<int, std::string> lyrics;
-  if (!lyricsText.empty()) {
-    lyrics = LyricsLoader::parseLyricsText(lyricsText);
-  }
-  if (lyrics.empty()) {
-    lyrics =
-        LyricsLoader::getLyrics(song.at("title").text, song.at("artist").text);
-  }
-  lyricsManager.setLyrics(std::move(lyrics));
-  auto [data, size] = SongParser::extractCoverImage(song.at("filepath").text);
-  if (size > 0) {
-    pixmap.loadFromData(data.data(), size);
-    ui->label->clear();
-    updateImageSize();
-    sysMedia->setArtwork(QByteArray(reinterpret_cast<const char *>(data.data()),
-                                    static_cast<int>(size)));
-  } else {
-    pixmap = QPixmap();
-    ui->label->clear();
-    ui->label->setText("No cover");
-  }
-  ui->lyricsPanel->setLyricsPanel(lyricsManager.getCurrentLyricsMap());
-}
-
-void MainWindow::clearImageAndLyrics() {
-  lyricsManager.setLyrics({});
-  ui->lyricsPanel->setLyricsPanel(lyricsManager.getCurrentLyricsMap());
-  pixmap = QPixmap();
-  ui->label->clear();
-}
-
 bool MainWindow::event(QEvent *event) {
   if (event->type() == QEvent::StatusTip) {
     return true;
@@ -765,18 +647,7 @@ bool MainWindow::event(QEvent *event) {
 
 void MainWindow::resizeEvent(QResizeEvent *event) {
   QMainWindow::resizeEvent(event);
-  updateImageSize();
-}
-
-void MainWindow::updateImageSize() {
-  if (pixmap.isNull()) {
-    return;
-  }
-
-  const QSize logicalMaxSize = ui->label->contentsRect().size();
-  const qreal devicePixelRatio = ui->label->devicePixelRatioF();
-  ui->label->setPixmap(
-      scaledCoverPixmap(pixmap, logicalMaxSize, devicePixelRatio));
+  coverArt_->updateCoverSize();
 }
 
 void MainWindow::durationChanged(qint64 newDuration) {
@@ -801,6 +672,7 @@ void MainWindow::positionChanged(qint64 progress) {
     ui->horizontalSlider->setValue(progress);
   updatePlaybackTimeStatus();
   sysMedia->updateCurrentPosition(progress);
+  lyrics_->setPositionMs(progress);
 }
 
 void MainWindow::bitrateChanged(qint64 bitsPerSecond) {

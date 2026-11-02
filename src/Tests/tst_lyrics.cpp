@@ -7,38 +7,23 @@
 
 #include "../lyricsloader.h"
 #include "../lyricsmanager.h"
+#include "scopedhomedir.h"
 
 namespace {
-#ifdef Q_OS_WIN
-constexpr const char *kHomeEnvVar = "USERPROFILE";
-#else
-constexpr const char *kHomeEnvVar = "HOME";
-#endif
-
-// Points the home directory used by LyricsLoader::getLyrics at a temporary
-// directory for the lifetime of this object.
-class ScopedHomeDir {
-public:
-  explicit ScopedHomeDir(const QString &path)
-      : hadValue_(qEnvironmentVariableIsSet(kHomeEnvVar)),
-        oldValue_(qgetenv(kHomeEnvVar)) {
-    qputenv(kHomeEnvVar, QDir::toNativeSeparators(path).toLocal8Bit());
-  }
-  ~ScopedHomeDir() {
-    if (hadValue_) {
-      qputenv(kHomeEnvVar, oldValue_);
-    } else {
-      qunsetenv(kHomeEnvVar);
-    }
-  }
-
-private:
-  bool hadValue_;
-  QByteArray oldValue_;
-};
-
 std::map<int, std::string> sampleLyrics() {
   return {{1000, "first"}, {2500, "second"}, {4000, "third"}};
+}
+
+using Song = std::unordered_map<std::string, FieldValue>;
+
+Song makeSong(const std::vector<std::pair<std::string, std::string>> &fields) {
+  Song song;
+  song.insert_or_assign("title", FieldValue("Title", "title"));
+  song.insert_or_assign("artist", FieldValue("Artist", "artist"));
+  for (const auto &[key, text] : fields) {
+    song.insert_or_assign(key, FieldValue(text, key));
+  }
+  return song;
 }
 
 QList<int> emittedIndices(const QSignalSpy &spy) {
@@ -61,6 +46,9 @@ private slots:
   void getLyrics_missingFileReturnsEmpty();
   void onPlayerProgressChange_emitsLineIndexOnlyWhenItChanges();
   void setLyrics_resetsCurrentLine();
+  void resolveLyrics_prefersUnsyncedLyricsField();
+  void resolveLyrics_fallsBackToTagFields();
+  void resolveLyrics_fallsBackToLrcFile();
 };
 
 void TestLyrics::parseLyricsText_parsesTimestampedLines() {
@@ -154,6 +142,43 @@ void TestLyrics::setLyrics_resetsCurrentLine() {
   manager.onPlayerProgressChange(2500);
 
   QCOMPARE(emittedIndices(spy), (QList<int>{1, 1}));
+}
+
+void TestLyrics::resolveLyrics_prefersUnsyncedLyricsField() {
+  const Song song = makeSong({{"attr:unsynced_lyrics", "[00:01.00]unsynced"},
+                              {"attr:lyrics", "[00:01.00]lyrics"}});
+  const std::unordered_map<std::string, std::string> remaining = {
+      {"unsynced_lyrics", "[00:01.00]tag"}};
+
+  const std::map<int, std::string> expected = {{1000, "unsynced"}};
+  QCOMPARE(LyricsLoader::resolveLyrics(song, remaining), expected);
+}
+
+void TestLyrics::resolveLyrics_fallsBackToTagFields() {
+  // An empty field counts as unset.
+  const Song song = makeSong({{"attr:unsynced_lyrics", ""}});
+  const std::unordered_map<std::string, std::string> remaining = {
+      {"unsynced_lyrics", ""}, {"lyrics", "[00:02.00]tag lyrics"}};
+
+  const std::map<int, std::string> expected = {{2000, "tag lyrics"}};
+  QCOMPARE(LyricsLoader::resolveLyrics(song, remaining), expected);
+}
+
+void TestLyrics::resolveLyrics_fallsBackToLrcFile() {
+  QTemporaryDir home;
+  QVERIFY(home.isValid());
+  QVERIFY(QDir(home.path()).mkpath("Music"));
+  QFile file(QDir(home.path()).filePath("Music/Artist - Title.lrc"));
+  QVERIFY(file.open(QIODevice::WriteOnly));
+  file.write("[00:03.00]from file\n");
+  file.close();
+  const ScopedHomeDir scopedHome(home.path());
+
+  // Embedded text without timestamped lines is not used.
+  const Song song = makeSong({{"attr:lyrics", "plain text only"}});
+
+  const std::map<int, std::string> expected = {{3000, "from file"}};
+  QCOMPARE(LyricsLoader::resolveLyrics(song, {}), expected);
 }
 
 QTEST_MAIN(TestLyrics)

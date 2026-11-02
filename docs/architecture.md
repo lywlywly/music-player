@@ -296,10 +296,28 @@ OS media controls and now-playing metadata.
 
 Where lyrics and cover images come from, and the lyrics panel settings.
 
+* `LyricsPresenter` (frontend)
+  * Shows the playing song's lyrics in `LyricsPanel`, owns the
+    `LyricsManager`, and applies the lyrics panel style settings.
+  * `MainWindow` calls `showSong(...)` from `playSong`, `clear()` on stop,
+    and `setPositionMs(...)` from its `positionChanged` handler. The position
+    goes through `MainWindow` because that handler is reconnected when the
+    playback backend changes; a direct connection to the player would stay on
+    the old player.
+* `CoverArtPresenter` (frontend)
+  * Shows the playing song's embedded cover in the cover label, scaled to the
+    label on resize and splitter moves.
+  * `MainWindow` calls `showSong(...)` from `playSong` and `clear()` on stop.
+  * Emits `artworkChanged(imageData)` for a song with an embedded cover;
+    `MainWindow` connects it to `ISystemMediaInterface::setArtwork`.
+* The two presenters do not know about each other; `MainWindow` drives both.
 * `LyricsLoader` / `LyricsManager`
   * Lyrics fetch + timed line updates from playback position.
-  * On play, `MainWindow` refreshes song metadata once and prefers embedded
-    lyrics from parsed tag fields; file-based `.lrc` loading is fallback.
+  * On play, `MainWindow` refreshes song metadata once;
+    `LyricsLoader::resolveLyrics(...)` then picks the first non-empty of the
+    `attr:unsynced_lyrics` and `attr:lyrics` fields, then of the
+    `unsynced_lyrics` and `lyrics` tag fields with no column. If none is set
+    or it has no timestamped lines, the `.lrc` file is the fallback.
   * The `.lrc` fallback (`LyricsLoader::getLyrics`) opens
     `<home>/Music/<artist> - <title>.lrc` only, where `<home>` is
     `USERPROFILE` on Windows and `HOME` elsewhere; it does not look next to
@@ -314,7 +332,7 @@ Where lyrics and cover images come from, and the lyrics panel settings.
     TagLib with `MultiByteToWideChar`.
   * Cover art comes from `SongParser::extractCoverImage`; a file it cannot
     open (for example moved or deleted) logs a warning and shows no cover.
-* Lyrics panel style settings (`SettingsDialog` + `MainWindow`)
+* Lyrics panel style settings (`SettingsDialog` + `LyricsPresenter`)
   * Uses four settings keys: `lyrics/use_system_default_font`,
     `lyrics/font_family`, `lyrics/font_size`, and
     `lyrics/highlight_color`.

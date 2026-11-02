@@ -78,6 +78,8 @@ set(PROJECT_SOURCES
   columndefinition.h
   columnregistry.h
   columnregistry.cpp
+  coverartpresenter.h
+  coverartpresenter.cpp
   databasemanager.h
   databasemanager.cpp
   displayexpression.h
@@ -119,6 +121,8 @@ set(PROJECT_SOURCES
   lyricsloader.cpp
   lyricsmanager.h
   lyricsmanager.cpp
+  lyricspresenter.h
+  lyricspresenter.cpp
   lyricspanel.ui
   lyricspanel.h
   lyricspanel.cpp
