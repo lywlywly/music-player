@@ -55,3 +55,5 @@ compile_commands.json
 *_qmlcache.qrc
 
 .DS_Store
+# CTest output
+Testing/
