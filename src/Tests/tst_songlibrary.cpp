@@ -14,8 +14,16 @@
 #include "../databasemanager.h"
 #include "../songlibrary.h"
 #include "../utils.h"
+#include "testsymlink.h"
 
 namespace {
+// The form SongLibrary stores a missing file's path in: cleaned and absolute
+// ("C:/tmp/..." on Windows). Refreshes look songs up by it.
+std::string storedPath(const char *path) {
+  return QDir::cleanPath(QFileInfo(QString::fromUtf8(path)).absoluteFilePath())
+      .toStdString();
+}
+
 MSong makeSong(const QString &title, const QString &artist, const QString &path,
                const QString &album = {}, const QString &tracknumber = {},
                const QString &date = {}, const QString &genre = {}) {
@@ -133,16 +141,17 @@ void TestSongLibrary::addToLibrary_canonicalisesFilepath() {
   QFile file(root + "/music/a.mp3");
   QVERIFY(file.open(QIODevice::WriteOnly));
   file.close();
-  QVERIFY(QFile::link(root + "/music", root + "/link"));
 
   const int pk =
       library_->addTolibrary(makeSong("A", "Artist", root + "/music/a.mp3"));
   QCOMPARE(library_->addTolibrary(
                makeSong("A", "Artist", root + "/music/../music/a.mp3")),
            pk);
-  QCOMPARE(
-      library_->addTolibrary(makeSong("A", "Artist", root + "/link/a.mp3")),
-      pk);
+  if (makeSymlink(root + "/music", root + "/link")) {
+    QCOMPARE(
+        library_->addTolibrary(makeSong("A", "Artist", root + "/link/a.mp3")),
+        pk);
+  }
   QCOMPARE(
       QString::fromStdString(library_->getSongByPK(pk).at("filepath").text),
       root + "/music/a.mp3");
@@ -921,7 +930,7 @@ void TestSongLibrary::refreshSongFromFile_usesInjectedParserAndSyncsDb() {
         return parsed;
       });
 
-  const std::string path = "/tmp/refresh-single.mp3";
+  const std::string path = storedPath("/tmp/refresh-single.mp3");
   const int songId = localLibrary.addTolibrary(
       makeSong("Old", "Artist A", QString::fromStdString(path)));
 
@@ -971,8 +980,8 @@ void TestSongLibrary::refreshSongsFromFilepaths_dedupesAndReportsProgress() {
                         "Genre");
       });
 
-  const std::string pathA = "/tmp/refresh-list-a.mp3";
-  const std::string pathB = "/tmp/refresh-list-b.mp3";
+  const std::string pathA = storedPath("/tmp/refresh-list-a.mp3");
+  const std::string pathB = storedPath("/tmp/refresh-list-b.mp3");
   const int idA = localLibrary.addTolibrary(
       makeSong("A", "Artist", QString::fromStdString(pathA)));
   const int idB = localLibrary.addTolibrary(
@@ -990,9 +999,9 @@ void TestSongLibrary::refreshSongsFromFilepaths_dedupesAndReportsProgress() {
   QCOMPARE(progress, expectedProgress);
 
   QCOMPARE(localLibrary.getSongByPK(idA).at("title").text,
-           std::string("Refreshed:/tmp/refresh-list-a.mp3"));
+           "Refreshed:" + pathA);
   QCOMPARE(localLibrary.getSongByPK(idB).at("title").text,
-           std::string("Refreshed:/tmp/refresh-list-b.mp3"));
+           "Refreshed:" + pathB);
 }
 
 void TestSongLibrary::refreshSongFromFile_populatesRemainingFields() {
@@ -1016,7 +1025,7 @@ void TestSongLibrary::refreshSongFromFile_populatesRemainingFields() {
   QVERIFY(sawNullRemaining);
   QVERIFY(!sawProvidedRemaining);
 
-  const std::string path = "/tmp/embedded-on.mp3";
+  const std::string path = storedPath("/tmp/embedded-on.mp3");
   localLibrary.addTolibrary(
       makeSong("Old", "Artist", QString::fromStdString(path)));
   std::unordered_map<std::string, std::string> remainingFields;
@@ -1033,7 +1042,7 @@ void TestSongLibrary::refreshSongFromFile_unparsableFileKeepsStoredFields() {
          std::unordered_map<std::string, std::string> *)
           -> std::optional<MSong> { return std::nullopt; });
 
-  const std::string path = "/tmp/refresh-unparsable.mp3";
+  const std::string path = storedPath("/tmp/refresh-unparsable.mp3");
   const int songId = localLibrary.addTolibrary(
       makeSong("Stored", "Artist A", QString::fromStdString(path), "Album A"));
   const std::string identityKey = localLibrary.songIdentityKeyBySongPk(songId);
@@ -1098,7 +1107,7 @@ void TestSongLibrary::refreshSongFromFile_customLyricsFieldsPersist() {
         return parsed;
       });
 
-  const std::string path = "/tmp/embedded-refresh.mp3";
+  const std::string path = storedPath("/tmp/embedded-refresh.mp3");
   localLibrary.addTolibrary(
       makeSong("Old", "Artist", QString::fromStdString(path)));
 

@@ -348,6 +348,10 @@ void TestPlaylist::refreshMetadataFromFiles_updatesSongsAndReportsProgress() {
   Playlist playlist(-1, localLibrary, *databaseManager_);
   playlist.addSong(makeSong("Old A", "Artist", "/tmp/refresh-a.mp3"));
   playlist.addSong(makeSong("Old B", "Artist", "/tmp/refresh-b.mp3"));
+  // The library stores paths in canonical form ("C:/tmp/..." on Windows), and
+  // the refresh parses the stored path.
+  const std::string pathA = playlist.getSongByIndex(0).at("filepath").text;
+  const std::string pathB = playlist.getSongByIndex(1).at("filepath").text;
 
   QSignalSpy aboutToResetSpy(&playlist, &Playlist::aboutToResetSongs);
   QSignalSpy resetSpy(&playlist, &Playlist::songsReset);
@@ -360,10 +364,8 @@ void TestPlaylist::refreshMetadataFromFiles_updatesSongsAndReportsProgress() {
   QCOMPARE(progress, expectedProgress);
   QCOMPARE(aboutToResetSpy.count(), 1);
   QCOMPARE(resetSpy.count(), 1);
-  QCOMPARE(playlist.getSongByIndex(0).at("title").text,
-           std::string("Refreshed /tmp/refresh-a.mp3"));
-  QCOMPARE(playlist.getSongByIndex(1).at("title").text,
-           std::string("Refreshed /tmp/refresh-b.mp3"));
+  QCOMPARE(playlist.getSongByIndex(0).at("title").text, "Refreshed " + pathA);
+  QCOMPARE(playlist.getSongByIndex(1).at("title").text, "Refreshed " + pathB);
 }
 
 void TestPlaylist::addFiles_insertsBatchWithOneSignalPair() {

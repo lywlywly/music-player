@@ -19,6 +19,7 @@
 #include "../monitoredlibrary.h"
 #include "../playlistcollection.h"
 #include "../songlibrary.h"
+#include "testsymlink.h"
 
 namespace {
 // Test files hold their title as text; "BAD" marks an unreadable file.
@@ -520,8 +521,10 @@ void TestMonitoredLibrary::walk_skipsHiddenSymlinksAndOtherExtensions() {
   QVERIFY(writeFile(w + "/._a.mp3", "H"));
   QVERIFY(writeFile(w + "/.hiddendir/d.mp3", "H"));
   QVERIFY(writeFile(root() + "/outside/e.mp3", "E"));
-  QVERIFY(QFile::link(root() + "/outside/e.mp3", w + "/link.mp3"));
-  QVERIFY(QFile::link(root() + "/outside", w + "/linkdir"));
+  // Where Windows refuses symlinks the expected songs are the same; the links
+  // are then not exercised.
+  makeSymlink(root() + "/outside/e.mp3", w + "/link.mp3");
+  makeSymlink(root() + "/outside", w + "/linkdir");
 
   QVERIFY(monitored_->addFolder(w).folderId > 0);
   waitIdle();
@@ -538,7 +541,7 @@ void TestMonitoredLibrary::walk_skipsHiddenSymlinksAndOtherExtensions() {
 void TestMonitoredLibrary::addFolder_rejectsOverlapAndMissing() {
   QVERIFY(QDir().mkpath(root() + "/music/sub"));
   QVERIFY(QDir().mkpath(root() + "/music2"));
-  QVERIFY(QFile::link(root() + "/music", root() + "/alias"));
+  const bool linked = makeSymlink(root() + "/music", root() + "/alias");
 
   QVERIFY(monitored_->addFolder(root() + "/music").folderId > 0);
   waitIdle();
@@ -550,7 +553,9 @@ void TestMonitoredLibrary::addFolder_rejectsOverlapAndMissing() {
   };
   QVERIFY(rejected(root() + "/music"));
   QVERIFY(rejected(root() + "/music/"));
-  QVERIFY(rejected(root() + "/alias"));
+  if (linked) {
+    QVERIFY(rejected(root() + "/alias"));
+  }
   QVERIFY(rejected(root() + "/music/sub"));
   QVERIFY(rejected(root()));
   QVERIFY(rejected(root() + "/missing"));
