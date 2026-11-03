@@ -476,7 +476,8 @@ Where lyrics and cover images come from, and the lyrics panel settings.
 
 ### UI styling
 
-Toolbar icons, the Windows application font, and the light/dark theme.
+Toolbar icons, the Windows application font, the Windows table selection
+fix, and the light/dark theme.
 
 * Playback toolbar icons
   * `mainwindow.ui` keeps playback controls in a nested
@@ -527,12 +528,58 @@ Toolbar icons, the Windows application font, and the light/dark theme.
     widget font. With another app font size, menu bar gaps change but the
     text does not. Other sizes would need a `QProxyStyle` override of
     `CE_MenuBarItem` or the `windowsvista` style.
+* Table row selection (Windows only, `tableselectionstyle.cpp`, installed in
+  `main.cpp`)
+  * Symptom: in a row-selecting `QTableView`, the `windows11` style draws a
+    selected row as separate rounded boxes, one per cell, each with its own
+    accent-colored bar at the left edge.
+  * Cause, in the Qt style (`qwindows11style.cpp`), not in the app:
+    * `QTableView` calls `PE_PanelItemViewRow` for every cell
+      (`QTableViewPrivate::drawCell`). Since Qt 6.10 the style draws the
+      tree/list accent bar there for any selected item, with no check of the
+      view type; a code comment assumes only `QTreeView` calls it. Qt 6.8
+      drew one bar per row (on the `Beginning` cell only) and 6.9 drew none.
+    * `CE_ItemViewItem` forces `onlyOne = true` for any `QTableView` (seen in
+      6.11; 6.10 unconfirmed), ignoring the `viewItemPosition` that
+      `QTableView` already sets, so each cell gets its own fully rounded box.
+      6.8 and 6.9 used `viewItemPosition` and drew one continuous band.
+    * Both are still present on the Qt `dev` branch (checked 2026-11) and
+      not reported on bugreports.qt.io (searched 2026-11). The bar is the
+      WinUI selection indicator added for `QTreeView` (see QTBUG-140494);
+      tables get it because they use the same primitive.
+  * Fix: `TableSelectionStyle`, a `QProxyStyle` over `windows11`, set as the
+    application style when the default style is `windows11`. For
+    row-selecting tables only, it
+    * draws `PE_PanelItemViewRow` with `State_Selected` removed, which keeps
+      the alternate-row background but drops the bar;
+    * paints the selection band itself in `CE_ItemViewItem`, rounded only
+      at the row's ends as given by `viewItemPosition`, then lets the base
+      style draw the content with the selected/hover state removed.
+  * The band is a neutral gray at 14% opacity (`kFillAlpha`): white in dark
+    themes, black in light ones. The base style's subtle gray (WinUI
+    `fillSubtleSecondary`, 6% / 4%) is hard to see. Its solid accent for
+    alternating rows is not copied either: it leaves dark text on a dark
+    accent (QTBUG-144903, QTBUG-141485), and no table uses alternating rows.
+    On alternating rows the gray band is harder to tell from the alternate
+    background.
+  * `viewItemPosition` counts hidden columns, so a row whose first or last
+    column is hidden would lose its rounded end; no table hides columns.
+  * It does nothing in a high-contrast theme (which the base style detects
+    as `Qt::ColorScheme::Unknown` and draws no bar for). Its 4px radius and
+    2px margins copy private values of the base style, so recheck them when
+    upgrading Qt.
+  * A `QStyledItemDelegate` cannot fix this: the bar is painted by the view
+    before the delegate runs, and the style ignores `viewItemPosition` for
+    tables.
+  * Removal: once a Qt release paints table rows correctly, delete
+    `tableselectionstyle.{h,cpp}` and the `setStyle` block in `main.cpp`.
 * Display theme (`displaytheme.cpp`, used by `SettingsDialog` and `MainWindow`)
   * Display theme mode is persisted as `display/theme_mode` with values:
     `system`, `light`, `dark`.
   * `applyDisplayThemeMode` switches `QStyleHints::colorScheme`
     (`system`/`light`/`dark`); app widget style remains the system/default
-    style. `MainWindow` re-tints the playback icons after applying it.
+    style (on Windows, `windows11` wrapped by `TableSelectionStyle`).
+    `MainWindow` re-tints the playback icons after applying it.
 
 ## Core Feature Implementation Notes
 

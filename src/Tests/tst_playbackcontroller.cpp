@@ -258,7 +258,8 @@ void TestPlaybackController::playStats_nearEndWithListenCountsOnce() {
 void TestPlaybackController::playStats_notifyEverySongOfTheIdentity() {
   // Two files with the same title, artist and album: one identity, so shared
   // play stats. Tagged, as playing re-reads the tags.
-  for (const QString &name : {QStringLiteral("a.wav"), QStringLiteral("b.wav")}) {
+  for (const QString &name :
+       {QStringLiteral("a.wav"), QStringLiteral("b.wav")}) {
     const QString path = dir_->filePath(name);
     QVERIFY(writeSilentWav(path));
     QVERIFY(SongParser::writeTags(

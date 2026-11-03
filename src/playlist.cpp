@@ -59,8 +59,7 @@ SortValue resolveSortValue(const SongLibrary &library, int songPk,
 } // namespace
 
 Playlist::Playlist(int playlistId, SongLibrary &lib,
-                   DatabaseManager &databaseManager, Kind kind,
-                   QObject *parent)
+                   DatabaseManager &databaseManager, Kind kind, QObject *parent)
     : QObject(parent), playlistId_{playlistId}, kind_{kind}, library_{lib},
       databaseManager_{databaseManager} {}
 
@@ -398,8 +397,7 @@ bool Playlist::refuseWrite(const char *operation) const {
   if (kind_ != Kind::Auto) {
     return false;
   }
-  qWarning("Playlist::%s: refused for autoplaylist %d", operation,
-           playlistId_);
+  qWarning("Playlist::%s: refused for autoplaylist %d", operation, playlistId_);
   return true;
 }
 

@@ -224,6 +224,8 @@ endif()
 
 if(WIN32)
   list(APPEND PROJECT_SOURCES
+    tableselectionstyle.h
+    tableselectionstyle.cpp
     windowsmediacenter.h
     windowsmediacenter.cpp
   )

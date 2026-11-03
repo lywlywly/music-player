@@ -2,6 +2,9 @@
 #include <QApplication>
 #include <glib.h>
 #include <thread>
+#ifdef Q_OS_WIN
+#include "tableselectionstyle.h"
+#endif
 
 // GMainLoop *glib_loop = nullptr;
 
@@ -23,6 +26,11 @@ int main(int argc, char *argv[]) {
                          QStringLiteral("Microsoft YaHei UI")});
     appFont.setPointSizeF(10);
     QApplication::setFont(appFont);
+  }
+  // Fix the windows11 style's per-cell selection painting in tables.
+  if (QApplication::style()->name() == QLatin1String("windows11")) {
+    QApplication::setStyle(
+        new TableSelectionStyle(QStringLiteral("windows11")));
   }
 #endif
 
