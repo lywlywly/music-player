@@ -13,7 +13,8 @@ class PlaylistTableModel;
 
 // Table of one Playlist through its own PlaylistTableModel. The header follows
 // GlobalColumnLayoutManager and writes back column moves, resizes and
-// visibility; clicking a sortable column sorts the playlist. Frontend class.
+// visibility; clicking a sortable column sorts the playlist. Rows can be
+// dragged to reorder the playlist (both kinds). Frontend class.
 class PlaylistTableView : public QTableView {
   Q_OBJECT
 
@@ -34,6 +35,9 @@ signals:
   // A properties shortcut was pressed. row is firstSelectedRow(), or the
   // current row when no row is selected.
   void propertiesRequested(int row);
+
+protected:
+  void dropEvent(QDropEvent *event) override;
 
 private:
   void sortByHeaderSection(int section);

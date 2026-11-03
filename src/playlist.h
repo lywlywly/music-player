@@ -7,15 +7,18 @@
 class DatabaseManager;
 
 // One playlist: ordered song membership, persistence (`playlist_items`,
-// `playlists.last_played`), library ingest/refresh for its operations, and
-// change signals. Backend class: no Qt view types, no playback status.
-// Canonical song metadata lives in SongLibrary.
+// `autoplaylist_order`, `playlists.last_played`), library ingest/refresh for
+// its operations, and change signals. Backend class: no Qt view types, no
+// playback status. Canonical song metadata lives in SongLibrary.
 // A song appears at most once; adding a song already present is a no-op.
 // playlistId <= 0 is non-persistent (no DB reads or writes).
 // An Auto playlist (autoplaylist) has no `playlist_items`: its rows are set
 // by PlaylistCollection through resetRows, appendRows and removeRowsByPk, and
 // the write operations (addFiles, addSong, addSongByPk, removeSongs, clear)
-// are refused with a warning.
+// are refused with a warning. Its row order is stored in
+// `autoplaylist_order`, which mirrors its rows; that table owns no songs.
+// Both kinds can be reordered (sortByField, moveRows), and the order is
+// saved.
 class Playlist : public QObject {
   Q_OBJECT
 public:
@@ -24,9 +27,10 @@ public:
 
   Playlist(int playlistId, SongLibrary &, DatabaseManager &,
            Kind kind = Kind::Manual, QObject *parent = nullptr);
-  // Loads last_played and, for a manual playlist, playlist_items (by
-  // position). Emits no signals. Returns false when the playlists row is
-  // missing or a query fails.
+  // Loads last_played and the stored rows by position (`playlist_items`, or
+  // `autoplaylist_order` for an autoplaylist, whose rows PlaylistCollection
+  // then sets with resetRows). Emits no signals. Returns false when the
+  // playlists row is missing or a query fails.
   bool loadState();
 
   int id() const;
@@ -64,8 +68,15 @@ public:
   // songPksRemoved if it was not empty. Song rows in DB table `songs` are not
   // deleted here; see PlaylistCollection.
   void clear();
-  // order: 0 ascending, otherwise descending.
+  // Sorts the rows and saves the order. order: 0 ascending, otherwise
+  // descending. Both kinds.
   void sortByField(const std::string &fieldId, int order = 0);
+  // Moves the rows (current numbering; any order, duplicates ignored) in
+  // front of destinationRow (numbered before the move; songCount() for the
+  // end), keeping their relative order, and saves the order. Both kinds.
+  // Returns false, emitting nothing, when a row is out of range or the order
+  // does not change.
+  bool moveRows(std::vector<int> rows, int destinationRow);
   // Re-parses metadata for all songs currently in this playlist and writes the
   // refreshed values back to SongLibrary, then emits songsRefreshed. progress
   // is called after each processed song with (current, total). Assumes every
@@ -74,7 +85,9 @@ public:
   void refreshMetadataFromFiles(const ProgressFn &progress = {});
   // Auto playlists only; none of these emits songPksRemoved. songPks must be
   // songs in SongLibrary.
-  // Replaces the rows (reset signals).
+  // Sets the rows to songPks (reset signals): rows that stay keep their
+  // order, and the songs not yet in the playlist are appended in the given
+  // order.
   void resetRows(const std::vector<int> &songPks);
   // Appends the songs not already in the playlist (insert signals).
   void appendRows(const std::vector<int> &songPks);
@@ -94,6 +107,9 @@ signals:
   void songPksRemoved(const std::vector<int> &songPks);
   void aboutToResetSongs();
   void songsReset();
+  // Around a change of row order only (sortByField, moveRows): the same
+  // songs, in other rows.
+  void aboutToReorderSongs();
   void songsReordered();
   void songDataChanged(int row);
   // After refreshMetadataFromFiles: the songs whose data was re-read.
@@ -104,13 +120,20 @@ private:
   bool refuseWrite(const char *operation) const;
   // Logs a warning and returns true for a manual playlist.
   bool refuseRowUpdate(const char *operation) const;
-  // Removes the rows (and, for a manual playlist, their `playlist_items`
-  // rows) with remove signals; returns their pks.
+  // Removes the rows and their stored rows, with remove signals; returns
+  // their pks.
   std::vector<int> removeRows(std::vector<int> rows);
+  // In memory only; callers store the new rows with insertItemsInDb.
   void appendSongPk(int songId);
-  void appendSongToPlaylistInDb(int songId, int position);
-  void removePlaylistItemInDb(int songId);
+  // `playlist_items`, or `autoplaylist_order` for an autoplaylist.
+  QString itemsTable() const;
+  // Stores the songs at the next positions, in one transaction.
+  void insertItemsInDb(const std::vector<int> &songIds);
+  // In one transaction.
+  void removeItemsInDb(const std::vector<int> &songIds);
   void removePlaylistItemsInDb();
+  // Renumbers the stored positions to the current rows (1..n).
+  void persistOrder();
   void rebuildIndices();
   int playlistId_;
   Kind kind_;
@@ -119,8 +142,8 @@ private:
   std::vector<int> songPKs_;
   std::vector<int> indices_;
   int lastPlayed_ = 1;
-  // Position for the next appended `playlist_items` row; above every stored
-  // position, so removals cannot cause collisions.
+  // Position for the next stored row; above every stored position, so
+  // removals cannot cause collisions.
   int nextPosition_ = 1;
 };
 

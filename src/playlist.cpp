@@ -56,6 +56,21 @@ SortValue resolveSortValue(const SongLibrary &library, int songPk,
 
   return {false, it->second};
 }
+
+// Runs write in one transaction. Callers never hold one (SQLite does not nest
+// them): MonitoredLibrary and SongLibrary emit their signals after commit.
+template <typename Write>
+void inTransaction(QSqlDatabase &db, const char *context, Write write) {
+  if (!db.transaction()) {
+    qFatal("%s: failed to start transaction: %s", context,
+           db.lastError().text().toUtf8().data());
+  }
+  write();
+  if (!db.commit()) {
+    qFatal("%s: commit failed: %s", context,
+           db.lastError().text().toUtf8().data());
+  }
+}
 } // namespace
 
 Playlist::Playlist(int playlistId, SongLibrary &lib,
@@ -80,18 +95,16 @@ bool Playlist::loadState() {
     return false;
   }
   lastPlayed_ = qPlaylist.value(0).toInt();
-  if (kind_ == Kind::Auto) {
-    return true;
-  }
 
   songPKs_.clear();
   QSqlQuery qItems(db);
-  qItems.prepare(R"(
+  qItems.prepare(QString(R"(
       SELECT song_id, position
-      FROM playlist_items
+      FROM %1
       WHERE playlist_id=:playlist_id
       ORDER BY position ASC
-  )");
+  )")
+                     .arg(itemsTable()));
   qItems.bindValue(":playlist_id", playlistId_);
   if (!qItems.exec()) {
     return false;
@@ -171,6 +184,7 @@ std::vector<int> Playlist::addFiles(const std::vector<std::string> &paths,
   for (int pk : pks) {
     appendSongPk(pk);
   }
+  insertItemsInDb(pks);
   emit songsInserted(first, songCount() - 1);
   return pks;
 }
@@ -190,6 +204,7 @@ bool Playlist::addSongByPk(int songId) {
   const int row = songCount();
   emit aboutToInsertSongs(row, row);
   appendSongPk(songId);
+  insertItemsInDb({songId});
   emit songsInserted(row, row);
   return true;
 }
@@ -215,12 +230,10 @@ std::vector<int> Playlist::removeRows(std::vector<int> rows) {
     const int songId = songPKs_.at(row);
     songPKs_.erase(songPKs_.begin() + row);
     rebuildIndices();
-    if (playlistId_ > 0 && kind_ == Kind::Manual) {
-      removePlaylistItemInDb(songId);
-    }
     emit songsRemoved(row, row);
     removedPks.push_back(songId);
   }
+  removeItemsInDb(removedPks);
   return removedPks;
 }
 
@@ -243,6 +256,7 @@ void Playlist::clear() {
 void Playlist::sortByField(const std::string &f, int order) {
   const bool ascending = (order == 0);
 
+  emit aboutToReorderSongs();
   std::stable_sort(songPKs_.begin(), songPKs_.end(), [&](int i, int j) {
     const SortValue valueA = resolveSortValue(library_, i, f);
     const SortValue valueB = resolveSortValue(library_, j, f);
@@ -267,7 +281,52 @@ void Playlist::sortByField(const std::string &f, int order) {
   });
 
   rebuildIndices();
+  persistOrder();
   emit songsReordered();
+}
+
+bool Playlist::moveRows(std::vector<int> rows, int destinationRow) {
+  const int count = songCount();
+  std::sort(rows.begin(), rows.end());
+  rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
+  if (rows.empty() || rows.front() < 0 || rows.back() >= count ||
+      destinationRow < 0 || destinationRow > count) {
+    return false;
+  }
+
+  std::vector<bool> isMoved(count, false);
+  std::vector<int> moved;
+  moved.reserve(rows.size());
+  for (int row : rows) {
+    isMoved[row] = true;
+    moved.push_back(songPKs_[row]);
+  }
+  std::vector<int> order;
+  order.reserve(count);
+  size_t insertAt = 0;
+  for (int row = 0; row < count; ++row) {
+    if (row == destinationRow) {
+      insertAt = order.size();
+    }
+    if (!isMoved[row]) {
+      order.push_back(songPKs_[row]);
+    }
+  }
+  if (destinationRow == count) {
+    insertAt = order.size();
+  }
+  order.insert(order.begin() + static_cast<std::ptrdiff_t>(insertAt),
+               moved.begin(), moved.end());
+  if (order == songPKs_) {
+    return false;
+  }
+
+  emit aboutToReorderSongs();
+  songPKs_ = std::move(order);
+  rebuildIndices();
+  persistOrder();
+  emit songsReordered();
+  return true;
 }
 
 void Playlist::refreshMetadataFromFiles(const ProgressFn &progress) {
@@ -300,14 +359,28 @@ void Playlist::resetRows(const std::vector<int> &songPks) {
   if (refuseRowUpdate("resetRows")) {
     return;
   }
-  emit aboutToResetSongs();
-  songPKs_.clear();
-  indices_.clear();
+  const std::unordered_set<int> wanted(songPks.begin(), songPks.end());
+  std::vector<int> kept;
+  std::vector<int> left;
+  for (int pk : songPKs_) {
+    (wanted.contains(pk) ? kept : left).push_back(pk);
+  }
+  std::unordered_set<int> placed(kept.begin(), kept.end());
+  std::vector<int> added;
   for (int pk : songPks) {
-    if (!containsPk(pk)) {
-      appendSongPk(pk);
+    if (placed.insert(pk).second) {
+      added.push_back(pk);
     }
   }
+
+  emit aboutToResetSongs();
+  songPKs_ = std::move(kept);
+  rebuildIndices();
+  for (int pk : added) {
+    appendSongPk(pk);
+  }
+  removeItemsInDb(left);
+  insertItemsInDb(added);
   emit songsReset();
 }
 
@@ -330,6 +403,7 @@ void Playlist::appendRows(const std::vector<int> &songPks) {
   for (int pk : pks) {
     appendSongPk(pk);
   }
+  insertItemsInDb(pks);
   emit songsInserted(first, songCount() - 1);
 }
 
@@ -388,9 +462,11 @@ void Playlist::appendSongPk(int songId) {
   if (indices_.size() < songId + 1)
     indices_.resize(songId + 1, -1);
   indices_[songId] = songPKs_.size() - 1;
-  if (playlistId_ > 0 && kind_ == Kind::Manual) {
-    appendSongToPlaylistInDb(songId, nextPosition_++);
-  }
+}
+
+QString Playlist::itemsTable() const {
+  return kind_ == Kind::Auto ? QStringLiteral("autoplaylist_order")
+                             : QStringLiteral("playlist_items");
 }
 
 bool Playlist::refuseWrite(const char *operation) const {
@@ -410,34 +486,74 @@ bool Playlist::refuseRowUpdate(const char *operation) const {
   return true;
 }
 
-void Playlist::appendSongToPlaylistInDb(int songId, int position) {
-  QSqlDatabase &db = databaseManager_.db();
-  QSqlQuery q(db);
-  q.prepare(R"(
-      INSERT INTO playlist_items(playlist_id, song_id, position)
-      VALUES(:playlist_id, :song_id, :position)
-  )");
-  q.bindValue(":playlist_id", playlistId_);
-  q.bindValue(":song_id", songId);
-  q.bindValue(":position", position);
-  if (!q.exec()) {
-    qFatal("appendSongToPlaylistInDb failed: %s",
-           q.lastError().text().toUtf8().data());
+void Playlist::insertItemsInDb(const std::vector<int> &songIds) {
+  if (playlistId_ <= 0 || songIds.empty()) {
+    return;
   }
+  QSqlDatabase &db = databaseManager_.db();
+  inTransaction(db, "insertItemsInDb", [&]() {
+    QSqlQuery q(db);
+    q.prepare(QString(R"(
+        INSERT INTO %1(playlist_id, song_id, position)
+        VALUES(:playlist_id, :song_id, :position)
+    )")
+                  .arg(itemsTable()));
+    for (int songId : songIds) {
+      q.bindValue(":playlist_id", playlistId_);
+      q.bindValue(":song_id", songId);
+      q.bindValue(":position", nextPosition_++);
+      if (!q.exec()) {
+        qFatal("insertItemsInDb failed: %s",
+               q.lastError().text().toUtf8().data());
+      }
+    }
+  });
 }
 
-void Playlist::removePlaylistItemInDb(int songId) {
-  QSqlQuery q(databaseManager_.db());
-  q.prepare(R"(
-      DELETE FROM playlist_items
-      WHERE playlist_id=:playlist_id AND song_id=:song_id
-  )");
-  q.bindValue(":playlist_id", playlistId_);
-  q.bindValue(":song_id", songId);
-  if (!q.exec()) {
-    qFatal("removePlaylistItemInDb failed: %s",
-           q.lastError().text().toUtf8().data());
+void Playlist::removeItemsInDb(const std::vector<int> &songIds) {
+  if (playlistId_ <= 0 || songIds.empty()) {
+    return;
   }
+  QSqlDatabase &db = databaseManager_.db();
+  inTransaction(db, "removeItemsInDb", [&]() {
+    QSqlQuery q(db);
+    q.prepare(QString(R"(
+        DELETE FROM %1
+        WHERE playlist_id=:playlist_id AND song_id=:song_id
+    )")
+                  .arg(itemsTable()));
+    for (int songId : songIds) {
+      q.bindValue(":playlist_id", playlistId_);
+      q.bindValue(":song_id", songId);
+      if (!q.exec()) {
+        qFatal("removeItemsInDb failed: %s",
+               q.lastError().text().toUtf8().data());
+      }
+    }
+  });
+}
+
+void Playlist::persistOrder() {
+  if (playlistId_ <= 0) {
+    return;
+  }
+  QSqlDatabase &db = databaseManager_.db();
+  inTransaction(db, "persistOrder", [&]() {
+    QSqlQuery q(db);
+    q.prepare(QString(R"(
+        UPDATE %1 SET position=:position
+        WHERE playlist_id=:playlist_id AND song_id=:song_id
+    )")
+                  .arg(itemsTable()));
+    for (int row = 0; row < songCount(); ++row) {
+      q.bindValue(":position", row + 1);
+      q.bindValue(":playlist_id", playlistId_);
+      q.bindValue(":song_id", songPKs_[row]);
+      if (!q.exec()) {
+        qFatal("persistOrder failed: %s", q.lastError().text().toUtf8().data());
+      }
+    }
+  });
 }
 
 // Synchronous, so rows appended right after clear() are not deleted later.

@@ -1,5 +1,10 @@
 #include "playlisttablemodel.h"
 
+#include <QDataStream>
+#include <QIODevice>
+#include <QMimeData>
+#include <algorithm>
+
 PlaylistTableModel::PlaylistTableModel(
     Playlist &playlist, PlaybackQueue &queue,
     GlobalColumnLayoutManager &columnLayoutManager, QObject *parent)
@@ -26,12 +31,10 @@ PlaylistTableModel::PlaylistTableModel(
           [this]() { beginResetModel(); });
   connect(&playlist, &Playlist::songsReset, this,
           [this]() { endResetModel(); });
-  connect(&playlist, &Playlist::songsReordered, this, [this]() {
-    if (rowCount() == 0 || columnCount() == 0) {
-      return;
-    }
-    emit dataChanged(index(0, 0), index(rowCount() - 1, columnCount() - 1));
-  });
+  connect(&playlist, &Playlist::aboutToReorderSongs, this,
+          &PlaylistTableModel::beginReorder);
+  connect(&playlist, &Playlist::songsReordered, this,
+          &PlaylistTableModel::endReorder);
   connect(&playlist, &Playlist::songDataChanged, this, [this](int row) {
     if (columnCount() == 0) {
       return;
@@ -113,6 +116,122 @@ QVariant PlaylistTableModel::headerData(int section,
   }
 
   return QString::number(section + 1);
+}
+
+Qt::ItemFlags PlaylistTableModel::flags(const QModelIndex &index) const {
+  const Qt::ItemFlags flags = QAbstractTableModel::flags(index);
+  // Drops go between rows (the invalid parent), never onto a row.
+  return index.isValid() ? flags | Qt::ItemIsDragEnabled
+                         : flags | Qt::ItemIsDropEnabled;
+}
+
+Qt::DropActions PlaylistTableModel::supportedDropActions() const {
+  return Qt::MoveAction;
+}
+
+QStringList PlaylistTableModel::mimeTypes() const {
+  return {QString::fromLatin1(kRowsMimeType)};
+}
+
+QMimeData *PlaylistTableModel::mimeData(const QModelIndexList &indexes) const {
+  if (!playlist_) {
+    return nullptr;
+  }
+  // Song pks, not rows: QDrag::exec runs an event loop, and an autoplaylist's
+  // rows can change before the drop (a scan applying its results).
+  // The view passes one index per selected cell.
+  std::vector<int> rows;
+  for (const QModelIndex &index : indexes) {
+    if (index.isValid()) {
+      rows.push_back(index.row());
+    }
+  }
+  std::sort(rows.begin(), rows.end());
+  rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
+  QList<int> songPks;
+  songPks.reserve(static_cast<qsizetype>(rows.size()));
+  for (int row : rows) {
+    songPks.push_back(playlist_->getPkByIndex(row));
+  }
+
+  QByteArray encoded;
+  QDataStream stream(&encoded, QIODevice::WriteOnly);
+  stream << quintptr(playlist_.data()) << songPks;
+  auto *data = new QMimeData();
+  data->setData(QString::fromLatin1(kRowsMimeType), encoded);
+  return data;
+}
+
+std::vector<int> PlaylistTableModel::draggedRows(const QMimeData *data) const {
+  if (!playlist_ || !data ||
+      !data->hasFormat(QString::fromLatin1(kRowsMimeType))) {
+    return {};
+  }
+  QDataStream stream(data->data(QString::fromLatin1(kRowsMimeType)));
+  quintptr source = 0;
+  QList<int> songPks;
+  stream >> source >> songPks;
+  if (stream.status() != QDataStream::Ok ||
+      source != quintptr(playlist_.data())) {
+    return {};
+  }
+  std::vector<int> rows;
+  for (int songPk : std::as_const(songPks)) {
+    if (playlist_->containsPk(songPk)) {
+      rows.push_back(playlist_->getIndexByPk(songPk));
+    }
+  }
+  return rows;
+}
+
+bool PlaylistTableModel::canDropMimeData(const QMimeData *data,
+                                         Qt::DropAction action, int, int,
+                                         const QModelIndex &) const {
+  return action == Qt::MoveAction && !draggedRows(data).empty();
+}
+
+bool PlaylistTableModel::dropMimeData(const QMimeData *data,
+                                      Qt::DropAction action, int row, int,
+                                      const QModelIndex &parent) {
+  if (action == Qt::IgnoreAction) {
+    return true;
+  }
+  const std::vector<int> rows = draggedRows(data);
+  if (action != Qt::MoveAction || rows.empty()) {
+    return false;
+  }
+  const int destination =
+      row >= 0 ? row : (parent.isValid() ? parent.row() : rowCount());
+  // The rows move here, so the view's follow-up removeRows for a move must do
+  // nothing: this model does not implement removeRows.
+  return playlist_->moveRows(rows, destination);
+}
+
+// The reorder signals come from playlist_ in pairs, and a reorder keeps the
+// same songs.
+void PlaylistTableModel::beginReorder() {
+  emit layoutAboutToBeChanged({}, QAbstractItemModel::VerticalSortHint);
+  reorderIndexes_ = persistentIndexList();
+  reorderPks_.clear();
+  reorderPks_.reserve(reorderIndexes_.size());
+  for (const QModelIndex &index : std::as_const(reorderIndexes_)) {
+    reorderPks_.push_back(playlist_->getPkByIndex(index.row()));
+  }
+}
+
+void PlaylistTableModel::endReorder() {
+  // A song is in a playlist at most once, so its pk finds its new row.
+  QModelIndexList moved;
+  moved.reserve(reorderIndexes_.size());
+  for (qsizetype i = 0; i < reorderIndexes_.size(); ++i) {
+    moved.push_back(
+        index(playlist_->getIndexByPk(reorderPks_[static_cast<size_t>(i)]),
+              reorderIndexes_[i].column()));
+  }
+  changePersistentIndexList(reorderIndexes_, moved);
+  reorderIndexes_.clear();
+  reorderPks_.clear();
+  emit layoutChanged({}, QAbstractItemModel::VerticalSortHint);
 }
 
 Playlist *PlaylistTableModel::playlist() const { return playlist_; }

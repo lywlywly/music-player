@@ -1,9 +1,12 @@
+#include <QMimeData>
 #include <QObject>
+#include <QPersistentModelIndex>
 #include <QSettings>
 #include <QSignalSpy>
 #include <QSqlDatabase>
 #include <QTest>
 #include <QUuid>
+#include <memory>
 
 #include "../columnregistry.h"
 #include "../databasemanager.h"
@@ -50,6 +53,8 @@ private slots:
   void data_returnsQueuedPosition();
   void statusChanged_targetsStatusCellOfMatchingPlaylistOnly();
   void sortByColumnId_statusNoop_tracknumberSorts();
+  void reorder_persistentIndexesFollowTheirSongs();
+  void dropMimeData_movesDraggedRows();
   void songDataChanged_refreshesWholeRow();
   void playlistSignals_mapToRowInsertRemoveAndReset();
   void columnCount_tracksVisibilityChanges();
@@ -165,7 +170,8 @@ void TestPlaylistTableModel::sortByColumnId_statusNoop_tracknumberSorts() {
   playlist.addSong(makeSong("B", "Artist", "/tmp/pl-b.mp3", "2"));
   playlist.addSong(makeSong("C", "Artist", "/tmp/pl-c.mp3", "1"));
   PlaylistTableModel model(playlist, *queue_, *layout_);
-  QSignalSpy spy(&model, &QAbstractItemModel::dataChanged);
+  QSignalSpy aboutSpy(&model, &QAbstractItemModel::layoutAboutToBeChanged);
+  QSignalSpy spy(&model, &QAbstractItemModel::layoutChanged);
 
   const std::string before = playlist.getSongByIndex(0).at("title").text;
   model.sortByColumnId("status", 0);
@@ -176,7 +182,87 @@ void TestPlaylistTableModel::sortByColumnId_statusNoop_tracknumberSorts() {
   QCOMPARE(playlist.getSongByIndex(0).at("title").text, std::string("C"));
   QCOMPARE(playlist.getSongByIndex(1).at("title").text, std::string("B"));
   QCOMPARE(playlist.getSongByIndex(2).at("title").text, std::string("A"));
+  QCOMPARE(aboutSpy.count(), 1);
   QCOMPARE(spy.count(), 1);
+}
+
+void TestPlaylistTableModel::reorder_persistentIndexesFollowTheirSongs() {
+  Playlist playlist(-1, *library_, *databaseManager_);
+  playlist.addSong(makeSong("A", "Artist", "/tmp/pl-follow-a.mp3", "3"));
+  playlist.addSong(makeSong("B", "Artist", "/tmp/pl-follow-b.mp3", "2"));
+  playlist.addSong(makeSong("C", "Artist", "/tmp/pl-follow-c.mp3", "1"));
+  PlaylistTableModel model(playlist, *queue_, *layout_);
+  const QPersistentModelIndex a(model.index(0, 1));
+  const QPersistentModelIndex c(model.index(2, 0));
+
+  // Any reorder (sortByField, moveRows) goes through the same signals.
+  model.sortByColumnId("tracknumber", 0);
+  QCOMPARE(a.row(), 2);
+  QCOMPARE(a.column(), 1);
+  QCOMPARE(c.row(), 0);
+}
+
+void TestPlaylistTableModel::dropMimeData_movesDraggedRows() {
+  Playlist playlist(-1, *library_, *databaseManager_);
+  playlist.addSong(makeSong("A", "Artist", "/tmp/pl-drag-a.mp3", "1"));
+  playlist.addSong(makeSong("B", "Artist", "/tmp/pl-drag-b.mp3", "2"));
+  playlist.addSong(makeSong("C", "Artist", "/tmp/pl-drag-c.mp3", "3"));
+  playlist.addSong(makeSong("D", "Artist", "/tmp/pl-drag-d.mp3", "4"));
+  PlaylistTableModel model(playlist, *queue_, *layout_);
+  const auto titles = [&]() {
+    QStringList out;
+    for (int row = 0; row < playlist.songCount(); ++row) {
+      out << QString::fromStdString(
+          playlist.getSongByIndex(row).at("title").text);
+    }
+    return out;
+  };
+
+  QVERIFY(model.flags(model.index(0, 0)) & Qt::ItemIsDragEnabled);
+  QVERIFY(!(model.flags(model.index(0, 0)) & Qt::ItemIsDropEnabled));
+  QVERIFY(model.flags(QModelIndex()) & Qt::ItemIsDropEnabled);
+  QCOMPARE(model.supportedDropActions(), Qt::DropActions(Qt::MoveAction));
+
+  // Rows 0 and 2 (every column of each, as a row selection drags), dropped
+  // on the empty viewport (no row, no parent): to the end.
+  std::unique_ptr<QMimeData> data(
+      model.mimeData({model.index(2, 0), model.index(0, 0), model.index(0, 1),
+                      model.index(2, 1)}));
+  QVERIFY(data);
+  QVERIFY(model.canDropMimeData(data.get(), Qt::MoveAction, -1, -1, {}));
+  QVERIFY(!model.canDropMimeData(data.get(), Qt::CopyAction, -1, -1, {}));
+  QVERIFY(model.dropMimeData(data.get(), Qt::MoveAction, -1, -1, {}));
+  QCOMPARE(titles(), (QStringList{"B", "D", "A", "C"}));
+
+  // Dropped onto a row (row -1): in front of it.
+  data.reset(model.mimeData({model.index(3, 0)}));
+  QVERIFY(model.dropMimeData(data.get(), Qt::MoveAction, -1, -1,
+                             model.index(0, 0)));
+  QCOMPARE(titles(), (QStringList{"C", "B", "D", "A"}));
+
+  // Dropped between rows (row 0). The drag carries songs, not rows: rows
+  // changing before the drop (as an autoplaylist's can during the drag's
+  // event loop) still move the dragged song, and a dragged song that left is
+  // skipped.
+  data.reset(model.mimeData({model.index(3, 0), model.index(0, 0)}));
+  playlist.removeSongs({0});
+  QCOMPARE(titles(), (QStringList{"B", "D", "A"}));
+  QVERIFY(model.dropMimeData(data.get(), Qt::MoveAction, 0, 0, {}));
+  QCOMPARE(titles(), (QStringList{"A", "B", "D"}));
+
+  // A drop that changes nothing reports no move.
+  data.reset(model.mimeData({model.index(0, 0)}));
+  QVERIFY(!model.dropMimeData(data.get(), Qt::MoveAction, 1, 0, {}));
+  QCOMPARE(titles(), (QStringList{"A", "B", "D"}));
+
+  // Rows from another playlist's model are refused.
+  Playlist other(-1, *library_, *databaseManager_);
+  other.addSong(makeSong("X", "Artist", "/tmp/pl-drag-x.mp3", "1"));
+  PlaylistTableModel otherModel(other, *queue_, *layout_);
+  data.reset(otherModel.mimeData({otherModel.index(0, 0)}));
+  QVERIFY(!model.canDropMimeData(data.get(), Qt::MoveAction, 0, 0, {}));
+  QVERIFY(!model.dropMimeData(data.get(), Qt::MoveAction, 0, 0, {}));
+  QCOMPARE(titles(), (QStringList{"A", "B", "D"}));
 }
 
 void TestPlaylistTableModel::songDataChanged_refreshesWholeRow() {

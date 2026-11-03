@@ -3,6 +3,7 @@
 #include "columnregistry.h"
 #include "globalcolumnlayoutmanager.h"
 #include "playlisttablemodel.h"
+#include <QDropEvent>
 #include <QHeaderView>
 #include <QMenu>
 #include <QShortcut>
@@ -21,6 +22,10 @@ PlaylistTableView::PlaylistTableView(Playlist &playlist, PlaybackQueue &queue,
   setSortingEnabled(true);
   setEditTriggers(QAbstractItemView::NoEditTriggers);
   setSelectionBehavior(QAbstractItemView::SelectRows);
+  // Drag rows to reorder the playlist (PlaylistTableModel::dropMimeData).
+  setDragDropMode(QAbstractItemView::InternalMove);
+  // QTableView drops onto items by default; drop between rows instead.
+  setDragDropOverwriteMode(false);
   setContextMenuPolicy(Qt::CustomContextMenu);
   // The Properties menu action only displays these keys: Qt does not dispatch
   // shortcuts reliably from a transient QMenu, so the table handles them.
@@ -94,6 +99,15 @@ void PlaylistTableView::sortByHeaderSection(int section) {
 
   header->setSortIndicatorShown(true);
   model_->sortByColumnId(columnId, header->sortIndicatorOrder());
+}
+
+void PlaylistTableView::dropEvent(QDropEvent *event) {
+  QTableView::dropEvent(event);
+  // Accepted only when the rows moved (PlaylistTableModel::dropMimeData): a
+  // hand-made order is no longer sorted by the indicated column.
+  if (event->isAccepted()) {
+    horizontalHeader()->setSortIndicatorShown(false);
+  }
 }
 
 void PlaylistTableView::applyLayout() {

@@ -71,8 +71,14 @@ private slots:
   void addFiles_skipsAndReportsUnparsableFiles();
   void removeSongs_thenReadd_persistsSingleRowAtEnd();
   void operations_emitBeforeAndAfterSignals();
+  void sortByField_persistsOrder();
+  void moveRows_movesAndPersists();
+  void moveRows_rejectsInvalidAndNoOpMoves();
 
 private:
+  // A persistent manual playlist (id 1) with songs S1..Sn, in that order.
+  std::vector<int> makePersistentPlaylist(Playlist &playlist, int count);
+  std::vector<int> reloadedRows() const;
   ColumnRegistry *registry_ = nullptr;
   DatabaseManager *databaseManager_ = nullptr;
   SongLibrary *library_ = nullptr;
@@ -496,8 +502,7 @@ void TestPlaylist::removeSongs_thenReadd_persistsSingleRowAtEnd() {
 
   // Stored: S3 at position 3. A row-count position for re-added S1 would be
   // 2 and load before S3.
-  playlist.removeSongs({0});
-  playlist.removeSongs({0});
+  playlist.removeSongs({0, 1});
   QVERIFY(playlist.addSongByPk(pk1));
 
   Playlist reloaded(1, *library_, *databaseManager_);
@@ -515,6 +520,7 @@ void TestPlaylist::operations_emitBeforeAndAfterSignals() {
   QSignalSpy removedSpy(&playlist, &Playlist::songsRemoved);
   QSignalSpy aboutToResetSpy(&playlist, &Playlist::aboutToResetSongs);
   QSignalSpy resetSpy(&playlist, &Playlist::songsReset);
+  QSignalSpy aboutToReorderSpy(&playlist, &Playlist::aboutToReorderSongs);
   QSignalSpy reorderedSpy(&playlist, &Playlist::songsReordered);
   QSignalSpy dataChangedSpy(&playlist, &Playlist::songDataChanged);
 
@@ -526,6 +532,7 @@ void TestPlaylist::operations_emitBeforeAndAfterSignals() {
   QCOMPARE(insertedSpy.at(1).at(1).toInt(), 1);
 
   playlist.sortByField("tracknumber", 0);
+  QCOMPARE(aboutToReorderSpy.count(), 1);
   QCOMPARE(reorderedSpy.count(), 1);
   QCOMPARE(playlist.getSongByIndex(0).at("title").text, std::string("A"));
 
@@ -546,6 +553,101 @@ void TestPlaylist::operations_emitBeforeAndAfterSignals() {
   QCOMPARE(aboutToResetSpy.count(), 1);
   QCOMPARE(resetSpy.count(), 1);
   QCOMPARE(playlist.songCount(), 0);
+}
+
+std::vector<int> TestPlaylist::makePersistentPlaylist(Playlist &playlist,
+                                                      int count) {
+  QSqlQuery q(databaseManager_->db());
+  if (!q.exec("INSERT INTO playlists(playlist_id, name, last_played, "
+              "tab_order) VALUES (1, 'Default', 1, 0)") ||
+      !playlist.loadState()) {
+    return {};
+  }
+  for (int i = 1; i <= count; ++i) {
+    // Track numbers count down, so a tracknumber sort reverses the rows.
+    playlist.addSong(makeSong(QString("S%1").arg(i), "Artist",
+                              QString("/tmp/order-%1.mp3").arg(i),
+                              QString::number(count - i + 1)));
+  }
+  std::vector<int> pks;
+  for (int row = 0; row < playlist.songCount(); ++row) {
+    pks.push_back(playlist.getPkByIndex(row));
+  }
+  return pks;
+}
+
+std::vector<int> TestPlaylist::reloadedRows() const {
+  Playlist reloaded(1, *library_, *databaseManager_);
+  if (!reloaded.loadState()) {
+    return {};
+  }
+  std::vector<int> pks;
+  for (int row = 0; row < reloaded.songCount(); ++row) {
+    pks.push_back(reloaded.getPkByIndex(row));
+  }
+  return pks;
+}
+
+void TestPlaylist::sortByField_persistsOrder() {
+  Playlist playlist(1, *library_, *databaseManager_);
+  const std::vector<int> pks = makePersistentPlaylist(playlist, 3);
+  QCOMPARE(pks.size(), size_t{3});
+
+  playlist.sortByField("tracknumber", 0);
+
+  QCOMPARE(reloadedRows(), (std::vector<int>{pks[2], pks[1], pks[0]}));
+}
+
+void TestPlaylist::moveRows_movesAndPersists() {
+  Playlist playlist(1, *library_, *databaseManager_);
+  const std::vector<int> p = makePersistentPlaylist(playlist, 5);
+  QCOMPARE(p.size(), size_t{5});
+  QSignalSpy aboutSpy(&playlist, &Playlist::aboutToReorderSongs);
+  QSignalSpy reorderedSpy(&playlist, &Playlist::songsReordered);
+  const auto rows = [&]() {
+    std::vector<int> pks;
+    for (int row = 0; row < playlist.songCount(); ++row) {
+      pks.push_back(playlist.getPkByIndex(row));
+    }
+    return pks;
+  };
+
+  // Down: in front of the old row 4.
+  QVERIFY(playlist.moveRows({0}, 4));
+  QCOMPARE(rows(), (std::vector<int>{p[1], p[2], p[3], p[0], p[4]}));
+  // To the end.
+  QVERIFY(playlist.moveRows({0}, 5));
+  QCOMPARE(rows(), (std::vector<int>{p[2], p[3], p[0], p[4], p[1]}));
+  // Up, several rows not next to each other, in any order: they keep their
+  // relative order.
+  QVERIFY(playlist.moveRows({4, 2}, 0));
+  QCOMPARE(rows(), (std::vector<int>{p[0], p[1], p[2], p[3], p[4]}));
+  // Into the middle, from both sides of the destination.
+  QVERIFY(playlist.moveRows({0, 4}, 2));
+  QCOMPARE(rows(), (std::vector<int>{p[1], p[0], p[4], p[2], p[3]}));
+
+  QCOMPARE(aboutSpy.count(), 4);
+  QCOMPARE(reorderedSpy.count(), 4);
+  QCOMPARE(playlist.getIndexByPk(p[4]), 2);
+  QCOMPARE(reloadedRows(), rows());
+}
+
+void TestPlaylist::moveRows_rejectsInvalidAndNoOpMoves() {
+  Playlist playlist(1, *library_, *databaseManager_);
+  const std::vector<int> p = makePersistentPlaylist(playlist, 3);
+  QSignalSpy reorderedSpy(&playlist, &Playlist::songsReordered);
+
+  QVERIFY(!playlist.moveRows({}, 0));
+  QVERIFY(!playlist.moveRows({3}, 0));
+  QVERIFY(!playlist.moveRows({-1}, 0));
+  QVERIFY(!playlist.moveRows({0}, 4));
+  // In front of itself, or of the next row: no change.
+  QVERIFY(!playlist.moveRows({1}, 1));
+  QVERIFY(!playlist.moveRows({1}, 2));
+  QVERIFY(!playlist.moveRows({0, 1, 2}, 0));
+
+  QCOMPARE(reorderedSpy.count(), 0);
+  QCOMPARE(reloadedRows(), p);
 }
 
 QTEST_MAIN(TestPlaylist)

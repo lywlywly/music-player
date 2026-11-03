@@ -69,6 +69,7 @@ private slots:
 
   void parseSongFilter_acceptsOnlyConditions();
   void playlist_autoKindRefusesWritesAndStoresNoItems();
+  void rowOrder_isSavedAndKept();
   void create_fillsMatchingMonitoredSongsInFilepathOrder();
   void loadAll_restoresAutoPlaylists();
   void scanChanges_updateRowsBeforeRelease();
@@ -216,12 +217,68 @@ void TestAutoPlaylist::playlist_autoKindRefusesWritesAndStoresNoItems() {
       queryInt(databaseManager_->db(), "SELECT COUNT(*) FROM playlist_items"),
       0);
 
-  // loadState reads only last_played.
+  // loadState reads last_played and the stored row order, not
+  // playlist_items.
   playlist.setLastPlayed(a);
   Playlist reloaded(id, *library_, *databaseManager_, Playlist::Kind::Auto);
   QVERIFY(reloaded.loadState());
   QCOMPARE(reloaded.getLastPlayed(), a);
-  QVERIFY(reloaded.empty());
+  QCOMPARE(rows(reloaded), std::vector<int>{a});
+}
+
+void TestAutoPlaylist::rowOrder_isSavedAndKept() {
+  QVERIFY(writeFile(root() + "/a.mp3", "A;jazz"));
+  QVERIFY(writeFile(root() + "/b.mp3", "B;jazz"));
+  QVERIFY(writeFile(root() + "/c.mp3", "C;jazz"));
+  watchRoot();
+  const int a = pkOf("a.mp3");
+  const int b = pkOf("b.mp3");
+  const int c = pkOf("c.mp3");
+  const int id = collection_->createAutoPlaylist("Jazz", "genre HAS jazz");
+  Playlist &playlist = *collection_->playlist(id);
+  QCOMPARE(rows(playlist), (std::vector<int>{a, b, c}));
+  const auto reloadedRows = [&]() {
+    PlaylistCollection reloaded(*library_, *databaseManager_, *monitored_);
+    reloaded.loadAll();
+    return rows(*reloaded.playlist(id));
+  };
+
+  // A reorder is saved (moveRows and sortByField share it; see tst_playlist).
+  QVERIFY(playlist.moveRows({2}, 0));
+  QCOMPARE(reloadedRows(), (std::vector<int>{c, a, b}));
+
+  // A song that starts matching is appended.
+  QVERIFY(writeFile(root() + "/0.mp3", "0;jazz"));
+  rescanAndWait();
+  const int zero = pkOf("0.mp3");
+  QCOMPARE(rows(playlist), (std::vector<int>{c, a, b, zero}));
+
+  // A song that stops matching loses its saved place, and is appended when it
+  // matches again (by a scan, then by an expression edit, which keeps the
+  // order of the songs that stay).
+  QVERIFY(writeFile(root() + "/a.mp3", "A;pop"));
+  rescanAndWait();
+  QCOMPARE(rows(playlist), (std::vector<int>{c, b, zero}));
+  QVERIFY(collection_->setAutoPlaylistExpression(
+      id, "genre HAS jazz OR genre HAS pop"));
+  QCOMPARE(rows(playlist), (std::vector<int>{c, b, zero, a}));
+  QVERIFY(collection_->setAutoPlaylistExpression(id, "genre HAS jazz"));
+  QCOMPARE(rows(playlist), (std::vector<int>{c, b, zero}));
+  QCOMPARE(queryInt(databaseManager_->db(),
+                    QString("SELECT COUNT(*) FROM autoplaylist_order WHERE "
+                            "playlist_id=%1")
+                        .arg(id)),
+           3);
+  QCOMPARE(reloadedRows(), (std::vector<int>{c, b, zero}));
+
+  // The saved order owns no songs.
+  QCOMPARE(
+      queryInt(databaseManager_->db(), "SELECT COUNT(*) FROM playlist_items"),
+      0);
+  QVERIFY(collection_->removePlaylist(id));
+  QCOMPARE(queryInt(databaseManager_->db(),
+                    "SELECT COUNT(*) FROM autoplaylist_order"),
+           0);
 }
 
 void TestAutoPlaylist::create_fillsMatchingMonitoredSongsInFilepathOrder() {

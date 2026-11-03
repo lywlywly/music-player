@@ -243,11 +243,12 @@ are the Qt frontend.
     only so the menu can display the platform binding (`Command+I` on macOS,
     `Alt+Enter` elsewhere); the table handles the keys (see `PlaylistTableView`).
 * `Playlist` (backend)
-  * One playlist: song-id ordering, sorting, `last_played`, and per-playlist operations (`addFiles`, `addSong`, `addSongByPk`, `removeSongs`, `clear`, `sortByField`, `refreshMetadataFromFiles`).
-  * `Kind::Manual` or `Kind::Auto`. An auto playlist stores no `playlist_items` and refuses the write operations; `PlaylistCollection` sets its rows with `resetRows`, `appendRows` and `removeRowsByPk`, which never emit `songPksRemoved`.
+  * One playlist: song-id ordering, sorting, `last_played`, and per-playlist operations (`addFiles`, `addSong`, `addSongByPk`, `removeSongs`, `clear`, `sortByField`, `moveRows`, `refreshMetadataFromFiles`).
+  * `Kind::Manual` or `Kind::Auto`. An auto playlist stores no `playlist_items` and refuses the write operations; `PlaylistCollection` sets its rows with `resetRows`, `appendRows` and `removeRowsByPk`, which never emit `songPksRemoved`. Its row order is stored in `autoplaylist_order`, which mirrors its rows and owns no songs; `resetRows` keeps the order of the rows that stay and appends the others.
+  * Both kinds can be reordered: `sortByField` and `moveRows(rows, destinationRow)` (a drag) renumber the stored positions to the new rows, so the order survives a restart.
   * A song appears at most once per playlist. Adding a song already present is a silent no-op (`addSong` / `addSongByPk` return `false`; `addFiles` skips it and returns only the appended pks). `playlist_items` enforces this with `UNIQUE (playlist_id, song_id)`.
-  * Ingests/refreshes songs through `SongLibrary`; owns `playlist_items` and `playlists.last_played` persistence. `playlistId <= 0` is non-persistent (used by tests).
-  * Sends before/after signals for insert, remove and reset, and after-only signals for reorder and song-data changes. `addFiles` parses and ingests all paths first, then sends one insert pair for the batch. `removeSongs` sends one remove pair per row; after it and `clear`, `songPksRemoved(songPks)` reports the songs that left. Does not know playback status.
+  * Ingests/refreshes songs through `SongLibrary`; owns `playlist_items`, `autoplaylist_order` and `playlists.last_played` persistence. `playlistId <= 0` is non-persistent (used by tests).
+  * Sends before/after signals for insert, remove, reset and reorder (`aboutToReorderSongs` / `songsReordered`), and after-only signals for song-data changes. `addFiles` parses and ingests all paths first, then sends one insert pair for the batch. `removeSongs` sends one remove pair per row; after it and `clear`, `songPksRemoved(songPks)` reports the songs that left. Does not know playback status.
 * `SongMatcher`, `matchPlaylistRows` (backend, playlistsearch.h)
   * A Playlist Search query: a `parseSongFilter` condition, else plain words
     matched case-insensitively against the displayed values of the given
@@ -263,9 +264,12 @@ are the Qt frontend.
   * `QAbstractTableModel` adapter for one `Playlist`: columns, header, cell text, sortable-column check (`sortByColumnId`).
   * Renders the status column from `PlaybackQueue::statusOf` and refreshes only the status cell on `PlaybackQueue::statusChanged` for its own playlist.
   * Holds the `Playlist` through a `QPointer`, so it reports no rows if the playlist is destroyed first.
+  * A reorder is a layout change (`layoutAboutToBeChanged` / `layoutChanged`): persistent indexes are moved by song pk, so the view's selection and current row follow their songs (and so does "Playback follows cursor").
+  * Drag and drop: rows are draggable and drops go between rows. `mimeData` encodes the dragged songs' pks as `PlaylistTableModel::kRowsMimeType` with the source playlist (pks, not rows: `QDrag::exec` runs an event loop, and an autoplaylist's rows can change before the drop); `dropMimeData` accepts only a move from the same playlist, looks up the songs' current rows and calls `Playlist::moveRows`, and returns whether the order changed. The model has no `removeRows`, so the view's follow-up removal after a move does nothing.
 * `PlaylistTableView` (frontend)
   * `QTableView` of one `Playlist` through its own `PlaylistTableModel`.
   * Header: applies `GlobalColumnLayoutManager` widths on `layoutChanged`, and writes back column moves, resizes and the header menu's visibility changes. Clicking a sortable column sorts the playlist (`sortByColumnId`).
+  * Rows can be dragged to reorder the playlist (`InternalMove`, both kinds); a drop that moves rows hides the sort indicator.
   * Handles the Properties keys with a `QShortcut` per key and emits `propertiesRequested(row)` for the first selected row, or the current row when none is selected. Qt does not reliably dispatch `QAction` shortcuts from a transient popup `QMenu`, and the keys must act on the selection rather than the right-clicked row stored on the context-menu action.
 
 ### Song Properties UI
@@ -711,19 +715,24 @@ What is saved per playlist, and which class writes each table.
   playing resumes it, or starts at the first row when that song is not in the
   playlist (new playlists start with `last_played = 1`, or the song was
   removed); an empty playlist does nothing.
-* Manual playlist membership is persisted in `playlist_items(position)`.
-  Autoplaylists store only `playlists.kind = 'auto'` and `expression`; their
-  rows are computed at load and kept current in memory.
+* Manual playlist membership and order are persisted in
+  `playlist_items(position)`. Autoplaylists store `playlists.kind = 'auto'`
+  and `expression`; their rows are computed at load and kept current in
+  memory, and their order is persisted in `autoplaylist_order(position)`,
+  one row per current row. It is not membership: a song leaving the
+  autoplaylist loses its row, and one that starts matching is appended.
 * Playlist tab name edits are done inline on the tab bar and persisted to
   `playlists.name`.
 * Writers: `PlaylistCollection` owns `playlists` rows (insert, delete, `name`,
-  `tab_order`); `Playlist` owns `playlist_items` and `playlists.last_played`.
+  `tab_order`); `Playlist` owns `playlist_items`, `autoplaylist_order` and
+  `playlists.last_played`.
 * Playlist metadata writes (`playlists` row create/update/delete) stay synchronous.
 * Removing a row from a playlist also deletes its `playlist_items` row; a
   song left in no playlist and not in the monitored library is also deleted
-  from `songs` (see `PlaylistCollection`). Sort order is not persisted.
-* New `playlist_items` rows get a position above every stored one, so
-  positions may have gaps but never collide.
+  from `songs` (see `PlaylistCollection`).
+* A sort or a drag renumbers the playlist's stored positions to 1..n in one
+  transaction. New rows get a position above every stored one, so positions
+  may have gaps but never collide.
 
 ## Threading / Async Model
 
@@ -742,4 +751,6 @@ What is saved per playlist, and which class writes each table.
 * GStreamer GLib loop uses a dedicated `std::thread` on macOS/Windows.
 * Playlist DB writes, including the bulk `playlist_items` delete in
   `Playlist::clear()`, are synchronous, so rows appended right after a clear
-  are never removed by a late delete.
+  are never removed by a late delete. Batches of row writes (appends,
+  removals, reorders) run in one transaction each; no caller holds one then
+  (SQLite transactions do not nest).

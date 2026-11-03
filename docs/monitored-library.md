@@ -63,9 +63,9 @@ as it is. It is called the **manual library** below.
 
 * **Autoplaylists are views of the monitored library only.** A song that is
   only in manual playlists never appears in one.
-* **Rows are read-only but sortable.** No adding, removing or clearing;
-  the expression decides the contents. Column sort works and, as for manual
-  playlists, is not saved.
+* **Rows are read-only but can be reordered.** No adding, removing or
+  clearing; the expression decides the contents. Column sort and dragging
+  rows work and, as for manual playlists, the order is saved.
 * **If the playing song stops matching, it keeps playing.**
 * **No "whole monitored library" view.** Use an autoplaylist with the
   expression `true` (verified: it parses as a boolean expression).
@@ -102,7 +102,8 @@ as it is. It is called the **manual library** below.
 * **Watched folder**: a directory in `library_folders`, scanned recursively.
   It is **online** or **offline** (see "Offline folders").
 * **Autoplaylist**: a playlist with `kind = 'auto'` and an expression. Its
-  rows are computed, never stored. It is not an owner.
+  rows are computed; only their order is stored (`autoplaylist_order`). It is
+  not an owner.
 
 ### Invariants
 
@@ -129,7 +130,9 @@ as it is. It is called the **manual library** below.
    `songsLeft` by first removing autoplaylist rows, then calling
    `releaseSongs`.
 6. **Autoplaylists own nothing.** They never write `playlist_items`, never
-   cause a release, and removing one deletes only its `playlists` row.
+   cause a release, and removing one deletes only its `playlists` row (its
+   `autoplaylist_order` rows cascade). `autoplaylist_order` records row order
+   only and is not part of the release check.
 7. **Each monitored file belongs to exactly one watched folder**
    (`monitored_files.folder_id`), because folders don't overlap and the walk
    doesn't follow symlinks.
@@ -384,11 +387,21 @@ file's mtime and size and fires the watcher.
 
 ### Row order
 
-* On load and after an expression edit, rows are in `filepath` order.
+* A new autoplaylist starts in `filepath` order.
+* The order is saved in `autoplaylist_order` (one row per current row, by
+  `position`) and restored on load. Column-header sort
+  (`Playlist::sortByField`) and dragging rows (`Playlist::moveRows`) reorder
+  the rows and save the order, as for manual playlists.
+* Refills (load, an expression edit, `reloadAutoPlaylistExpressions`) keep the
+  order of the songs that still match; songs not yet in the playlist are
+  appended in `filepath` order.
 * Songs that start matching are appended at the end.
-* Column-header sort reorders rows in memory only (`Playlist::sortByField`,
-  as for manual playlists). The next launch starts in `filepath` order
-  again.
+* A song that stops matching loses its saved place: if it matches again, it
+  is appended. So an expression that becomes invalid (no rows) discards the
+  saved order.
+* Autoplaylists created before `autoplaylist_order` existed have no saved
+  order; their first load appends every song in `filepath` order and saves
+  that.
 
 ### Invalid expression
 
@@ -414,7 +427,7 @@ never fails because of an invalid expression; the playlist is just empty.
 |---|---|---|
 | File > Open / Add Folder (into the current playlist) | yes | disabled |
 | Remove from Playlist / Clear Playlist (context menu and File menu) | yes | hidden in the context menu, disabled in the File menu |
-| Column sort | yes (not saved) | yes (not saved) |
+| Column sort, dragging rows | yes (saved) | yes (saved) |
 | Rename / reorder / remove tab | yes | yes; removing releases no songs |
 | Properties / Open Containing Folder / Refresh Playlist Metadata | yes | yes (writes the shared row) |
 | Play Next / Add to Playback Queue / play / follows-cursor | yes | yes |
@@ -536,6 +549,17 @@ CREATE TABLE IF NOT EXISTS playlists (
 ```
 
 * `playlist_items` is unchanged and holds rows for manual playlists only.
+* Autoplaylist row order (added later; `CREATE TABLE IF NOT EXISTS`, so
+  existing databases get it without a migration):
+  ```sql
+  CREATE TABLE IF NOT EXISTS autoplaylist_order (
+    playlist_id INTEGER NOT NULL REFERENCES playlists(playlist_id) ON DELETE CASCADE,
+    song_id     INTEGER NOT NULL REFERENCES songs(song_id) ON DELETE CASCADE,
+    position    INTEGER NOT NULL,
+    PRIMARY KEY (playlist_id, song_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_autoplaylist_order_songid ON autoplaylist_order(song_id);
+  ```
 * `songs.filepath` is already `NOT NULL UNIQUE`; it now always holds the
   canonical path (invariant 1).
 * The `songs` cascade never removes a monitored song in practice: only
@@ -605,8 +629,9 @@ CREATE TABLE IF NOT EXISTS playlists (
   * `DummyFileSystemMonitor` for tests: records watches and lets the test
     emit events.
 * `Playlist` gets a kind (`Manual` / `Auto`) from `playlists.kind`.
-  * Auto: `loadState` reads only `last_played`; the write operations are
-    refused (see "Operations by playlist kind").
+  * Auto: `loadState` reads `last_played` and the saved order
+    (`autoplaylist_order`); the write operations are refused (see
+    "Operations by playlist kind").
   * New, for auto playlists only: `resetRows(pks)` (reset signals),
     `appendRows(pks)` (insert signals) and `removeRowsByPk(pks)` (the same
     remove signals as `removeSongs`). None of them emits `songPksRemoved`,
@@ -723,7 +748,6 @@ Each phase is separately testable and committable.
 * Tracking moved files by inode or file id to keep their pk. A move is a
   remove + add; play stats survive through identity.
 * A list of unreadable files in the UI.
-* Saving autoplaylist (or manual playlist) sort order.
 * Watching network shares reliably. Native events may not arrive for remote
   changes; the startup scan and "Rescan now" still pick them up.
 * Recomputing stored computed values after custom fields change (the existing

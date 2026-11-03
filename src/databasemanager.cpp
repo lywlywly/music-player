@@ -188,6 +188,25 @@ bool DatabaseManager::ensurePlaylistsSchema(QSqlQuery &q) {
 
   q.exec(
       R"(CREATE INDEX IF NOT EXISTS idx_playlist_items_songid ON playlist_items(song_id);)");
+
+  // An autoplaylist's row order, mirroring its rows. Unlike playlist_items it
+  // owns no songs: the expression decides membership.
+  if (!execOrWarn(q,
+                  R"(
+        CREATE TABLE IF NOT EXISTS autoplaylist_order (
+            playlist_id INTEGER NOT NULL
+                        REFERENCES playlists(playlist_id) ON DELETE CASCADE,
+            song_id     INTEGER NOT NULL
+                        REFERENCES songs(song_id) ON DELETE CASCADE,
+            position    INTEGER NOT NULL,
+            PRIMARY KEY (playlist_id, song_id)
+        );
+    )",
+                  "Error creating autoplaylist_order table:")) {
+    return false;
+  }
+  q.exec(
+      R"(CREATE INDEX IF NOT EXISTS idx_autoplaylist_order_songid ON autoplaylist_order(song_id);)");
   q.exec(
       R"(CREATE INDEX IF NOT EXISTS idx_playlists_tab_order ON playlists(tab_order);)");
 
