@@ -2,7 +2,10 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QDialogButtonBox>
+#include <QFile>
+#include <QFileInfo>
 #include <QGuiApplication>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QObject>
@@ -12,6 +15,7 @@
 #include <QSignalSpy>
 #include <QSqlDatabase>
 #include <QSqlQuery>
+#include <QTabBar>
 #include <QTableView>
 #include <QTemporaryDir>
 #include <QTest>
@@ -20,6 +24,7 @@
 #include <QtGlobal>
 #include <unordered_map>
 
+#include "../autoplaylistdialog.h"
 #include "../columnregistry.h"
 #include "../databasemanager.h"
 #include "../globalcolumnlayoutmanager.h"
@@ -152,9 +157,19 @@ private slots:
   void removeTab_allowsRemovingDefaultWhenMultipleTabs();
   void tabMove_persistsOrderInDb();
   void renameTab_updatesTabTextAndDb();
+  void autoPlaylistTab_showsIconAndErrorTooltip();
+  void autoPlaylistMenus_leaveOutWritesAndOfferEdit();
+  void newAutoPlaylist_dialogChecksExpressionAndCreates();
+  void editAutoPlaylist_renamesAndSetsExpression();
 
 private:
   void recreateTabs();
+  // Creates empty files with these names, watches their folder and waits for
+  // the scan. The monitored library parses a file as a song titled by its
+  // base name.
+  void watchSongs(const QStringList &fileNames);
+  // Closes the popup menu shown next, after recording its action texts.
+  void closeNextPopup(QStringList *actionTexts);
 
   ColumnRegistry *registry_ = nullptr;
   DatabaseManager *databaseManager_ = nullptr;
@@ -166,6 +181,7 @@ private:
   MonitoredLibrary *monitored_ = nullptr;
   PlaylistCollection *collection_ = nullptr;
   PlaylistTabs *tabs_ = nullptr;
+  QTemporaryDir *songDir_ = nullptr;
   QString connectionName_;
 };
 
@@ -209,7 +225,14 @@ void TestPlaylistTabs::recreateTabs() {
   delete tabs_;
   delete collection_;
   delete monitored_;
-  monitored_ = new MonitoredLibrary(*library_, *registry_, *databaseManager_);
+  monitored_ =
+      new MonitoredLibrary(*library_, *registry_, *databaseManager_,
+                           [](const std::string &path, const ColumnRegistry &) {
+                             const QString qpath = QString::fromStdString(path);
+                             return std::optional<MSong>(makeSong(
+                                 QFileInfo(qpath).baseName(), "Artist", qpath));
+                           });
+  monitored_->load();
   collection_ =
       new PlaylistCollection(*library_, *databaseManager_, *monitored_);
   collection_->loadAll();
@@ -219,6 +242,9 @@ void TestPlaylistTabs::recreateTabs() {
 }
 
 void TestPlaylistTabs::cleanup() {
+  QTRY_VERIFY(!monitored_->isScanning());
+  delete songDir_;
+  songDir_ = nullptr;
   delete tabs_;
   tabs_ = nullptr;
   delete collection_;
@@ -1210,6 +1236,189 @@ void TestPlaylistTabs::renameTab_updatesTabTextAndDb() {
                      .arg(playlistId)));
   QVERIFY(q.next());
   QCOMPARE(q.value(0).toString(), QString("Renamed"));
+}
+
+void TestPlaylistTabs::watchSongs(const QStringList &fileNames) {
+  songDir_ = new QTemporaryDir();
+  QVERIFY(songDir_->isValid());
+  const QString root = QFileInfo(songDir_->path()).canonicalFilePath();
+  for (const QString &name : fileNames) {
+    QFile file(root + "/" + name);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+  }
+  QVERIFY(monitored_->addFolder(root).folderId > 0);
+  QTRY_VERIFY(!monitored_->isScanning());
+  QCOMPARE(monitored_->songPks().size(), static_cast<size_t>(fileNames.size()));
+}
+
+void TestPlaylistTabs::closeNextPopup(QStringList *actionTexts) {
+  QTimer::singleShot(0, [actionTexts]() {
+    if (auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget())) {
+      for (QAction *action : menu->actions()) {
+        if (action->isVisible() && !action->isSeparator()) {
+          actionTexts->push_back(action->text());
+        }
+      }
+      menu->close();
+    }
+  });
+}
+
+void TestPlaylistTabs::autoPlaylistTab_showsIconAndErrorTooltip() {
+  const int id = collection_->createAutoPlaylist("Auto", "true");
+  QTabWidget *tabWidget = tabs_->tabWidget();
+  QCOMPARE(tabWidget->count(), 2);
+  QVERIFY(tabWidget->tabIcon(0).isNull());
+  QVERIFY(!tabWidget->tabIcon(1).isNull());
+  QCOMPARE(tabWidget->tabToolTip(1), QString("true"));
+  const qint64 validIcon = tabWidget->tabIcon(1).cacheKey();
+
+  QVERIFY(collection_->setAutoPlaylistExpression(id, "davis"));
+  QCOMPARE(tabWidget->tabToolTip(1), QString("Expression must be a condition"));
+  QVERIFY(tabWidget->tabIcon(1).cacheKey() != validIcon);
+
+  // Loaded autoplaylists get the same icon.
+  recreateTabs();
+  QCOMPARE(tabs_->tabWidget()->tabToolTip(1),
+           QString("Expression must be a condition"));
+}
+
+void TestPlaylistTabs::autoPlaylistMenus_leaveOutWritesAndOfferEdit() {
+  if (QGuiApplication::primaryScreen() == nullptr) {
+    QSKIP("No screen available for popup menu test");
+  }
+  watchSongs({"a.mp3"});
+  QSignalSpy changedSpy(tabs_, &PlaylistTabs::currentPlaylistChanged);
+  collection_->createAutoPlaylist("Auto", "true");
+  QCOMPARE(changedSpy.count(), 1);
+  Playlist *autoPlaylist = tabs_->currentPlaylist();
+  QCOMPARE(changedSpy.at(0).at(0).value<Playlist *>(), autoPlaylist);
+  QCOMPARE(autoPlaylist->kind(), Playlist::Kind::Auto);
+  QCOMPARE(autoPlaylist->songCount(), 1);
+
+  QTableView *table =
+      tabs_->tabWidget()->currentWidget()->findChild<QTableView *>();
+  QVERIFY(table != nullptr);
+  const QPoint rowPos = table->visualRect(table->model()->index(0, 0)).center();
+  QStringList rowActions;
+  closeNextPopup(&rowActions);
+  tabs_->onCustomContextMenuRequested(rowPos);
+  QVERIFY(rowActions.contains("Play Next"));
+  QVERIFY(rowActions.contains("Properties"));
+  QVERIFY(!rowActions.contains("Remove from Playlist"));
+  QVERIFY(!rowActions.contains("Clear Playlist"));
+
+  QTabBar *tabBar = tabs_->tabWidget()->tabBar();
+  QStringList autoTabActions;
+  closeNextPopup(&autoTabActions);
+  tabs_->onTabContextMenuRequested(tabBar->tabRect(1).center());
+  QVERIFY(autoTabActions.contains("Edit Autoplaylist..."));
+  QVERIFY(autoTabActions.contains("Remove Tab"));
+
+  // The manual playlist keeps its write operations and has nothing to edit.
+  tabs_->tabWidget()->setCurrentIndex(0);
+  QCOMPARE(changedSpy.count(), 2);
+  tabs_->currentPlaylist()->addSong(
+      makeSong("M", "Artist", "/tmp/pt-auto-menu-m.mp3"));
+  table = tabs_->tabWidget()->currentWidget()->findChild<QTableView *>();
+  rowActions.clear();
+  closeNextPopup(&rowActions);
+  tabs_->onCustomContextMenuRequested(
+      table->visualRect(table->model()->index(0, 0)).center());
+  QVERIFY(rowActions.contains("Remove from Playlist"));
+  QVERIFY(rowActions.contains("Clear Playlist"));
+  QStringList manualTabActions;
+  closeNextPopup(&manualTabActions);
+  tabs_->onTabContextMenuRequested(tabBar->tabRect(0).center());
+  QVERIFY(!manualTabActions.contains("Edit Autoplaylist..."));
+}
+
+void TestPlaylistTabs::newAutoPlaylist_dialogChecksExpressionAndCreates() {
+  watchSongs({"a.mp3", "b.mp3"});
+  tabs_->newAutoPlaylist();
+  auto *dialog = tabs_->findChild<AutoPlaylistDialog *>();
+  QVERIFY(dialog != nullptr);
+  auto *nameEdit = dialog->findChild<QLineEdit *>("name_edit");
+  auto *expressionEdit = dialog->findChild<QLineEdit *>("expression_edit");
+  auto *statusLabel = dialog->findChild<QLabel *>("status_label");
+  auto *buttons = dialog->findChild<QDialogButtonBox *>();
+  QVERIFY(nameEdit != nullptr);
+  QVERIFY(expressionEdit != nullptr);
+  QVERIFY(statusLabel != nullptr);
+  QVERIFY(buttons != nullptr);
+  QPushButton *ok = buttons->button(QDialogButtonBox::Ok);
+  QCOMPARE(nameEdit->text(), QString("New Autoplaylist"));
+  QVERIFY(!ok->isEnabled());
+
+  expressionEdit->setText("title IS a");
+  QCOMPARE(statusLabel->text(), QString("1 matching song"));
+  QVERIFY(ok->isEnabled());
+  expressionEdit->setText("true");
+  QCOMPARE(statusLabel->text(), QString("2 matching songs"));
+  expressionEdit->setText("davis");
+  QCOMPARE(statusLabel->text(), QString("Expression must be a condition"));
+  QVERIFY(!ok->isEnabled());
+  expressionEdit->setText("title IS");
+  QVERIFY(statusLabel->text().contains("(at "));
+  QVERIFY(!ok->isEnabled());
+
+  expressionEdit->setText("title IS b");
+  nameEdit->setText("  ");
+  QVERIFY(!ok->isEnabled());
+  nameEdit->setText(" B songs ");
+  QVERIFY(ok->isEnabled());
+  QTest::mouseClick(ok, Qt::LeftButton);
+
+  QCOMPARE(tabs_->tabWidget()->count(), 2);
+  QCOMPARE(tabs_->tabWidget()->tabText(1), QString("B songs"));
+  const int id = tabs_->tabWidget()->tabBar()->tabData(1).toInt();
+  QVERIFY(collection_->isAuto(id));
+  QCOMPARE(collection_->autoPlaylistExpression(id), QString("title IS b"));
+  QCOMPARE(tabs_->currentPlaylist()->songCount(), 1);
+  QTRY_VERIFY(tabs_->findChild<AutoPlaylistDialog *>() == nullptr);
+
+  // A second one gets a numbered default name; Cancel creates nothing.
+  collection_->renamePlaylist(id, "New Autoplaylist");
+  tabs_->newAutoPlaylist("true");
+  dialog = tabs_->findChild<AutoPlaylistDialog *>();
+  QVERIFY(dialog != nullptr);
+  QCOMPARE(dialog->name(), QString("New Autoplaylist 1"));
+  QCOMPARE(dialog->expression(), QString("true"));
+  dialog->reject();
+  QCOMPARE(tabs_->tabWidget()->count(), 2);
+}
+
+void TestPlaylistTabs::editAutoPlaylist_renamesAndSetsExpression() {
+  watchSongs({"a.mp3", "b.mp3"});
+  const int id = collection_->createAutoPlaylist("Auto", "title IS a");
+  tabs_->editAutoPlaylist(id);
+  auto *dialog = tabs_->findChild<AutoPlaylistDialog *>();
+  QVERIFY(dialog != nullptr);
+  QCOMPARE(dialog->name(), QString("Auto"));
+  QCOMPARE(dialog->expression(), QString("title IS a"));
+  dialog->findChild<QLineEdit *>("name_edit")->setText("Everything");
+  dialog->findChild<QLineEdit *>("expression_edit")->setText("true");
+  dialog->accept();
+
+  QCOMPARE(tabs_->tabWidget()->tabText(1), QString("Everything"));
+  QCOMPARE(collection_->autoPlaylistExpression(id), QString("true"));
+  QCOMPARE(tabs_->tabWidget()->tabToolTip(1), QString("true"));
+  QCOMPARE(collection_->playlist(id)->songCount(), 2);
+  QTRY_VERIFY(tabs_->findChild<AutoPlaylistDialog *>() == nullptr);
+
+  // Renaming alone keeps the rows (and their order).
+  QSignalSpy resetSpy(collection_->playlist(id), &Playlist::songsReset);
+  tabs_->editAutoPlaylist(id);
+  dialog = tabs_->findChild<AutoPlaylistDialog *>();
+  QVERIFY(dialog != nullptr);
+  dialog->findChild<QLineEdit *>("name_edit")->setText("All");
+  dialog->accept();
+  QCOMPARE(tabs_->tabWidget()->tabText(1), QString("All"));
+  QCOMPARE(resetSpy.count(), 0);
+
+  // A manual playlist has no autoplaylist to edit.
+  tabs_->editAutoPlaylist(1);
+  QTRY_VERIFY(tabs_->findChild<AutoPlaylistDialog *>() == nullptr);
 }
 
 QTEST_MAIN(TestPlaylistTabs)

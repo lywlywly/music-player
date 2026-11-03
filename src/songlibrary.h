@@ -75,7 +75,10 @@ public:
   void prepareParsedSong(MSong &song) const;
   const MSong &getSongByPK(int) const;
   ExprParseResult parseLibraryExpression(const QString &expressionText) const;
-  std::vector<int> search(const Expr &expression) const;
+  // The songs of candidatePks that evaluate the expression to true, in
+  // filepath order. Removed pks are skipped.
+  std::vector<int> search(const Expr &expression,
+                          const std::vector<int> &candidatePks) const;
   // Whether the song evaluates the expression to true; false for a removed
   // pk.
   bool matches(const Expr &expression, int songPk) const;

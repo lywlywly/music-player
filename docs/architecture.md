@@ -118,7 +118,13 @@ The top-level window and what it owns.
   * Starts the library load (`loadLibrary`) during startup and builds the
     playlists, tabs and actions once it calls back.
   * Open and Add Folder call `addFilesFromDialog` and `addFolderFromDialog`
-    (playlistdialogs.h) on the current playlist.
+    (playlistdialogs.h) on the current playlist. They and Clear Playlist are
+    enabled only while a manual playlist is shown
+    (`PlaylistTabs::currentPlaylistChanged`).
+  * File > New Autoplaylist and Library Search's Save as Autoplaylist call
+    `PlaylistTabs::newAutoPlaylist`.
+  * A permanent status bar label shows `MonitoredLibrary` scan progress, then
+    the number of offline watched folders, if any.
 
 ### Persistence and schema
 
@@ -171,6 +177,11 @@ The in-memory song store and reading/writing audio file tags.
     thread, applied on the main thread). Never deletes song rows; songs that
     leave it are announced with `songsLeft`. See
     [monitored-library.md](monitored-library.md).
+* `LibraryFoldersPage` (frontend, the Settings > Library tab)
+  * Lists the watched folders (marked "Offline") and calls `MonitoredLibrary`
+    for Add, Remove, Rescan Now and Remove Missing Songs (enabled for a folder
+    offline although its root exists, so offline because empty). Actions apply
+    at once, not on the Settings dialog's OK.
 * `SongParser`
   * Parses file tags into built-in + dynamic fields and remaining raw tag fields.
   * Multi-value tag fields are displayed as comma-separated text (`", "`).
@@ -201,6 +212,8 @@ are the Qt frontend.
   * Properties (row context menu, and the table's shortcut) and Open Containing Folder (row context menu) call `openSongProperties` and `revealSongFile` for the row's song.
   * Remove from Playlist (row context menu) removes the selected rows with `Playlist::removeSongs`.
   * Clear Playlist (row context menu, and the `MainWindow` menu action) calls `clearCurrentPlaylist`.
+  * Autoplaylist tabs show an icon, or a warning icon with `autoPlaylistError` as tooltip, updated on `autoPlaylistExpressionChanged`. Their row context menu hides Remove from Playlist and Clear Playlist; their tab context menu adds Edit Autoplaylist (`editAutoPlaylist`). `newAutoPlaylist` and `editAutoPlaylist` open an `AutoPlaylistDialog` (name and expression, checked with `parseSongFilter` as you type, with the number of matching monitored songs).
+  * Emits `currentPlaylistChanged` when the shown playlist changes.
   * Refresh (tab context menu) re-reads the playlist's tags with `refreshMetadataWithProgress`.
   * The Properties context-menu action carries `PlaylistTableView::propertiesShortcuts()`
     only so the menu can display the platform binding (`Command+I` on macOS,

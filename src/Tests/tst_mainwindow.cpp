@@ -22,6 +22,7 @@
 #include <QUrl>
 #include <QUuid>
 
+#include "../autoplaylistdialog.h"
 #include "../cloudplaystatssyncservice.h"
 #include "../columnregistry.h"
 #include "../databasemanager.h"
@@ -31,7 +32,9 @@
 #include "../librarysearchdialog.h"
 #include "../lyricsmanager.h"
 #include "../mainwindow.h"
+#include "../monitoredlibrary.h"
 #include "../playbackbackendmanager.h"
+#include "../playlistcollection.h"
 #include "../playlisttablemodel.h"
 #include "../playlisttabs.h"
 #include "../settingsdialog.h"
@@ -130,8 +133,10 @@ private slots:
   void cursorFollowsPlaybackAction_controlsSelectionOnSongSwitch();
   void playbackFollowsCursorAction_persistsToSettings();
   void playbackFollowsCursorAction_playsSelectedRowWhenQueueEmpty();
-  void librarySearchAction_opensDialog();
   void librarySearchDialog_canCreateNewPlaylistTabFromResults();
+  void librarySearchDialog_savesAutoPlaylist();
+  void newAutoPlaylistAction_opensDialog();
+  void libraryScanStatus_showsProgressThenOfflineFolders();
   void countedPlay_isPushedToCloud();
   void cloudSync_startupRebase_runsOnWindowStartup();
   void cloudSync_manualRebase_appliesCloudPlayCount_integration();
@@ -141,6 +146,12 @@ private slots:
 
 private:
   void recreateWindow();
+  // Writes tagged WAVs with these titles into a folder, watches it and waits
+  // for the scan.
+  void watchTaggedSongs(const QStringList &titles);
+  // Opens Library Search and searches for expression; nullptr if it does not
+  // open.
+  LibrarySearchDialog *searchLibrary(const QString &expression);
   MainWindow *window_ = nullptr;
   QTemporaryDir *workDir_ = nullptr;
   QString oldCwd_;
@@ -316,18 +327,22 @@ void TestMainWindow::
 
   QAction *openAction = window_->findChild<QAction *>("actionOpen");
   QAction *playAction = window_->findChild<QAction *>("actionPlay");
+  QAction *newAutoPlaylistAction =
+      window_->findChild<QAction *>("actionNew_autoplaylist");
   QAction *manualRebase =
       window_->findChild<QAction *>("actionManual_cloud_rebase");
   QStatusBar *statusBar = window_->findChild<QStatusBar *>("statusbar");
   auto *media = window_->findChild<DummySystemMediaInterface *>();
   QVERIFY(openAction != nullptr);
   QVERIFY(playAction != nullptr);
+  QVERIFY(newAutoPlaylistAction != nullptr);
   QVERIFY(manualRebase != nullptr);
   QVERIFY(statusBar != nullptr);
   QVERIFY(media != nullptr);
 
   QVERIFY(!openAction->isEnabled());
   QVERIFY(!playAction->isEnabled());
+  QVERIFY(!newAutoPlaylistAction->isEnabled());
   QVERIFY(!manualRebase->isEnabled());
   QCOMPARE(statusBar->currentMessage(), QStringLiteral("Loading library..."));
 
@@ -339,6 +354,7 @@ void TestMainWindow::
 
   QTRY_VERIFY(openAction->isEnabled());
   QTRY_VERIFY(playAction->isEnabled());
+  QVERIFY(newAutoPlaylistAction->isEnabled());
   QCOMPARE(statusBar->currentMessage(), QString{});
   qunsetenv("MYPLAYER_TEST_LIBRARY_LOAD_DELAY_MS");
 }
@@ -953,50 +969,54 @@ void TestMainWindow::
   QTRY_COMPARE(table->currentIndex().row(), 1);
 }
 
-void TestMainWindow::librarySearchAction_opensDialog() {
+void TestMainWindow::watchTaggedSongs(const QStringList &titles) {
+  const QString folder = workDir_->filePath("library");
+  QVERIFY(QDir().mkpath(folder));
+  ColumnRegistry registry;
+  for (const QString &title : titles) {
+    const QString path = folder + "/" + title + ".wav";
+    QVERIFY(writeSilentWav(path));
+    QVERIFY(SongParser::writeTags(path.toStdString(),
+                                  {{"title", title.toStdString()},
+                                   {"artist", "Artist"},
+                                   {"album", "Album"}},
+                                  registry));
+  }
+  PlaylistCollection *collection = window_->findChild<PlaylistCollection *>();
+  QVERIFY(collection != nullptr);
+  MonitoredLibrary &monitored = collection->monitoredLibrary();
+  QVERIFY(monitored.addFolder(folder).folderId > 0);
+  QTRY_VERIFY(!monitored.isScanning());
+  QCOMPARE(monitored.songPks().size(), static_cast<size_t>(titles.size()));
+}
+
+LibrarySearchDialog *TestMainWindow::searchLibrary(const QString &expression) {
   QAction *searchAction = window_->findChild<QAction *>("actionSearch");
-  QVERIFY(searchAction != nullptr);
-
+  if (searchAction == nullptr) {
+    return nullptr;
+  }
   searchAction->trigger();
-
-  QTRY_VERIFY(window_->findChild<LibrarySearchDialog *>() != nullptr);
+  auto *dialog = window_->findChild<LibrarySearchDialog *>();
+  if (dialog == nullptr) {
+    return nullptr;
+  }
+  dialog->findChild<QLineEdit *>("expression_edit")->setText(expression);
+  QTest::mouseClick(dialog->findChild<QPushButton *>("search_button"),
+                    Qt::LeftButton);
+  return dialog;
 }
 
 void TestMainWindow::librarySearchDialog_canCreateNewPlaylistTabFromResults() {
   PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
   QVERIFY(tabs != nullptr);
-  Playlist *playlist = tabs->currentPlaylist();
-  QVERIFY(playlist != nullptr);
+  watchTaggedSongs({"Song1", "Song2", "Song3"});
 
-  const QString wav1 = workDir_->filePath("search-tab-song1.wav");
-  const QString wav2 = workDir_->filePath("search-tab-song2.wav");
-  const QString wav3 = workDir_->filePath("search-tab-song3.wav");
-  QVERIFY(writeSilentWav(wav1));
-  QVERIFY(writeSilentWav(wav2));
-  QVERIFY(writeSilentWav(wav3));
-
-  playlist->addSong(makeSong("Song1", "Artist", wav1));
-  playlist->addSong(makeSong("Song2", "Artist", wav2));
-  playlist->addSong(makeSong("Song3", "Artist", wav3));
-
-  QAction *searchAction = window_->findChild<QAction *>("actionSearch");
-  QVERIFY(searchAction != nullptr);
-  searchAction->trigger();
-
-  LibrarySearchDialog *dialog = window_->findChild<LibrarySearchDialog *>();
-  QTRY_VERIFY(dialog != nullptr);
-
-  QLineEdit *expressionEdit = dialog->findChild<QLineEdit *>("expression_edit");
-  QPushButton *searchButton = dialog->findChild<QPushButton *>("search_button");
+  LibrarySearchDialog *dialog = searchLibrary("title IS song2");
+  QVERIFY(dialog != nullptr);
   QPushButton *createPlaylistButton =
       dialog->findChild<QPushButton *>("create_playlist_button");
-  QVERIFY(expressionEdit != nullptr);
-  QVERIFY(searchButton != nullptr);
   QVERIFY(createPlaylistButton != nullptr);
-
-  expressionEdit->setText("title IS song2");
-  QTest::mouseClick(searchButton, Qt::LeftButton);
-  QTRY_VERIFY(createPlaylistButton->isEnabled());
+  QVERIFY(createPlaylistButton->isEnabled());
 
   const int oldTabCount = tabs->tabWidget()->count();
   QTest::mouseClick(createPlaylistButton, Qt::LeftButton);
@@ -1005,6 +1025,77 @@ void TestMainWindow::librarySearchDialog_canCreateNewPlaylistTabFromResults() {
   QTRY_COMPARE(tabs->currentPlaylist()->songCount(), 1);
   QCOMPARE(tabs->currentPlaylist()->getSongByIndex(0).at("title").text,
            std::string("Song2"));
+}
+
+void TestMainWindow::librarySearchDialog_savesAutoPlaylist() {
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QVERIFY(tabs != nullptr);
+  QAction *openAction = window_->findChild<QAction *>("actionOpen");
+  QAction *addFolderAction = window_->findChild<QAction *>("actionAdd_folder");
+  QAction *clearAction = window_->findChild<QAction *>("actionClear_Playlist");
+  QVERIFY(openAction != nullptr);
+  QVERIFY(addFolderAction != nullptr);
+  QVERIFY(clearAction != nullptr);
+  watchTaggedSongs({"Song1", "Song2"});
+  QVERIFY(openAction->isEnabled());
+
+  LibrarySearchDialog *dialog = searchLibrary("title IS song2");
+  QVERIFY(dialog != nullptr);
+  QTest::mouseClick(
+      dialog->findChild<QPushButton *>("save_autoplaylist_button"),
+      Qt::LeftButton);
+
+  AutoPlaylistDialog *autoDialog = nullptr;
+  QTRY_VERIFY((autoDialog = tabs->findChild<AutoPlaylistDialog *>()) !=
+              nullptr);
+  QCOMPARE(autoDialog->expression(), QString("title IS song2"));
+  autoDialog->accept();
+
+  QTRY_COMPARE(tabs->tabWidget()->count(), 2);
+  Playlist *shown = tabs->currentPlaylist();
+  QCOMPARE(shown->kind(), Playlist::Kind::Auto);
+  QCOMPARE(shown->songCount(), 1);
+  QCOMPARE(shown->getSongByIndex(0).at("title").text, std::string("Song2"));
+  QVERIFY(!openAction->isEnabled());
+  QVERIFY(!addFolderAction->isEnabled());
+  QVERIFY(!clearAction->isEnabled());
+
+  tabs->tabWidget()->setCurrentIndex(0);
+  QVERIFY(openAction->isEnabled());
+  QVERIFY(addFolderAction->isEnabled());
+  QVERIFY(clearAction->isEnabled());
+}
+
+void TestMainWindow::newAutoPlaylistAction_opensDialog() {
+  QAction *action = window_->findChild<QAction *>("actionNew_autoplaylist");
+  QVERIFY(action != nullptr);
+  action->trigger();
+  QTRY_VERIFY(window_->findChild<AutoPlaylistDialog *>() != nullptr);
+}
+
+void TestMainWindow::libraryScanStatus_showsProgressThenOfflineFolders() {
+  auto *label = window_->findChild<QLabel *>("library_scan_status_label");
+  QVERIFY(label != nullptr);
+  QVERIFY(label->isHidden());
+  PlaylistCollection *collection = window_->findChild<PlaylistCollection *>();
+  QVERIFY(collection != nullptr);
+  MonitoredLibrary &monitored = collection->monitoredLibrary();
+
+  emit monitored.scanProgress(120, 3000);
+  QVERIFY(!label->isHidden());
+  QCOMPARE(label->text(), QString("Scanning library... 120 / 3000"));
+  emit monitored.scanFinished();
+  QVERIFY(label->isHidden());
+
+  const QString folder = workDir_->filePath("offline");
+  QVERIFY(QDir().mkpath(folder));
+  QVERIFY(monitored.addFolder(folder).folderId > 0);
+  QTRY_VERIFY(!monitored.isScanning());
+  QVERIFY(QDir(folder).removeRecursively());
+  monitored.rescan();
+  QTRY_VERIFY(!monitored.isScanning());
+  QVERIFY(!label->isHidden());
+  QCOMPARE(label->text(), QString("1 library folder offline"));
 }
 
 void TestMainWindow::countedPlay_isPushedToCloud() {

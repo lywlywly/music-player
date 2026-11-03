@@ -1,4 +1,5 @@
 #include "playlisttabs.h"
+#include "autoplaylistdialog.h"
 #include "playlistdialogs.h"
 #include "playlisttableview.h"
 #include "songdialogs.h"
@@ -7,6 +8,7 @@
 #include <QKeyEvent>
 #include <QSettings>
 #include <QSignalBlocker>
+#include <QStyle>
 #include <QtGlobal>
 
 PlaylistTabs::PlaylistTabs(QWidget *parent)
@@ -43,6 +45,8 @@ void PlaylistTabs::init(SongLibrary *s, PlaybackQueue *p, PlaybackManager *c,
               ui->tabWidget->setTabText(index, name);
             }
           });
+  connect(collection_, &PlaylistCollection::autoPlaylistExpressionChanged, this,
+          &PlaylistTabs::updateAutoPlaylistTab);
   setUpPlaylist();
   setUpPlaybackManager();
   setUpCurrentPlaylist();
@@ -124,6 +128,37 @@ void PlaylistTabs::createNewPlaylistTabFromSongIds(const QList<int> &songIds) {
                               std::vector<int>(songIds.begin(), songIds.end()));
 }
 
+void PlaylistTabs::newAutoPlaylist(const QString &expression) {
+  auto *dialog = new AutoPlaylistDialog(
+      *songLibrary, collection_->monitoredLibrary(),
+      getNewPlaylistName("New Autoplaylist"), expression, this);
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  connect(dialog, &QDialog::accepted, this, [this, dialog]() {
+    collection_->createAutoPlaylist(dialog->name(), dialog->expression());
+  });
+  dialog->open();
+}
+
+void PlaylistTabs::editAutoPlaylist(int playlistId) {
+  if (!collection_->isAuto(playlistId)) {
+    return;
+  }
+  auto *dialog = new AutoPlaylistDialog(
+      *songLibrary, collection_->monitoredLibrary(),
+      collection_->name(playlistId),
+      collection_->autoPlaylistExpression(playlistId), this);
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  connect(dialog, &QDialog::accepted, this, [this, dialog, playlistId]() {
+    collection_->renamePlaylist(playlistId, dialog->name());
+    // An unchanged expression keeps the rows and their order.
+    if (dialog->expression() !=
+        collection_->autoPlaylistExpression(playlistId)) {
+      collection_->setAutoPlaylistExpression(playlistId, dialog->expression());
+    }
+  });
+  dialog->open();
+}
+
 void PlaylistTabs::setUpPlaybackManager() {
   connect(playbackOrderMenuActionGroup, &QActionGroup::triggered, this,
           [this](QAction *action) {
@@ -163,8 +198,11 @@ void PlaylistTabs::setUpPlaybackManager() {
 void PlaylistTabs::onCustomContextMenuRequested(const QPoint &pos) {
   QModelIndex index = currentTableView->indexAt(pos);
   const bool hasRow = index.isValid();
+  const bool manual = currentPlaylist_->kind() == Playlist::Kind::Manual;
   playNextAction_->setEnabled(hasRow);
   playEndAction_->setEnabled(hasRow);
+  removeFromPlaylistAction_->setVisible(manual);
+  clearPlaylistAction_->setVisible(manual);
   removeFromPlaylistAction_->setEnabled(hasRow);
   openContainingFolderAction_->setEnabled(hasRow);
   propertiesAction_->setEnabled(hasRow);
@@ -184,11 +222,16 @@ void PlaylistTabs::onTabContextMenuRequested(const QPoint &pos) {
 
   QMenu menu(this);
   QAction *addAction = menu.addAction("Add New Playlist");
+  QAction *editAutoPlaylistAction = nullptr;
   QAction *refreshAction = nullptr;
   QAction *renameAction = nullptr;
   QAction *removeAction = nullptr;
+  const int playlistId = playlistIdForTabIndex(index);
 
   if (index != -1) {
+    if (collection_->isAuto(playlistId)) {
+      editAutoPlaylistAction = menu.addAction("Edit Autoplaylist...");
+    }
     refreshAction = menu.addAction("Refresh Playlist Metadata");
     renameAction = menu.addAction("Rename Playlist");
     removeAction = menu.addAction("Remove Tab");
@@ -201,6 +244,8 @@ void PlaylistTabs::onTabContextMenuRequested(const QPoint &pos) {
 
   if (selected == addAction) {
     collection_->createPlaylist(getNewPlaylistName());
+  } else if (selected == editAutoPlaylistAction && index != -1) {
+    editAutoPlaylist(playlistId);
   } else if (selected == refreshAction && index != -1) {
     if (Playlist *playlist = playlistForTabIndex(index)) {
       refreshMetadataWithProgress(this, *playlist);
@@ -216,6 +261,7 @@ void PlaylistTabs::onTabChanged(int index) {
   if (index < 0) {
     currentPlaylist_ = nullptr;
     currentTableView = nullptr;
+    emit currentPlaylistChanged(nullptr);
     return;
   }
   currentPlaylist_ = playlistForTabIndex(index);
@@ -225,6 +271,7 @@ void PlaylistTabs::onTabChanged(int index) {
   setUpCurrentPlaylist();
   QSettings settings;
   settings.setValue("playlist/last_opened_id", playlistIdForTabIndex(index));
+  emit currentPlaylistChanged(currentPlaylist_);
 }
 
 void PlaylistTabs::setUpCurrentPlaylist() {
@@ -284,7 +331,23 @@ void PlaylistTabs::addPlaylistTab(const QString &playlistName, int playlistId) {
   ui->tabWidget->addTab(newTab, playlistName);
   const int tabIndex = ui->tabWidget->indexOf(newTab);
   ui->tabWidget->tabBar()->setTabData(tabIndex, playlistId);
+  updateAutoPlaylistTab(playlistId);
   ui->tabWidget->setCurrentWidget(newTab);
+}
+
+void PlaylistTabs::updateAutoPlaylistTab(int playlistId) {
+  const int index = tabIndexForPlaylistId(playlistId);
+  if (index < 0 || !collection_->isAuto(playlistId)) {
+    return;
+  }
+  const QString error = collection_->autoPlaylistError(playlistId);
+  ui->tabWidget->setTabIcon(
+      index,
+      style()->standardIcon(error.isEmpty() ? QStyle::SP_FileDialogContentsView
+                                            : QStyle::SP_MessageBoxWarning));
+  ui->tabWidget->setTabToolTip(
+      index, error.isEmpty() ? collection_->autoPlaylistExpression(playlistId)
+                             : error);
 }
 
 void PlaylistTabs::removePlaylistTab(int playlistId) {
@@ -297,14 +360,14 @@ void PlaylistTabs::removePlaylistTab(int playlistId) {
   delete tab;
 }
 
-QString PlaylistTabs::getNewPlaylistName() {
-  if (findPlaylistIndex("New Playlist") < 0) {
-    return "New Playlist";
+QString PlaylistTabs::getNewPlaylistName(const QString &base) {
+  if (findPlaylistIndex(base) < 0) {
+    return base;
   }
   for (int i = 1;; i++) {
-    std::string newName = std::format("New Playlist {}", i);
-    if (findPlaylistIndex(QString::fromUtf8(newName)) < 0) {
-      return QString::fromUtf8(newName);
+    const QString newName = QStringLiteral("%1 %2").arg(base).arg(i);
+    if (findPlaylistIndex(newName) < 0) {
+      return newName;
     }
   }
 }

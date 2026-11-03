@@ -20,6 +20,8 @@
 #include <QSpinBox>
 #include <unordered_map>
 
+class MonitoredLibrary;
+
 namespace Ui {
 class SettingsDialog;
 }
@@ -30,6 +32,7 @@ class SettingsDialog : public QDialog {
 public:
   explicit SettingsDialog(ColumnRegistry &columnRegistry,
                           DatabaseManager &databaseManager,
+                          MonitoredLibrary &monitoredLibrary,
                           QWidget *parent = nullptr);
   ~SettingsDialog();
   void setDisplayExpressionPreviewContext(

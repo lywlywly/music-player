@@ -67,12 +67,12 @@ public:
   // Why the autoplaylist's expression is invalid; empty when it is valid, or
   // for an unknown id or a manual playlist.
   QString autoPlaylistError(int playlistId) const;
-  // Stores the expression (even if invalid) and refills the rows in filepath
-  // order. Returns false for an unknown id, a manual playlist, or a failed
-  // update.
+  // Stores the expression (even if invalid), refills the rows in filepath
+  // order and emits autoPlaylistExpressionChanged. Returns false for an unknown
+  // id, a manual playlist, or a failed update.
   bool setAutoPlaylistExpression(int playlistId, const QString &expression);
   // Re-parses every autoplaylist expression and refills the rows, after
-  // custom fields changed.
+  // custom fields changed; emits autoPlaylistExpressionChanged for each.
   void reloadAutoPlaylistExpressions();
 
   // After song data changed (tags, play stats): updates autoplaylist rows,
@@ -88,6 +88,9 @@ signals:
   void playlistAboutToBeRemoved(int playlistId);
   void playlistRemoved(int playlistId);
   void playlistRenamed(int playlistId, const QString &name);
+  // After setAutoPlaylistExpression or reloadAutoPlaylistExpressions: the
+  // expression or its error (autoPlaylistError) may have changed.
+  void autoPlaylistExpressionChanged(int playlistId);
   // The songs were removed from SongLibrary, as neither library holds them
   // any more.
   void songsRemovedFromLibrary(const std::vector<int> &songPks);

@@ -22,7 +22,9 @@ class PlaylistTabs;
 // writes are delegated to PlaylistCollection; tabs follow its signals. Tab
 // identity: each tab stores its DB `playlist_id` in QTabBar::tabData(index),
 // and all playlist lookup/removal/reorder persistence uses that id (not tab
-// text/index).
+// text/index). Autoplaylist tabs have an icon (a warning icon, with the error
+// as tooltip, for an invalid expression), and their context menus leave out
+// the write operations.
 class PlaylistTabs : public QWidget {
   Q_OBJECT
 
@@ -36,7 +38,8 @@ public:
   void setUpPlaylist();
   void onCustomContextMenuRequested(const QPoint &pos);
   void onTabContextMenuRequested(const QPoint &pos);
-  QString getNewPlaylistName();
+  // base, or "base N" with the lowest N >= 1 no tab is named.
+  QString getNewPlaylistName(const QString &base = "New Playlist");
   std::string findPlaylistName(Playlist *);
   int findPlaylistIndex(QString);
   bool removePlaylistTabByIndex(int index);
@@ -49,6 +52,12 @@ public:
   // Clears the current playlist, if there is one.
   void clearCurrentPlaylist();
   void createNewPlaylistTabFromSongIds(const QList<int> &songIds);
+  // Opens an AutoPlaylistDialog with expression filled in; OK creates the
+  // autoplaylist.
+  void newAutoPlaylist(const QString &expression = {});
+  // Opens an AutoPlaylistDialog for the autoplaylist; OK renames it and, if
+  // the expression changed, sets it.
+  void editAutoPlaylist(int playlistId);
   bool renamePlaylistTabByIndex(int index, const QString &newName);
   void navigateIndex(int row, Playlist *pl);
   // PlaylistTableView::firstSelectedRow of the current tab, or -1 without one.
@@ -56,10 +65,14 @@ public:
 
 signals:
   void doubleClicked(const QModelIndex &index);
+  // The playlist shown changed; nullptr when there is no tab.
+  void currentPlaylistChanged(Playlist *playlist);
 
 private:
   void addPlaylistTab(const QString &playlistName, int playlistId);
   void removePlaylistTab(int playlistId);
+  // Sets the tab's icon and tooltip from its autoplaylist expression.
+  void updateAutoPlaylistTab(int playlistId);
   Playlist *playlistForTabIndex(int index);
   // Reads QTabBar::tabData(index) and returns the DB playlist_id for that tab.
   // Returns -1 for invalid index.

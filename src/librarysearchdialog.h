@@ -6,33 +6,42 @@
 #include "songlibrary.h"
 #include <QDialog>
 
+class MonitoredLibrary;
+
 namespace Ui {
 class LibrarySearchDialog;
 }
 
+// Searches the monitored library with a condition (parseSongFilter). Results
+// can become a manual playlist, or the expression an autoplaylist.
 class LibrarySearchDialog : public QDialog {
   Q_OBJECT
 
 public:
-  explicit LibrarySearchDialog(SongLibrary &songLibrary,
-                               GlobalColumnLayoutManager &columnLayoutManager,
-                               QWidget *parent = nullptr);
+  LibrarySearchDialog(SongLibrary &songLibrary,
+                      const MonitoredLibrary &monitoredLibrary,
+                      GlobalColumnLayoutManager &columnLayoutManager,
+                      QWidget *parent = nullptr);
   ~LibrarySearchDialog();
 
 signals:
   void createPlaylistRequested(const QList<int> &songIds);
+  void saveAsAutoPlaylistRequested(const QString &expression);
 
 private:
   void createPlaylistFromCurrentResults();
-  void updateCreatePlaylistButtonState();
   void performSearch();
-  void showMatchCount();
-  void showError(const ExprParseError &error);
+  // Clears the results and disables the result actions.
+  void clearResults();
+  void showMessage(const QString &message, bool error);
 
   Ui::LibrarySearchDialog *ui = nullptr;
   SongLibrary &songLibrary_;
+  const MonitoredLibrary &monitoredLibrary_;
   LibrarySearchResultsModel *resultsModel_ = nullptr;
   std::vector<int> currentMatches_;
+  // The expression of the last successful search.
+  QString currentExpression_;
 };
 
 #endif // LIBRARYSEARCHDIALOG_H

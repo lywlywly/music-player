@@ -280,20 +280,19 @@ SongLibrary::parseLibraryExpression(const QString &expressionText) const {
   return ::parseLibraryExpression(expressionText, resolver);
 }
 
-std::vector<int> SongLibrary::search(const Expr &expression) const {
-  std::vector<int> matches;
-  matches.reserve(songs.size());
-  for (int songId = 0; songId < static_cast<int>(songs.size()); ++songId) {
-    const MSong &song = songs[songId];
-    if (song.empty()) {
-      continue;
-    }
-    SongLibraryExprEvalContext context(song);
-    if (expression.evaluate(context)) {
-      matches.push_back(songId);
+std::vector<int>
+SongLibrary::search(const Expr &expression,
+                    const std::vector<int> &candidatePks) const {
+  std::vector<int> found;
+  for (int songPk : candidatePks) {
+    if (matches(expression, songPk)) {
+      found.push_back(songPk);
     }
   }
-  return matches;
+  std::sort(found.begin(), found.end(), [this](int a, int b) {
+    return songs[a].at("filepath").text < songs[b].at("filepath").text;
+  });
+  return found;
 }
 
 bool SongLibrary::matches(const Expr &expression, int songPk) const {
@@ -308,9 +307,11 @@ bool SongLibrary::matches(const Expr &expression, int songPk) const {
 ExprParseResult parseSongFilter(const SongLibrary &library,
                                 const QString &expressionText) {
   ExprParseResult result = library.parseLibraryExpression(expressionText);
-  if (result.ok() && inferExprStaticType(*result.expr) != ExprStaticType::Bool) {
+  if (result.ok() &&
+      inferExprStaticType(*result.expr) != ExprStaticType::Bool) {
     result.expr.reset();
-    result.error = {.message = QStringLiteral("Expression must be a condition")};
+    result.error = {.message =
+                        QStringLiteral("Expression must be a condition")};
   }
   return result;
 }

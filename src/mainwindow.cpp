@@ -16,6 +16,7 @@
 #include <QDir>
 #include <QEvent>
 #include <QKeySequence>
+#include <QLabel>
 #include <QResource>
 #include <QSettings>
 #include <QStatusBar>
@@ -106,6 +107,7 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
   setUpMenuBar();
   initCloudSync();
   setUpPlaylist();
+  setUpLibraryScanStatus();
   initSettings();
   setUpPlayback();
   initVolumeControl();
@@ -196,6 +198,10 @@ void MainWindow::finishSetUpPlaylist() {
   });
   connect(ui->actionClear_Playlist, &QAction::triggered, playlistTabs,
           &PlaylistTabs::clearCurrentPlaylist);
+  connect(ui->actionNew_autoplaylist, &QAction::triggered, playlistTabs,
+          [this]() { playlistTabs->newAutoPlaylist(); });
+  connect(playlistTabs, &PlaylistTabs::currentPlaylistChanged, this,
+          &MainWindow::updatePlaylistWriteActionsEnabled);
   playlistReady_ = true;
   playback_->setReady(true);
   setPlaylistDependentActionsEnabled(true);
@@ -205,9 +211,8 @@ void MainWindow::finishSetUpPlaylist() {
 }
 
 void MainWindow::setPlaylistDependentActionsEnabled(bool enabled) {
-  ui->actionOpen->setEnabled(enabled);
-  ui->actionAdd_folder->setEnabled(enabled);
-  ui->actionClear_Playlist->setEnabled(enabled);
+  updatePlaylistWriteActionsEnabled();
+  ui->actionNew_autoplaylist->setEnabled(enabled);
   ui->actionSearch->setEnabled(enabled);
   ui->actionPlay->setEnabled(enabled);
   ui->actionPause->setEnabled(enabled);
@@ -222,10 +227,47 @@ void MainWindow::setPlaylistDependentActionsEnabled(bool enabled) {
   refreshManualCloudRebaseActionEnabled();
 }
 
+void MainWindow::updatePlaylistWriteActionsEnabled() {
+  const Playlist *shown =
+      playlistReady_ ? playlistTabs->currentPlaylist() : nullptr;
+  const bool manual =
+      shown != nullptr && shown->kind() == Playlist::Kind::Manual;
+  ui->actionOpen->setEnabled(manual);
+  ui->actionAdd_folder->setEnabled(manual);
+  ui->actionClear_Playlist->setEnabled(manual);
+}
+
+void MainWindow::setUpLibraryScanStatus() {
+  auto *label = new QLabel(this);
+  label->setObjectName("library_scan_status_label");
+  label->hide();
+  statusBar()->addPermanentWidget(label);
+  connect(&monitoredLibrary_, &MonitoredLibrary::scanProgress, label,
+          [label](int done, int total) {
+            label->setText(
+                tr("Scanning library... %1 / %2").arg(done).arg(total));
+            label->show();
+          });
+  connect(&monitoredLibrary_, &MonitoredLibrary::scanFinished, label,
+          [this, label]() {
+            const std::vector<MonitoredLibrary::Folder> folders =
+                monitoredLibrary_.folders();
+            const auto offline =
+                std::count_if(folders.begin(), folders.end(),
+                              [](const MonitoredLibrary::Folder &folder) {
+                                return !folder.online;
+                              });
+            label->setText(offline == 1
+                               ? tr("1 library folder offline")
+                               : tr("%1 library folders offline").arg(offline));
+            label->setVisible(offline > 0);
+          });
+}
+
 void MainWindow::initSettings() {
   connect(ui->actionPreferences, &QAction::triggered, this, [this]() {
-    SettingsDialog *dialog =
-        new SettingsDialog(columnRegistry_, databaseManager_, this);
+    SettingsDialog *dialog = new SettingsDialog(
+        columnRegistry_, databaseManager_, monitoredLibrary_, this);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     dialog->setModal(true);
     connect(dialog, &SettingsDialog::backendChanged, this,
@@ -411,11 +453,13 @@ void MainWindow::updateSettingsDisplayPreviewContext(SettingsDialog *dialog) {
 }
 
 void MainWindow::openLibrarySearchDialog() {
-  LibrarySearchDialog *dialog =
-      new LibrarySearchDialog(songLibrary, columnLayoutManager_, this);
+  LibrarySearchDialog *dialog = new LibrarySearchDialog(
+      songLibrary, monitoredLibrary_, columnLayoutManager_, this);
   dialog->setAttribute(Qt::WA_DeleteOnClose);
   connect(dialog, &LibrarySearchDialog::createPlaylistRequested, playlistTabs,
           &PlaylistTabs::createNewPlaylistTabFromSongIds);
+  connect(dialog, &LibrarySearchDialog::saveAsAutoPlaylistRequested,
+          playlistTabs, &PlaylistTabs::newAutoPlaylist);
   dialog->show();
 }
 

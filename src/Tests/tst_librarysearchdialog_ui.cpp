@@ -1,3 +1,6 @@
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
@@ -7,6 +10,7 @@
 #include <QSignalSpy>
 #include <QSqlDatabase>
 #include <QTableView>
+#include <QTemporaryDir>
 #include <QTest>
 #include <QUuid>
 
@@ -14,30 +18,35 @@
 #include "../databasemanager.h"
 #include "../globalcolumnlayoutmanager.h"
 #include "../librarysearchdialog.h"
+#include "../monitoredlibrary.h"
 #include "../songlibrary.h"
-#include "../utils.h"
 
 namespace {
-MSong makeSong(const QString &title, const QString &artist, const QString &path,
-               const QString &genre = {}) {
-  MSong song;
-  song.insert_or_assign("title", FieldValue(title.toStdString(), "title"));
-  song.insert_or_assign("artist", FieldValue(artist.toStdString(), "artist"));
-  song.insert_or_assign("album", FieldValue("Album", "album"));
-  song.insert_or_assign("discnumber", FieldValue("1", "discnumber"));
-  song.insert_or_assign("tracknumber", FieldValue("1", "tracknumber"));
-  song.insert_or_assign("date", FieldValue("2024-01-01", "date"));
-  if (!genre.isEmpty()) {
-    song.insert_or_assign("genre", FieldValue(genre.toStdString(), "genre"));
+// Test files hold "<title>;<genre>".
+std::optional<MSong> fakeParse(const std::string &path) {
+  QFile file(QString::fromStdString(path));
+  if (!file.open(QIODevice::ReadOnly)) {
+    return std::nullopt;
   }
-  song.insert_or_assign("filepath", FieldValue(path.toStdString(), "filepath"));
-  const std::string identity =
-      util::normalizedText(title).toStdString() + "|" +
-      util::normalizedText(artist).toStdString() + "|" +
-      util::normalizedText(QStringLiteral("Album")).toStdString();
-  song.insert_or_assign("song_identity_key",
-                        FieldValue(identity, "song_identity_key"));
+  const QList<QByteArray> parts = file.readAll().trimmed().split(';');
+  MSong song;
+  song.insert_or_assign("title",
+                        FieldValue(parts.value(0).toStdString(), "title"));
+  song.insert_or_assign("genre",
+                        FieldValue(parts.value(1).toStdString(), "genre"));
+  song.insert_or_assign("artist", FieldValue("Artist", "artist"));
+  song.insert_or_assign("album", FieldValue("Album", "album"));
+  song.insert_or_assign("filepath", FieldValue(path, "filepath"));
   return song;
+}
+
+bool writeFile(const QString &path, const QByteArray &content) {
+  QDir().mkpath(QFileInfo(path).absolutePath());
+  QFile file(path);
+  if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    return false;
+  }
+  return file.write(content) == content.size();
 }
 
 int columnWithHeader(QTableView *table, const QString &title) {
@@ -62,14 +71,22 @@ private slots:
   void init();
   void cleanup();
 
-  void validExpression_populatesReadOnlyResultsInLibraryOrder();
+  void validExpression_showsMonitoredMatchesInFilepathOrder();
   void invalidExpression_showsInlineErrorAndClearsResults();
   void createPlaylistButton_emitsMatchingSongIds();
+  void saveAsAutoPlaylist_emitsSearchedExpression();
+  void noWatchedFolders_showsHint();
 
 private:
+  // Writes the files under root(), watches root() and waits for the scan.
+  void watchSongs(const QList<std::pair<QString, QByteArray>> &files);
+  QString root() const;
+
+  QTemporaryDir *dir_ = nullptr;
   ColumnRegistry *registry_ = nullptr;
   DatabaseManager *databaseManager_ = nullptr;
   SongLibrary *library_ = nullptr;
+  MonitoredLibrary *monitored_ = nullptr;
   GlobalColumnLayoutManager *layoutManager_ = nullptr;
   QString connectionName_;
 };
@@ -80,6 +97,8 @@ void TestLibrarySearchDialogUi::init() {
   QSettings settings;
   settings.clear();
 
+  dir_ = new QTemporaryDir();
+  QVERIFY(dir_->isValid());
   connectionName_ =
       QStringLiteral("test_librarysearchdialog_%1")
           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
@@ -87,12 +106,20 @@ void TestLibrarySearchDialogUi::init() {
   databaseManager_ =
       new DatabaseManager(*registry_, ":memory:", connectionName_);
   library_ = new SongLibrary(*registry_, *databaseManager_);
+  monitored_ =
+      new MonitoredLibrary(*library_, *registry_, *databaseManager_,
+                           [](const std::string &path, const ColumnRegistry &) {
+                             return fakeParse(path);
+                           });
+  monitored_->load();
   layoutManager_ = new GlobalColumnLayoutManager(*registry_);
 }
 
 void TestLibrarySearchDialogUi::cleanup() {
   delete layoutManager_;
   layoutManager_ = nullptr;
+  delete monitored_;
+  monitored_ = nullptr;
   delete library_;
   library_ = nullptr;
   delete databaseManager_;
@@ -100,18 +127,41 @@ void TestLibrarySearchDialogUi::cleanup() {
   delete registry_;
   registry_ = nullptr;
   QSqlDatabase::removeDatabase(connectionName_);
+  delete dir_;
+  dir_ = nullptr;
+}
+
+QString TestLibrarySearchDialogUi::root() const {
+  return QFileInfo(dir_->path()).canonicalFilePath() + "/music";
+}
+
+void TestLibrarySearchDialogUi::watchSongs(
+    const QList<std::pair<QString, QByteArray>> &files) {
+  for (const auto &[name, content] : files) {
+    QVERIFY(writeFile(root() + "/" + name, content));
+  }
+  const MonitoredLibrary::AddFolderResult added = monitored_->addFolder(root());
+  QVERIFY2(added.folderId > 0, qPrintable(added.error));
+  QTRY_VERIFY_WITH_TIMEOUT(!monitored_->isScanning(), 5000);
 }
 
 void TestLibrarySearchDialogUi::
-    validExpression_populatesReadOnlyResultsInLibraryOrder() {
-  library_->addTolibrary(
-      makeSong("Song 1", "Artist A", "/tmp/library-search-a.mp3", "Pop"));
-  library_->addTolibrary(
-      makeSong("Song 2", "Artist B", "/tmp/library-search-b.mp3", "Jazz"));
-  library_->addTolibrary(
-      makeSong("Song 3", "Artist C", "/tmp/library-search-c.mp3", "Pop"));
+    validExpression_showsMonitoredMatchesInFilepathOrder() {
+  watchSongs({{"a.mp3", "Song 1;Pop"},
+              {"b.mp3", "Song 2;Jazz"},
+              {"c.mp3", "Song 3;Pop"}});
+  // A matching song only in the manual library is not searched.
+  MSong manual;
+  manual.insert_or_assign("title", FieldValue("Manual", "title"));
+  manual.insert_or_assign("genre", FieldValue("Pop", "genre"));
+  manual.insert_or_assign("artist", FieldValue("Artist", "artist"));
+  manual.insert_or_assign("album", FieldValue("Album", "album"));
+  manual.insert_or_assign(
+      "filepath", FieldValue("/tmp/library-search-manual.mp3", "filepath"));
+  library_->prepareParsedSong(manual);
+  library_->addTolibrary(std::move(manual));
 
-  LibrarySearchDialog dialog(*library_, *layoutManager_);
+  LibrarySearchDialog dialog(*library_, *monitored_, *layoutManager_);
   dialog.show();
   QTest::qWait(0);
   QLineEdit *expressionEdit = dialog.findChild<QLineEdit *>("expression_edit");
@@ -122,6 +172,7 @@ void TestLibrarySearchDialogUi::
   QVERIFY(searchButton != nullptr);
   QVERIFY(errorLabel != nullptr);
   QVERIFY(resultsTable != nullptr);
+  QVERIFY(!errorLabel->isVisible());
 
   expressionEdit->setText("genre IS pop");
   QTest::mouseClick(searchButton, Qt::LeftButton);
@@ -145,43 +196,50 @@ void TestLibrarySearchDialogUi::
 
 void TestLibrarySearchDialogUi::
     invalidExpression_showsInlineErrorAndClearsResults() {
-  library_->addTolibrary(
-      makeSong("Song 1", "Artist A", "/tmp/library-search-d.mp3", "Pop"));
+  watchSongs({{"a.mp3", "Song 1;Pop"}});
 
-  LibrarySearchDialog dialog(*library_, *layoutManager_);
+  LibrarySearchDialog dialog(*library_, *monitored_, *layoutManager_);
   dialog.show();
   QTest::qWait(0);
   QLineEdit *expressionEdit = dialog.findChild<QLineEdit *>("expression_edit");
   QPushButton *searchButton = dialog.findChild<QPushButton *>("search_button");
+  QPushButton *saveButton =
+      dialog.findChild<QPushButton *>("save_autoplaylist_button");
   QLabel *errorLabel = dialog.findChild<QLabel *>("error_label");
   QTableView *resultsTable = dialog.findChild<QTableView *>("results_table");
   QVERIFY(expressionEdit != nullptr);
   QVERIFY(searchButton != nullptr);
+  QVERIFY(saveButton != nullptr);
   QVERIFY(errorLabel != nullptr);
   QVERIFY(resultsTable != nullptr);
 
-  expressionEdit->setText("artist IS artist a");
+  expressionEdit->setText("title IS song 1");
   QTest::mouseClick(searchButton, Qt::LeftButton);
   QCOMPARE(resultsTable->model()->rowCount(), 1);
+  QVERIFY(saveButton->isEnabled());
 
   expressionEdit->setText("artist AND");
   QTest::mouseClick(searchButton, Qt::LeftButton);
 
   QCOMPARE(resultsTable->model()->rowCount(), 0);
+  QVERIFY(!saveButton->isEnabled());
   QVERIFY(errorLabel->isVisible());
   QVERIFY(errorLabel->text().contains("Expected"));
   QVERIFY(errorLabel->text().contains("field name"));
+
+  // A bare word parses as text, not as a condition.
+  expressionEdit->setText("davis");
+  QTest::mouseClick(searchButton, Qt::LeftButton);
+  QCOMPARE(resultsTable->model()->rowCount(), 0);
+  QCOMPARE(errorLabel->text(), QString("Expression must be a condition"));
 }
 
 void TestLibrarySearchDialogUi::createPlaylistButton_emitsMatchingSongIds() {
-  library_->addTolibrary(
-      makeSong("Song 1", "Artist A", "/tmp/library-search-e.mp3", "Pop"));
-  library_->addTolibrary(
-      makeSong("Song 2", "Artist B", "/tmp/library-search-f.mp3", "Jazz"));
-  library_->addTolibrary(
-      makeSong("Song 3", "Artist C", "/tmp/library-search-g.mp3", "Pop"));
+  watchSongs({{"a.mp3", "Song 1;Pop"},
+              {"b.mp3", "Song 2;Jazz"},
+              {"c.mp3", "Song 3;Pop"}});
 
-  LibrarySearchDialog dialog(*library_, *layoutManager_);
+  LibrarySearchDialog dialog(*library_, *monitored_, *layoutManager_);
   dialog.show();
   QTest::qWait(0);
 
@@ -208,6 +266,55 @@ void TestLibrarySearchDialogUi::createPlaylistButton_emitsMatchingSongIds() {
            std::string("Song 1"));
   QCOMPARE(library_->getSongByPK(songIds[1]).at("title").text,
            std::string("Song 3"));
+}
+
+void TestLibrarySearchDialogUi::saveAsAutoPlaylist_emitsSearchedExpression() {
+  watchSongs({{"a.mp3", "Song 1;Pop"}});
+
+  LibrarySearchDialog dialog(*library_, *monitored_, *layoutManager_);
+  dialog.show();
+  QTest::qWait(0);
+  QSignalSpy saveSpy(&dialog,
+                     &LibrarySearchDialog::saveAsAutoPlaylistRequested);
+  QLineEdit *expressionEdit = dialog.findChild<QLineEdit *>("expression_edit");
+  QPushButton *searchButton = dialog.findChild<QPushButton *>("search_button");
+  QPushButton *saveButton =
+      dialog.findChild<QPushButton *>("save_autoplaylist_button");
+  QVERIFY(expressionEdit != nullptr);
+  QVERIFY(searchButton != nullptr);
+  QVERIFY(saveButton != nullptr);
+  QVERIFY(!saveButton->isEnabled());
+
+  // No match is still a valid autoplaylist.
+  expressionEdit->setText("genre IS rock");
+  QTest::mouseClick(searchButton, Qt::LeftButton);
+  QVERIFY(saveButton->isEnabled());
+  // Saves what was searched, not the text edited since.
+  expressionEdit->setText("genre IS");
+  QTest::mouseClick(saveButton, Qt::LeftButton);
+
+  QCOMPARE(saveSpy.count(), 1);
+  QCOMPARE(saveSpy.at(0).at(0).toString(), QString("genre IS rock"));
+  QVERIFY(!dialog.isVisible());
+}
+
+void TestLibrarySearchDialogUi::noWatchedFolders_showsHint() {
+  LibrarySearchDialog dialog(*library_, *monitored_, *layoutManager_);
+  dialog.show();
+  QTest::qWait(0);
+  QLineEdit *expressionEdit = dialog.findChild<QLineEdit *>("expression_edit");
+  QPushButton *searchButton = dialog.findChild<QPushButton *>("search_button");
+  QLabel *errorLabel = dialog.findChild<QLabel *>("error_label");
+  QVERIFY(expressionEdit != nullptr);
+  QVERIFY(searchButton != nullptr);
+  QVERIFY(errorLabel != nullptr);
+  const QString hint("No watched folders. Add one in Settings > Library.");
+  QVERIFY(errorLabel->isVisible());
+  QCOMPARE(errorLabel->text(), hint);
+
+  expressionEdit->setText("true");
+  QTest::mouseClick(searchButton, Qt::LeftButton);
+  QCOMPARE(errorLabel->text(), hint);
 }
 
 QTEST_MAIN(TestLibrarySearchDialogUi)

@@ -8,6 +8,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 #include <QUuid>
+#include <numeric>
 
 #include "../columnregistry.h"
 #include "../databasemanager.h"
@@ -42,6 +43,12 @@ MSong makeSong(const QString &title, const QString &artist, const QString &path,
   song.insert_or_assign("song_identity_key",
                         FieldValue(identity, "song_identity_key"));
   return song;
+}
+// Every pk of library, as the search candidates.
+std::vector<int> allPks(const SongLibrary &library) {
+  std::vector<int> pks(library.snapshot().songs.size());
+  std::iota(pks.begin(), pks.end(), 0);
+  return pks;
 }
 } // namespace
 
@@ -80,6 +87,7 @@ private slots:
   void search_supportsCustomFields();
   void search_supportsComputedFields();
   void search_noMatchReturnsEmpty();
+  void search_onlyCandidatesInFilepathOrder();
   void refreshSongFromFile_usesInjectedParserAndSyncsDb();
   void refreshSongFromFile_populatesRemainingFields();
   void refreshSongFromFile_unparsableFileKeepsStoredFields();
@@ -464,7 +472,8 @@ void TestSongLibrary::search_matchesCaseInsensitiveExact() {
   ExprParseResult parsed = library_->parseLibraryExpression("genre IS pop");
   QVERIFY(parsed.ok());
 
-  const std::vector<int> matches = library_->search(*parsed.expr);
+  const std::vector<int> matches =
+      library_->search(*parsed.expr, allPks(*library_));
   QCOMPARE(matches.size(), size_t(1));
   QCOMPARE(library_->getSongByPK(matches[0]).at("title").text,
            std::string("Song 1"));
@@ -482,7 +491,8 @@ void TestSongLibrary::search_supportsAndOr() {
       "artist IS artist c OR genre IS pop AND title IS song 2");
   QVERIFY(parsed.ok());
 
-  const std::vector<int> matches = library_->search(*parsed.expr);
+  const std::vector<int> matches =
+      library_->search(*parsed.expr, allPks(*library_));
   QCOMPARE(matches.size(), size_t(2));
   QCOMPARE(library_->getSongByPK(matches[0]).at("title").text,
            std::string("Song 2"));
@@ -502,7 +512,8 @@ void TestSongLibrary::search_supportsParentheses() {
       "(artist IS artist c OR genre IS pop) AND title IS song 2");
   QVERIFY(parsed.ok());
 
-  const std::vector<int> matches = library_->search(*parsed.expr);
+  const std::vector<int> matches =
+      library_->search(*parsed.expr, allPks(*library_));
   QCOMPARE(matches.size(), size_t(1));
   QCOMPARE(library_->getSongByPK(matches[0]).at("title").text,
            std::string("Song 2"));
@@ -520,7 +531,8 @@ void TestSongLibrary::search_supportsHasForTagLibStyleMultiValueFields() {
   ExprParseResult parsed = library_->parseLibraryExpression("genre HAS rock");
   QVERIFY(parsed.ok());
 
-  const std::vector<int> matches = library_->search(*parsed.expr);
+  const std::vector<int> matches =
+      library_->search(*parsed.expr, allPks(*library_));
   QCOMPARE(matches.size(), size_t(1));
   QCOMPARE(library_->getSongByPK(matches[0]).at("title").text,
            std::string("Song 1"));
@@ -530,7 +542,7 @@ void TestSongLibrary::search_supportsHasForTagLibStyleMultiValueFields() {
   QVERIFY(singleValueParsed.ok());
 
   const std::vector<int> singleValueMatches =
-      library_->search(*singleValueParsed.expr);
+      library_->search(*singleValueParsed.expr, allPks(*library_));
   QCOMPARE(singleValueMatches.size(), size_t(2));
   QCOMPARE(library_->getSongByPK(singleValueMatches[0]).at("title").text,
            std::string("Song 1"));
@@ -550,7 +562,8 @@ void TestSongLibrary::search_supportsInList() {
       library_->parseLibraryExpression("genre IN [pop, rock]");
   QVERIFY(parsed.ok());
 
-  const std::vector<int> matches = library_->search(*parsed.expr);
+  const std::vector<int> matches =
+      library_->search(*parsed.expr, allPks(*library_));
   QCOMPARE(matches.size(), size_t(2));
   QCOMPARE(library_->getSongByPK(matches[0]).at("title").text,
            std::string("Song 1"));
@@ -569,7 +582,8 @@ void TestSongLibrary::search_supportsInRange() {
   ExprParseResult numberParsed =
       library_->parseLibraryExpression("tracknumber IN [2..5]");
   QVERIFY(numberParsed.ok());
-  const std::vector<int> numberMatches = library_->search(*numberParsed.expr);
+  const std::vector<int> numberMatches =
+      library_->search(*numberParsed.expr, allPks(*library_));
   QCOMPARE(numberMatches.size(), size_t(1));
   QCOMPARE(library_->getSongByPK(numberMatches[0]).at("title").text,
            std::string("Song 2"));
@@ -577,7 +591,8 @@ void TestSongLibrary::search_supportsInRange() {
   ExprParseResult dateParsed =
       library_->parseLibraryExpression("date IN [2024-01-01..2024-12-31]");
   QVERIFY(dateParsed.ok());
-  const std::vector<int> dateMatches = library_->search(*dateParsed.expr);
+  const std::vector<int> dateMatches =
+      library_->search(*dateParsed.expr, allPks(*library_));
   QCOMPARE(dateMatches.size(), size_t(2));
   QCOMPARE(library_->getSongByPK(dateMatches[0]).at("title").text,
            std::string("Song 1"));
@@ -595,7 +610,8 @@ void TestSongLibrary::search_supportsQuotedValues() {
   ExprParseResult scalarParsed =
       library_->parseLibraryExpression("title IS \"rock, pop suite\"");
   QVERIFY(scalarParsed.ok());
-  const std::vector<int> scalarMatches = library_->search(*scalarParsed.expr);
+  const std::vector<int> scalarMatches =
+      library_->search(*scalarParsed.expr, allPks(*library_));
   QCOMPARE(scalarMatches.size(), size_t(1));
   QCOMPARE(library_->getSongByPK(scalarMatches[0]).at("title").text,
            std::string("rock, pop suite"));
@@ -603,7 +619,8 @@ void TestSongLibrary::search_supportsQuotedValues() {
   ExprParseResult listParsed =
       library_->parseLibraryExpression("genre IN [\"rock, pop\", jazz]");
   QVERIFY(listParsed.ok());
-  const std::vector<int> listMatches = library_->search(*listParsed.expr);
+  const std::vector<int> listMatches =
+      library_->search(*listParsed.expr, allPks(*library_));
   QCOMPARE(listMatches.size(), size_t(1));
   QCOMPARE(library_->getSongByPK(listMatches[0]).at("title").text,
            std::string("Song 2"));
@@ -618,7 +635,8 @@ void TestSongLibrary::search_supportsNumericFieldComparison() {
   ExprParseResult parsed = library_->parseLibraryExpression("tracknumber = 2");
   QVERIFY(parsed.ok());
 
-  const std::vector<int> matches = library_->search(*parsed.expr);
+  const std::vector<int> matches =
+      library_->search(*parsed.expr, allPks(*library_));
   QCOMPARE(matches.size(), size_t(1));
   QCOMPARE(library_->getSongByPK(matches[0]).at("title").text,
            std::string("Song 2"));
@@ -627,7 +645,7 @@ void TestSongLibrary::search_supportsNumericFieldComparison() {
       library_->parseLibraryExpression("tracknumber = 2.0");
   QVERIFY(typedNumberParsed.ok());
   const std::vector<int> typedNumberMatches =
-      library_->search(*typedNumberParsed.expr);
+      library_->search(*typedNumberParsed.expr, allPks(*library_));
   QCOMPARE(typedNumberMatches.size(), size_t(1));
   QCOMPARE(library_->getSongByPK(typedNumberMatches[0]).at("title").text,
            std::string("Song 2"));
@@ -636,7 +654,7 @@ void TestSongLibrary::search_supportsNumericFieldComparison() {
       library_->parseLibraryExpression("date IS 2026-01-01");
   QVERIFY(typedDateParsed.ok());
   const std::vector<int> typedDateMatches =
-      library_->search(*typedDateParsed.expr);
+      library_->search(*typedDateParsed.expr, allPks(*library_));
   QCOMPARE(typedDateMatches.size(), size_t(1));
   QCOMPARE(library_->getSongByPK(typedDateMatches[0]).at("title").text,
            std::string("Song 2"));
@@ -645,7 +663,7 @@ void TestSongLibrary::search_supportsNumericFieldComparison() {
       library_->parseLibraryExpression("tracknumber HAS 2.0");
   QVERIFY(typedHasNumberParsed.ok());
   const std::vector<int> typedHasNumberMatches =
-      library_->search(*typedHasNumberParsed.expr);
+      library_->search(*typedHasNumberParsed.expr, allPks(*library_));
   QCOMPARE(typedHasNumberMatches.size(), size_t(1));
   QCOMPARE(library_->getSongByPK(typedHasNumberMatches[0]).at("title").text,
            std::string("Song 2"));
@@ -654,7 +672,7 @@ void TestSongLibrary::search_supportsNumericFieldComparison() {
       library_->parseLibraryExpression("date HAS 2026-01-01");
   QVERIFY(typedHasDateParsed.ok());
   const std::vector<int> typedHasDateMatches =
-      library_->search(*typedHasDateParsed.expr);
+      library_->search(*typedHasDateParsed.expr, allPks(*library_));
   QCOMPARE(typedHasDateMatches.size(), size_t(1));
   QCOMPARE(library_->getSongByPK(typedHasDateMatches[0]).at("title").text,
            std::string("Song 2"));
@@ -675,7 +693,8 @@ void TestSongLibrary::search_supportsRelationalComparisons() {
   ExprParseResult ltParsed =
       library_->parseLibraryExpression("tracknumber < 3");
   QVERIFY(ltParsed.ok());
-  const std::vector<int> ltMatches = library_->search(*ltParsed.expr);
+  const std::vector<int> ltMatches =
+      library_->search(*ltParsed.expr, allPks(*library_));
   QCOMPARE(ltMatches.size(), size_t(2));
   QCOMPARE(library_->getSongByPK(ltMatches[0]).at("title").text,
            std::string("Song 1"));
@@ -685,7 +704,8 @@ void TestSongLibrary::search_supportsRelationalComparisons() {
   ExprParseResult gteParsed =
       library_->parseLibraryExpression("tracknumber >= 2");
   QVERIFY(gteParsed.ok());
-  const std::vector<int> gteMatches = library_->search(*gteParsed.expr);
+  const std::vector<int> gteMatches =
+      library_->search(*gteParsed.expr, allPks(*library_));
   QCOMPARE(gteMatches.size(), size_t(2));
   QCOMPARE(library_->getSongByPK(gteMatches[0]).at("title").text,
            std::string("Song 2"));
@@ -695,7 +715,8 @@ void TestSongLibrary::search_supportsRelationalComparisons() {
   ExprParseResult dateParsed =
       library_->parseLibraryExpression("date >= 2024-01-02");
   QVERIFY(dateParsed.ok());
-  const std::vector<int> dateMatches = library_->search(*dateParsed.expr);
+  const std::vector<int> dateMatches =
+      library_->search(*dateParsed.expr, allPks(*library_));
   QCOMPARE(dateMatches.size(), size_t(2));
   QCOMPARE(library_->getSongByPK(dateMatches[0]).at("title").text,
            std::string("Song 2"));
@@ -717,7 +738,8 @@ void TestSongLibrary::search_relationalComparisonSkipsMissingDate() {
   ExprParseResult parsed = library_->parseLibraryExpression("date < 2000");
   QVERIFY(parsed.ok());
 
-  const std::vector<int> matches = library_->search(*parsed.expr);
+  const std::vector<int> matches =
+      library_->search(*parsed.expr, allPks(*library_));
   QCOMPARE(matches.size(), size_t(1));
   QCOMPARE(library_->getSongByPK(matches[0]).at("title").text,
            std::string("Song 2"));
@@ -734,7 +756,8 @@ void TestSongLibrary::search_lastPlayedTimestamp_supportsDateTimeEquality() {
       "last_played_timestamp = 2026-05-13 01:45:59");
   QVERIFY(parsed.ok());
 
-  const std::vector<int> matches = library_->search(*parsed.expr);
+  const std::vector<int> matches =
+      library_->search(*parsed.expr, allPks(*library_));
   QCOMPARE(matches.size(), size_t(1));
   QCOMPARE(matches[0], songPk);
 }
@@ -752,7 +775,8 @@ void TestSongLibrary::search_supportsNot() {
       library_->parseLibraryExpression("NOT genre HAS rock AND genre HAS pop");
   QVERIFY(parsed.ok());
 
-  const std::vector<int> matches = library_->search(*parsed.expr);
+  const std::vector<int> matches =
+      library_->search(*parsed.expr, allPks(*library_));
   QCOMPARE(matches.size(), size_t(1));
   QCOMPARE(library_->getSongByPK(matches[0]).at("title").text,
            std::string("Song 2"));
@@ -786,7 +810,8 @@ void TestSongLibrary::search_supportsCustomFields() {
       library_->parseLibraryExpression("musicbrainz_trackid IS DEF456");
   QVERIFY(parsed.ok());
 
-  const std::vector<int> matches = library_->search(*parsed.expr);
+  const std::vector<int> matches =
+      library_->search(*parsed.expr, allPks(*library_));
   QCOMPARE(matches.size(), size_t(1));
   QCOMPARE(library_->getSongByPK(matches[0]).at("title").text,
            std::string("Song 2"));
@@ -823,7 +848,8 @@ void TestSongLibrary::search_supportsComputedFields() {
       localLibrary.parseLibraryExpression("era IS classic");
   QVERIFY(parsed.ok());
 
-  const std::vector<int> matches = localLibrary.search(*parsed.expr);
+  const std::vector<int> matches =
+      localLibrary.search(*parsed.expr, allPks(localLibrary));
   QCOMPARE(matches.size(), size_t(1));
   QCOMPARE(localLibrary.getSongByPK(matches[0]).at("title").text,
            std::string("Song 1"));
@@ -845,8 +871,25 @@ void TestSongLibrary::search_noMatchReturnsEmpty() {
       library_->parseLibraryExpression("artist IS artist z");
   QVERIFY(parsed.ok());
 
-  const std::vector<int> matches = library_->search(*parsed.expr);
+  const std::vector<int> matches =
+      library_->search(*parsed.expr, allPks(*library_));
   QVERIFY(matches.empty());
+}
+
+void TestSongLibrary::search_onlyCandidatesInFilepathOrder() {
+  const int c = library_->addTolibrary(
+      makeSong("Song C", "Artist", "/tmp/search-order-c.mp3", "Album", "1"));
+  const int a = library_->addTolibrary(
+      makeSong("Song A", "Artist", "/tmp/search-order-a.mp3", "Album", "2"));
+  const int b = library_->addTolibrary(
+      makeSong("Song B", "Artist", "/tmp/search-order-b.mp3", "Album", "3"));
+
+  ExprParseResult parsed = library_->parseLibraryExpression("true");
+  QVERIFY(parsed.ok());
+
+  QCOMPARE(library_->search(*parsed.expr, {c, b, a}),
+           (std::vector<int>{a, b, c}));
+  QCOMPARE(library_->search(*parsed.expr, {c, a}), (std::vector<int>{a, c}));
 }
 
 void TestSongLibrary::refreshSongFromFile_usesInjectedParserAndSyncsDb() {

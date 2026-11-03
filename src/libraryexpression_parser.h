@@ -11,6 +11,14 @@
 struct ExprParseError {
   QString message;
   int position = -1;
+
+  // The message, with the 1-based position when there is one:
+  // "Unexpected token (at 5)".
+  QString text() const {
+    return position >= 0
+               ? QStringLiteral("%1 (at %2)").arg(message).arg(position + 1)
+               : message;
+  }
 };
 
 struct ExprParseResult {

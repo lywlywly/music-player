@@ -1,13 +1,19 @@
 #include "librarysearchdialog.h"
 #include "ui_librarysearchdialog.h"
 
+#include "monitoredlibrary.h"
 #include <QHeaderView>
 
+namespace {
+const QString kNoWatchedFoldersMessage =
+    QStringLiteral("No watched folders. Add one in Settings > Library.");
+} // namespace
+
 LibrarySearchDialog::LibrarySearchDialog(
-    SongLibrary &songLibrary, GlobalColumnLayoutManager &columnLayoutManager,
-    QWidget *parent)
+    SongLibrary &songLibrary, const MonitoredLibrary &monitoredLibrary,
+    GlobalColumnLayoutManager &columnLayoutManager, QWidget *parent)
     : QDialog(parent), ui(new Ui::LibrarySearchDialog),
-      songLibrary_(songLibrary) {
+      songLibrary_(songLibrary), monitoredLibrary_(monitoredLibrary) {
   ui->setupUi(this);
   setModal(true);
   ui->error_label->hide();
@@ -28,25 +34,40 @@ LibrarySearchDialog::LibrarySearchDialog(
           &LibrarySearchDialog::performSearch);
   connect(ui->create_playlist_button, &QPushButton::clicked, this,
           &LibrarySearchDialog::createPlaylistFromCurrentResults);
+  connect(ui->save_autoplaylist_button, &QPushButton::clicked, this, [this]() {
+    emit saveAsAutoPlaylistRequested(currentExpression_);
+    close();
+  });
+  if (monitoredLibrary_.folders().empty()) {
+    showMessage(kNoWatchedFoldersMessage, false);
+  }
 }
 
 LibrarySearchDialog::~LibrarySearchDialog() { delete ui; }
 
 void LibrarySearchDialog::performSearch() {
-  const ExprParseResult parsed =
-      songLibrary_.parseLibraryExpression(ui->expression_edit->text());
+  clearResults();
+  if (monitoredLibrary_.folders().empty()) {
+    showMessage(kNoWatchedFoldersMessage, false);
+    return;
+  }
+  const QString expression = ui->expression_edit->text();
+  const ExprParseResult parsed = parseSongFilter(songLibrary_, expression);
   if (!parsed.ok()) {
-    currentMatches_.clear();
-    resultsModel_->clear();
-    updateCreatePlaylistButtonState();
-    showError(parsed.error);
+    showMessage(parsed.error.text(), true);
     return;
   }
 
-  currentMatches_ = songLibrary_.search(*parsed.expr);
+  currentMatches_ =
+      songLibrary_.search(*parsed.expr, monitoredLibrary_.songPks());
+  currentExpression_ = expression;
   resultsModel_->setMatches(currentMatches_);
-  updateCreatePlaylistButtonState();
-  showMatchCount();
+  ui->create_playlist_button->setEnabled(!currentMatches_.empty());
+  ui->save_autoplaylist_button->setEnabled(true);
+  showMessage(currentMatches_.size() == 1
+                  ? QStringLiteral("1 match")
+                  : QStringLiteral("%1 matches").arg(currentMatches_.size()),
+              false);
   ui->results_table->resizeColumnsToContents();
 }
 
@@ -64,29 +85,17 @@ void LibrarySearchDialog::createPlaylistFromCurrentResults() {
   close();
 }
 
-void LibrarySearchDialog::updateCreatePlaylistButtonState() {
-  ui->create_playlist_button->setEnabled(!currentMatches_.empty());
+void LibrarySearchDialog::clearResults() {
+  currentMatches_.clear();
+  currentExpression_.clear();
+  resultsModel_->clear();
+  ui->create_playlist_button->setEnabled(false);
+  ui->save_autoplaylist_button->setEnabled(false);
 }
 
-void LibrarySearchDialog::showMatchCount() {
-  ui->error_label->setStyleSheet(QString());
-  if (currentMatches_.size() == 1) {
-    ui->error_label->setText(QStringLiteral("1 match"));
-  } else {
-    ui->error_label->setText(
-        QStringLiteral("%1 matches").arg(currentMatches_.size()));
-  }
-  ui->error_label->show();
-}
-
-void LibrarySearchDialog::showError(const ExprParseError &error) {
-  ui->error_label->setStyleSheet(QStringLiteral("color: #b42318;"));
-  if (error.position >= 0) {
-    ui->error_label->setText(QStringLiteral("%1 (at %2)")
-                                 .arg(error.message)
-                                 .arg(error.position + 1));
-  } else {
-    ui->error_label->setText(error.message);
-  }
+void LibrarySearchDialog::showMessage(const QString &message, bool error) {
+  ui->error_label->setStyleSheet(error ? QStringLiteral("color: #b42318;")
+                                       : QString());
+  ui->error_label->setText(message);
   ui->error_label->show();
 }

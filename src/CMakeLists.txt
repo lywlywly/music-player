@@ -86,6 +86,8 @@ set(PROJECT_SOURCES
   audioplayer.cpp
   artworkutils.h
   audiofileformats.h
+  autoplaylistdialog.h
+  autoplaylistdialog.cpp
   checksumcalculator.h
   checksumcalculator.cpp
   cloudplaystatssyncservice.h
@@ -137,6 +139,8 @@ set(PROJECT_SOURCES
   libraryloader.cpp
   libraryscanner.h
   libraryscanner.cpp
+  libraryfolderspage.h
+  libraryfolderspage.cpp
   librarysearchdialog.ui
   librarysearchdialog.h
   librarysearchdialog.cpp

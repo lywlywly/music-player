@@ -1,7 +1,7 @@
 # Plan: Monitored Library, Autoplaylists and Playlist Search
 
-Status: phases 1 (monitored library, without the watcher) and 2
-(autoplaylist backend) are implemented; phases 3-6 are planned. The efsw
+Status: phases 1 (monitored library, without the watcher), 2 (autoplaylist
+backend) and 3 (UI) are implemented; phases 4-6 are planned. The efsw
 dependency is set up (`third_party/efsw`, 1.7.3) but not used yet.
 
 ## Summary
@@ -304,8 +304,8 @@ While offline:
 * It has no watch. `MonitoredLibrary` checks offline roots every 60 s (one
   `stat` or directory listing each); when one is available again, it is
   marked online, its watch is added, and it is scanned.
-* The Settings Library page shows the folder as "Offline", and the status bar
-  shows a short notice after the scan.
+* The Settings Library page shows the folder as "Offline", and after a scan
+  the status bar shows how many folders are offline until the next scan.
 * In case 2, the Library page offers "Remove missing songs" for the folder,
   for when the files really were deleted. In case 1, removing the folder from
   the list does the same.
@@ -406,7 +406,7 @@ never fails because of an invalid expression; the playlist is just empty.
 | Rename / reorder / remove tab | yes | yes; removing releases no songs |
 | Properties / Open Containing Folder / Refresh Playlist Metadata | yes | yes (writes the shared row) |
 | Play Next / Add to Playback Queue / play / follows-cursor | yes | yes |
-| Edit expression… | - | yes |
+| Edit Autoplaylist… (name and expression) | - | yes |
 
 The existing rule that the last playlist can't be removed applies to both
 kinds.
@@ -427,8 +427,8 @@ returns no pks, `addSong` / `addSongByPk` return false, `removeSongs` and
 
 ### Library Search
 
-* `SongLibrary::search(expr)` takes the candidate set:
-  `search(expr, candidatePks)`. `LibrarySearchDialog` passes
+* `SongLibrary::search(expr, candidatePks)` takes the candidate set and
+  returns the matches in `filepath` order. `LibrarySearchDialog` passes
   `MonitoredLibrary::songPks()`.
 * It uses the shared boolean check, so `davis` now shows "Expression must be
   a condition" instead of a meaningless result.
@@ -566,7 +566,8 @@ CREATE TABLE IF NOT EXISTS playlists (
   data: per-folder availability; new, changed and gone entries with parsed
   songs and stats; new failed entries.
 * `SongLibrary`
-  * `search(expr, candidatePks)` (phase 3).
+  * `search(expr, candidatePks)`, in `filepath` order; also fills
+    autoplaylists.
   * `matches(expr, pk)`, for autoplaylist membership.
   * `prepareParsedSong(MSong &) const`: computed fields and identity key,
     split out of `loadPreparedSongFromFile`.
@@ -599,7 +600,8 @@ CREATE TABLE IF NOT EXISTS playlists (
   * Adds `createAutoPlaylist(name, expression)`,
     `setAutoPlaylistExpression(id, expression)`, `isAuto(id)`,
     `autoPlaylistExpression(id)`, `autoPlaylistError(id)` and
-    `reloadAutoPlaylistExpressions()`.
+    `reloadAutoPlaylistExpressions()`, and the signal
+    `autoPlaylistExpressionChanged(id)` after either of the setters.
   * `notifySongsChanged(pks)` (public), used for the identity fan-out.
   * `releaseSongs(pks)` replaces `removeSongsInNoPlaylist`: keeps pks in no
     manual playlist and not `MonitoredLibrary::holds`, calls
@@ -617,24 +619,30 @@ CREATE TABLE IF NOT EXISTS playlists (
 
 ### Frontend
 
-* `SettingsDialog`, new "Library" page: watched folders with "Offline" and
-  "Live updates unavailable" markers; Add…, Remove, Rescan now; "Remove
-  missing songs" for a folder offline because empty; scan status.
-  `MainWindow` forwards the actions to `MonitoredLibrary`.
+* `SettingsDialog`, new "Library" page (`LibraryFoldersPage`): watched
+  folders with "Offline" markers ("Live updates unavailable" comes with the
+  watcher, phase 5); Add…, Remove, Rescan now; "Remove missing songs" for a
+  folder offline because empty (offline although its root exists); scan
+  progress. The page calls `MonitoredLibrary` directly, and its actions apply
+  at once, not on the dialog's OK.
 * `AutoPlaylistDialog` (new): name and expression editor with parse errors
   and a live match count over the monitored library. Opens from
-  `File > New Autoplaylist…`, Library Search's "Save as autoplaylist", and
-  the tab context menu's "Edit expression…".
+  `File > New Autoplaylist…`, Library Search's "Save as autoplaylist" (the
+  last searched expression), and the tab context menu's "Edit
+  Autoplaylist…". OK needs a name and a valid expression.
 * `LibrarySearchDialog`: monitored scope, boolean check, no-watched-folders
   hint, "Save as autoplaylist".
 * `PlaylistSearchDialog` (new): see "Playlist Search".
 * `PlaylistTabs`: `currentPlaylistChanged` signal; autoplaylist tabs get a
-  distinct icon (and the warning icon for an invalid expression); context
-  menus follow "Operations by playlist kind".
+  distinct icon (and the warning icon, with the error as tooltip, for an
+  invalid expression), updated on
+  `PlaylistCollection::autoPlaylistExpressionChanged`; context menus follow
+  "Operations by playlist kind".
 * `MainWindow`: Open, Add Folder and Clear Playlist actions are disabled
   while an autoplaylist tab is shown.
-* Status bar: "Scanning library… 120 / 3000" during a scan, then the normal
-  message.
+* Status bar: a permanent label shows "Scanning library… 120 / 3000" during
+  a scan, then "1 library folder offline" if any folder is offline, and is
+  hidden otherwise. The playback message beside it is unchanged.
 
 ## Startup and shutdown
 

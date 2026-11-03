@@ -28,7 +28,9 @@ for the rest of the app.
   * Evaluation boundary for field lookup.
   * Provides `FieldValue` instances to the expression runtime.
 * `LibrarySearchDialog` + `LibrarySearchResultsModel`
-  * Parse/evaluate query via `SongLibrary`, then present matching rows.
+  * Parse the query with `parseSongFilter` (conditions only), evaluate it over
+    the monitored library (`SongLibrary::search(expr, candidatePks)`), then
+    present the matching songs in `filepath` order.
 
 ## Parsing
 

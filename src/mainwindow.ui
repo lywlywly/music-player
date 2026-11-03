@@ -285,6 +285,7 @@
     <addaction name="separator"/>
     <addaction name="actionAdd_folder"/>
     <addaction name="actionLoad_playlist"/>
+    <addaction name="actionNew_autoplaylist"/>
     <addaction name="actionClear_Playlist"/>
     <addaction name="separator"/>
     <addaction name="actionPreferences"/>
@@ -393,6 +394,11 @@
   <action name="actionLoad_playlist">
    <property name="text">
     <string>Load Playlist...</string>
+   </property>
+  </action>
+  <action name="actionNew_autoplaylist">
+   <property name="text">
+    <string>New Autoplaylist...</string>
    </property>
   </action>
   <action name="actionClear_Playlist">

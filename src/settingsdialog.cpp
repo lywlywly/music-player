@@ -1,6 +1,7 @@
 #include "settingsdialog.h"
 #include "displayexpression.h"
 #include "displaytheme.h"
+#include "libraryfolderspage.h"
 #include "ui_settingsdialog.h"
 #include "utils.h"
 #include <QApplication>
@@ -20,10 +21,13 @@
 
 SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
                                DatabaseManager &databaseManager,
+                               MonitoredLibrary &monitoredLibrary,
                                QWidget *parent)
     : QDialog(parent), ui(new Ui::SettingsDialog),
       columnRegistry_(columnRegistry), databaseManager_(databaseManager) {
   ui->setupUi(this);
+  ui->settings_tab_widget->insertTab(
+      1, new LibraryFoldersPage(monitoredLibrary, this), "Library");
 
   ui->backend_combo_box->setCurrentIndex(
       static_cast<int>(loadPlaybackBackendSetting()));

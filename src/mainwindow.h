@@ -60,6 +60,11 @@ private:
   void setUpPlaylist();
   void finishSetUpPlaylist();
   void setPlaylistDependentActionsEnabled(bool enabled);
+  // Open, Add Folder and Clear Playlist: enabled once the playlists are ready,
+  // while a manual playlist is shown.
+  void updatePlaylistWriteActionsEnabled();
+  // Shows scan progress, then the offline folder count, in the status bar.
+  void setUpLibraryScanStatus();
   void initCloudSync();
   void setUpMenuBar();
   void openLibrarySearchDialog();

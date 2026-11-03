@@ -111,11 +111,11 @@ void TestAutoPlaylist::init() {
                          std::unordered_map<std::string, std::string> *) {
                         return fakeParse(path);
                       });
-  monitored_ = new MonitoredLibrary(
-      *library_, *registry_, *databaseManager_,
-      [](const std::string &path, const ColumnRegistry &) {
-        return fakeParse(path);
-      });
+  monitored_ =
+      new MonitoredLibrary(*library_, *registry_, *databaseManager_,
+                           [](const std::string &path, const ColumnRegistry &) {
+                             return fakeParse(path);
+                           });
   monitored_->load();
   collection_ =
       new PlaylistCollection(*library_, *databaseManager_, *monitored_);
@@ -170,8 +170,8 @@ void TestAutoPlaylist::parseSongFilter_acceptsOnlyConditions() {
     const ExprParseResult result = parseSongFilter(*library_, condition);
     QVERIFY2(result.ok(), qPrintable(condition));
   }
-  for (const QString &value :
-       {QStringLiteral("davis"), QStringLiteral("1"), QStringLiteral("title")}) {
+  for (const QString &value : {QStringLiteral("davis"), QStringLiteral("1"),
+                               QStringLiteral("title")}) {
     const ExprParseResult result = parseSongFilter(*library_, value);
     QVERIFY2(!result.ok(), qPrintable(value));
     QCOMPARE(result.error.message, QString("Expression must be a condition"));
@@ -212,9 +212,9 @@ void TestAutoPlaylist::playlist_autoKindRefusesWritesAndStoresNoItems() {
   playlist.clear();
   QCOMPARE(rows(playlist), std::vector<int>{a});
   QCOMPARE(removedPksSpy.count(), 0);
-  QCOMPARE(queryInt(databaseManager_->db(),
-                    "SELECT COUNT(*) FROM playlist_items"),
-           0);
+  QCOMPARE(
+      queryInt(databaseManager_->db(), "SELECT COUNT(*) FROM playlist_items"),
+      0);
 
   // loadState reads only last_played.
   playlist.setLastPlayed(a);
@@ -232,10 +232,9 @@ void TestAutoPlaylist::create_fillsMatchingMonitoredSongsInFilepathOrder() {
   // A manual-only song never appears.
   const QString manualPath = dir_->path() + "/manual.mp3";
   QVERIFY(writeFile(manualPath, "M;jazz"));
-  QCOMPARE(collection_->playlist(1)
-               ->addFiles({manualPath.toStdString()})
-               .size(),
-           size_t{1});
+  QCOMPARE(
+      collection_->playlist(1)->addFiles({manualPath.toStdString()}).size(),
+      size_t{1});
   QSignalSpy createdSpy(collection_, &PlaylistCollection::playlistCreated);
 
   const int id = collection_->createAutoPlaylist("Jazz", "genre HAS jazz");
@@ -362,8 +361,12 @@ void TestAutoPlaylist::invalidExpression_hasNoRowsAndKeepsText() {
   QVERIFY(playlist.empty());
   QVERIFY(!collection_->autoPlaylistError(id).isEmpty());
   QCOMPARE(collection_->autoPlaylistExpression(id), QString("genre IN [pop"));
+  QSignalSpy changedSpy(collection_,
+                        &PlaylistCollection::autoPlaylistExpressionChanged);
 
   QVERIFY(collection_->setAutoPlaylistExpression(id, "davis"));
+  QCOMPARE(changedSpy.count(), 1);
+  QCOMPARE(changedSpy.at(0).at(0).toInt(), id);
   QCOMPARE(collection_->autoPlaylistError(id),
            QString("Expression must be a condition"));
   QVERIFY(playlist.empty());
@@ -398,9 +401,13 @@ void TestAutoPlaylist::reloadAutoPlaylistExpressions_resolvesNewFields() {
                                        .valueType = ValueType::Text,
                                        .searchable = true,
                                        .writable = true});
+  QSignalSpy changedSpy(collection_,
+                        &PlaylistCollection::autoPlaylistExpressionChanged);
   collection_->reloadAutoPlaylistExpressions();
 
   QVERIFY(collection_->autoPlaylistError(id).isEmpty());
+  QCOMPARE(changedSpy.count(), 1);
+  QCOMPARE(changedSpy.at(0).at(0).toInt(), id);
 }
 
 void TestAutoPlaylist::removeAutoPlaylist_releasesNothing() {

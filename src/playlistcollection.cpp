@@ -173,8 +173,8 @@ int PlaylistCollection::insertPlaylistRow(const QString &name,
   )");
   q.bindValue(":name", name);
   q.bindValue(":tab_order", static_cast<int>(order_.size()));
-  q.bindValue(":kind", isAutoKind ? QStringLiteral("auto")
-                                  : QStringLiteral("manual"));
+  q.bindValue(":kind",
+              isAutoKind ? QStringLiteral("auto") : QStringLiteral("manual"));
   q.bindValue(":expression",
               isAutoKind ? QVariant(storedExpression(expression)) : QVariant());
   if (!q.exec()) {
@@ -292,6 +292,7 @@ bool PlaylistCollection::setAutoPlaylistExpression(int playlistId,
   }
   setAutoPlaylistFilter(playlistId, expression);
   fillAutoPlaylist(playlistId);
+  emit autoPlaylistExpressionChanged(playlistId);
   return true;
 }
 
@@ -299,6 +300,7 @@ void PlaylistCollection::reloadAutoPlaylistExpressions() {
   for (auto &[playlistId, autoPlaylist] : autoPlaylists_) {
     setAutoPlaylistFilter(playlistId, autoPlaylist.expression);
     fillAutoPlaylist(playlistId);
+    emit autoPlaylistExpressionChanged(playlistId);
   }
 }
 
@@ -361,17 +363,11 @@ bool PlaylistCollection::isAutoPlaylistMember(const AutoPlaylist &autoPlaylist,
 
 void PlaylistCollection::fillAutoPlaylist(int playlistId) {
   const AutoPlaylist &autoPlaylist = autoPlaylists_.at(playlistId);
-  std::vector<int> members;
-  for (int songPk : monitoredLibrary_.songPks()) {
-    if (isAutoPlaylistMember(autoPlaylist, songPk)) {
-      members.push_back(songPk);
-    }
-  }
-  std::sort(members.begin(), members.end(), [this](int a, int b) {
-    return library_.getSongByPK(a).at("filepath").text <
-           library_.getSongByPK(b).at("filepath").text;
-  });
-  playlists_.at(playlistId)->resetRows(members);
+  playlists_.at(playlistId)
+      ->resetRows(autoPlaylist.filter
+                      ? library_.search(*autoPlaylist.filter,
+                                        monitoredLibrary_.songPks())
+                      : std::vector<int>{});
 }
 
 void PlaylistCollection::updateAutoPlaylistRows(
@@ -395,17 +391,16 @@ void PlaylistCollection::updateAutoPlaylistRows(
 
 void PlaylistCollection::releaseSongs(const std::vector<int> &songPks) {
   std::vector<int> unused;
-  std::copy_if(
-      songPks.begin(), songPks.end(), std::back_inserter(unused),
-      [this](int songPk) {
-        return !monitoredLibrary_.holds(songPk) &&
-               std::none_of(playlists_.begin(), playlists_.end(),
-                            [songPk](const auto &entry) {
-                              return entry.second->kind() ==
-                                         Playlist::Kind::Manual &&
-                                     entry.second->containsPk(songPk);
-                            });
-      });
+  std::copy_if(songPks.begin(), songPks.end(), std::back_inserter(unused),
+               [this](int songPk) {
+                 return !monitoredLibrary_.holds(songPk) &&
+                        std::none_of(playlists_.begin(), playlists_.end(),
+                                     [songPk](const auto &entry) {
+                                       return entry.second->kind() ==
+                                                  Playlist::Kind::Manual &&
+                                              entry.second->containsPk(songPk);
+                                     });
+               });
   if (unused.empty()) {
     return;
   }
