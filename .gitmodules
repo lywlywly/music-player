@@ -1,3 +1,6 @@
 [submodule "third_party/taglib"]
 	path = third_party/taglib
 	url = https://github.com/lywlywly/taglib.git
+[submodule "third_party/efsw"]
+	path = third_party/efsw
+	url = https://github.com/SpartanJ/efsw.git

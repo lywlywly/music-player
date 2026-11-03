@@ -8,7 +8,7 @@ void EFSWFileSystemMonitor::handleFileAction(efsw::WatchID watchid,
                                              const std::string &dir,
                                              const std::string &filename,
                                              efsw::Action action,
-                                             std::string oldFilename) {
+                                             const std::string &oldFilename) {
   switch (action) {
   case efsw::Actions::Add:
     std::cout << "DIR (" << dir << ") FILE (" << filename << ") has event Added"

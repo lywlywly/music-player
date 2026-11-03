@@ -20,6 +20,13 @@ A cross-platform desktop music player focused on local-library playback, lyrics,
 
 ## Build and Run
 
+TagLib and efsw are built from git submodules, and efsw needs CMake 3.27 or
+newer. After cloning:
+
+```bash
+git submodule update --init --recursive
+```
+
 ```bash
 cd src
 cmake -S . -B build

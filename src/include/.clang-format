@@ -1,5 +1,0 @@
-# Vendored third-party headers (efsw): keep upstream formatting.
----
-DisableFormat: true
-SortIncludes: Never
-...

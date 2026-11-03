@@ -7,6 +7,13 @@
 - License text: `LICENSES/LGPL-3.0.txt`
 - Copyright: KDE and Breeze Icons contributors
 
+## efsw
+
+- Source: https://github.com/SpartanJ/efsw (submodule `third_party/efsw`, tag 1.7.3)
+- License: MIT
+- License text: `third_party/efsw/LICENSE`
+- Copyright: Martín Lucas Golini
+
 ## Qt
 
 - Source: https://www.qt.io/

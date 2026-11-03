@@ -47,6 +47,22 @@ else()
   find_package(TagLib CONFIG REQUIRED)
   set(MYPLAYER_TAGLIB_TARGET TagLib::tag)
 endif()
+# efsw (file system watcher) from the third_party/efsw submodule. Built in a
+# function so its BUILD_SHARED_LIBS / BUILD_STATIC_LIBS overrides stay local:
+# efsw defaults BUILD_SHARED_LIBS to ON, which would also make MYLib shared.
+# With both OFF, the `efsw` target is one static library (efsw-static would
+# compile the same sources a second time). Requires CMake 3.27 (efsw minimum).
+function(myplayer_add_efsw)
+  set(BUILD_SHARED_LIBS OFF)
+  set(BUILD_STATIC_LIBS OFF)
+  set(BUILD_TEST_APP OFF)
+  set(BUILD_AGENT OFF)
+  set(EFSW_INSTALL OFF)
+  add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../third_party/efsw"
+    "${CMAKE_CURRENT_BINARY_DIR}/third_party/efsw")
+endfunction()
+myplayer_add_efsw()
+
 pkg_check_modules(GST IMPORTED_TARGET REQUIRED gstreamer-1.0)
 
 if(WIN32)
@@ -100,6 +116,8 @@ set(PROJECT_SOURCES
   fieldeditdialog.cpp
   filesystemcomparer.h
   filesystemcomparer.cpp
+  efswfilesystemmonitor.h
+  efswfilesystemmonitor.cpp
   gstaudioplayer.h
   gstaudioplayer.cpp
   globalcolumnlayoutmanager.h
@@ -198,12 +216,7 @@ if(BUILD_TESTING)
   )
 endif()
 
-if(NOT WIN32)
-  list(APPEND PROJECT_SOURCES
-    efswfilesystemmonitor.h
-    efswfilesystemmonitor.cpp
-  )
-else()
+if(WIN32)
   list(APPEND PROJECT_SOURCES
     windowsmediacenter.h
     windowsmediacenter.cpp
@@ -237,6 +250,7 @@ target_link_libraries(
   ${ICU_LIBRARIES}
   ${MYPLAYER_TAGLIB_TARGET}
   PkgConfig::GST
+  efsw
 )
 
 if(WIN32)
@@ -263,7 +277,6 @@ if(APPLE)
   )
   target_link_libraries(
     MYLib
-    ${CMAKE_SOURCE_DIR}/lib/libefsw-static-debug.a
     "-framework CoreAudio"
     "-framework Foundation"
     "-framework MediaPlayer"
@@ -272,7 +285,6 @@ elseif(LINUX)
   target_link_libraries(
     MYLib
     Qt6::DBus
-    ${CMAKE_SOURCE_DIR}/lib/libefsw.so
   )
 endif()
 
