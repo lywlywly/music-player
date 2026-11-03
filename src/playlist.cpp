@@ -59,8 +59,9 @@ SortValue resolveSortValue(const SongLibrary &library, int songPk,
 } // namespace
 
 Playlist::Playlist(int playlistId, SongLibrary &lib,
-                   DatabaseManager &databaseManager, QObject *parent)
-    : QObject(parent), playlistId_{playlistId}, library_{lib},
+                   DatabaseManager &databaseManager, Kind kind,
+                   QObject *parent)
+    : QObject(parent), playlistId_{playlistId}, kind_{kind}, library_{lib},
       databaseManager_{databaseManager} {}
 
 bool Playlist::loadState() {
@@ -80,6 +81,9 @@ bool Playlist::loadState() {
     return false;
   }
   lastPlayed_ = qPlaylist.value(0).toInt();
+  if (kind_ == Kind::Auto) {
+    return true;
+  }
 
   songPKs_.clear();
   QSqlQuery qItems(db);
@@ -103,6 +107,8 @@ bool Playlist::loadState() {
 }
 
 int Playlist::id() const { return playlistId_; }
+
+Playlist::Kind Playlist::kind() const { return kind_; }
 
 int Playlist::songCount() const { return songPKs_.size(); }
 
@@ -137,6 +143,9 @@ int Playlist::getLastPlayed() const { return lastPlayed_; }
 std::vector<int> Playlist::addFiles(const std::vector<std::string> &paths,
                                     const ProgressFn &progress,
                                     std::vector<std::string> *failedPaths) {
+  if (refuseWrite("addFiles")) {
+    return {};
+  }
   std::vector<int> pks;
   pks.reserve(paths.size());
   std::unordered_set<int> seen;
@@ -168,12 +177,15 @@ std::vector<int> Playlist::addFiles(const std::vector<std::string> &paths,
 }
 
 bool Playlist::addSong(MSong &&s) {
+  if (refuseWrite("addSong")) {
+    return false;
+  }
   const int songId = library_.addTolibrary(std::move(s));
   return addSongByPk(songId);
 }
 
 bool Playlist::addSongByPk(int songId) {
-  if (containsPk(songId)) {
+  if (refuseWrite("addSongByPk") || containsPk(songId)) {
     return false;
   }
   const int row = songCount();
@@ -184,6 +196,16 @@ bool Playlist::addSongByPk(int songId) {
 }
 
 void Playlist::removeSongs(std::vector<int> rows) {
+  if (refuseWrite("removeSongs")) {
+    return;
+  }
+  const std::vector<int> removedPks = removeRows(std::move(rows));
+  if (!removedPks.empty()) {
+    emit songPksRemoved(removedPks);
+  }
+}
+
+std::vector<int> Playlist::removeRows(std::vector<int> rows) {
   // From the last row, so the rows not yet removed keep their numbers.
   std::sort(rows.begin(), rows.end(), std::greater<>());
   rows.erase(std::unique(rows.begin(), rows.end()), rows.end());
@@ -194,18 +216,19 @@ void Playlist::removeSongs(std::vector<int> rows) {
     const int songId = songPKs_.at(row);
     songPKs_.erase(songPKs_.begin() + row);
     rebuildIndices();
-    if (playlistId_ > 0) {
+    if (playlistId_ > 0 && kind_ == Kind::Manual) {
       removePlaylistItemInDb(songId);
     }
     emit songsRemoved(row, row);
     removedPks.push_back(songId);
   }
-  if (!removedPks.empty()) {
-    emit songPksRemoved(removedPks);
-  }
+  return removedPks;
 }
 
 void Playlist::clear() {
+  if (refuseWrite("clear")) {
+    return;
+  }
   emit aboutToResetSongs();
   const std::vector<int> removedPks = std::exchange(songPKs_, {});
   indices_.clear();
@@ -268,6 +291,60 @@ void Playlist::refreshMetadataFromFiles(const ProgressFn &progress) {
   emit aboutToResetSongs();
   library_.refreshSongsFromFilepaths(filepaths, progress);
   emit songsReset();
+  if (!songPKs_.empty()) {
+    // A copy: handlers may change this playlist's rows (an autoplaylist).
+    emit songsRefreshed(std::vector<int>(songPKs_));
+  }
+}
+
+void Playlist::resetRows(const std::vector<int> &songPks) {
+  if (refuseRowUpdate("resetRows")) {
+    return;
+  }
+  emit aboutToResetSongs();
+  songPKs_.clear();
+  indices_.clear();
+  for (int pk : songPks) {
+    if (!containsPk(pk)) {
+      appendSongPk(pk);
+    }
+  }
+  emit songsReset();
+}
+
+void Playlist::appendRows(const std::vector<int> &songPks) {
+  if (refuseRowUpdate("appendRows")) {
+    return;
+  }
+  std::vector<int> pks;
+  std::unordered_set<int> seen;
+  for (int pk : songPks) {
+    if (!containsPk(pk) && seen.insert(pk).second) {
+      pks.push_back(pk);
+    }
+  }
+  if (pks.empty()) {
+    return;
+  }
+  const int first = songCount();
+  emit aboutToInsertSongs(first, first + static_cast<int>(pks.size()) - 1);
+  for (int pk : pks) {
+    appendSongPk(pk);
+  }
+  emit songsInserted(first, songCount() - 1);
+}
+
+void Playlist::removeRowsByPk(const std::vector<int> &songPks) {
+  if (refuseRowUpdate("removeRowsByPk")) {
+    return;
+  }
+  std::vector<int> rows;
+  for (int pk : songPks) {
+    if (containsPk(pk)) {
+      rows.push_back(indices_[pk]);
+    }
+  }
+  removeRows(std::move(rows));
 }
 
 void Playlist::setLastPlayed(int songPk) {
@@ -312,9 +389,27 @@ void Playlist::appendSongPk(int songId) {
   if (indices_.size() < songId + 1)
     indices_.resize(songId + 1, -1);
   indices_[songId] = songPKs_.size() - 1;
-  if (playlistId_ > 0) {
+  if (playlistId_ > 0 && kind_ == Kind::Manual) {
     appendSongToPlaylistInDb(songId, nextPosition_++);
   }
+}
+
+bool Playlist::refuseWrite(const char *operation) const {
+  if (kind_ != Kind::Auto) {
+    return false;
+  }
+  qWarning("Playlist::%s: refused for autoplaylist %d", operation,
+           playlistId_);
+  return true;
+}
+
+bool Playlist::refuseRowUpdate(const char *operation) const {
+  if (kind_ != Kind::Manual) {
+    return false;
+  }
+  qWarning("Playlist::%s: refused for manual playlist %d", operation,
+           playlistId_);
+  return true;
 }
 
 void Playlist::appendSongToPlaylistInDb(int songId, int position) {

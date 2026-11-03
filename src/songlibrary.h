@@ -76,6 +76,9 @@ public:
   const MSong &getSongByPK(int) const;
   ExprParseResult parseLibraryExpression(const QString &expressionText) const;
   std::vector<int> search(const Expr &expression) const;
+  // Whether the song evaluates the expression to true; false for a removed
+  // pk.
+  bool matches(const Expr &expression, int songPk) const;
   std::vector<int> query(std::string) const;
   const std::vector<int> &registerQuery(std::string) const;
   void unregisterQuery(std::string) const;
@@ -121,6 +124,9 @@ public:
   // This also updates all in-memory songs with the same identity.
   bool incrementPlayCount(int songPk);
   std::string songIdentityKeyBySongPk(int songPk) const;
+  // The pks of the songs sharing songPk's identity, songPk included, which
+  // play stat changes reach. {songPk} when it has no identity.
+  std::vector<int> songPksSharingIdentity(int songPk) const;
   // Applies cloud play_count for identity key with merge=max(local, cloud).
   // Returns affected song pks for UI refresh.
   std::vector<int> applyCloudPlayCount(const std::string &identityKey,
@@ -167,5 +173,11 @@ private:
       registeredQueryFields;
   mutable std::unordered_map<std::string, std::vector<int>> registeredQueries;
 };
+
+// SongLibrary::parseLibraryExpression, then rejects an expression whose
+// static type is not boolean with "Expression must be a condition". For
+// expressions that filter songs (autoplaylists).
+ExprParseResult parseSongFilter(const SongLibrary &library,
+                                const QString &expressionText);
 
 #endif // SONGLIBRARY_H

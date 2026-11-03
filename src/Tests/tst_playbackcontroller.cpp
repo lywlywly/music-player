@@ -13,6 +13,7 @@
 #include "../playbackcontroller.h"
 #include "../playlistcollection.h"
 #include "../songlibrary.h"
+#include "../songparser.h"
 #include "../utils.h"
 #include "testaudiofiles.h"
 
@@ -47,6 +48,7 @@ private slots:
   void endOfMedia_countsFinishesAndPlaysNext();
   void playStats_seekToEndWithoutListenDoesNotCount();
   void playStats_nearEndWithListenCountsOnce();
+  void playStats_notifyEverySongOfTheIdentity();
 
   void next_overMissingFile_stopsPreviousAndSkips();
   void invalidMedia_skipsToNextSong();
@@ -251,6 +253,32 @@ void TestPlaybackController::playStats_nearEndWithListenCountsOnce() {
   QCOMPARE(q.value(0).toInt(), 1);
   QVERIFY(q.value(1).toLongLong() > 0);
   QVERIFY(!q.next());
+}
+
+void TestPlaybackController::playStats_notifyEverySongOfTheIdentity() {
+  // Two files with the same title, artist and album: one identity, so shared
+  // play stats. Tagged, as playing re-reads the tags.
+  for (const QString &name : {QStringLiteral("a.wav"), QStringLiteral("b.wav")}) {
+    const QString path = dir_->filePath(name);
+    QVERIFY(writeSilentWav(path));
+    QVERIFY(SongParser::writeTags(
+        path.toStdString(),
+        {{"title", "Song"}, {"artist", "Artist"}, {"album", "Album"}},
+        *registry_));
+    playlist_->addSong(makeSong("Song", path));
+  }
+  playlist_->setLastPlayed(playlist_->getPkByIndex(0));
+  player()->setDurationForTest(120000);
+  QSignalSpy changedSpy(playlist_, &Playlist::songDataChanged);
+
+  controller_->play();
+  QCOMPARE(changedSpy.count(), 2);
+  for (const qint64 positionMs : {1000, 35000, 70000, 109000, 115000, 119000}) {
+    player()->setPosition(positionMs);
+  }
+
+  QCOMPARE(changedSpy.count(), 4);
+  QCOMPARE(changedSpy.at(2).at(0).toInt() + changedSpy.at(3).at(0).toInt(), 1);
 }
 
 void TestPlaybackController::next_overMissingFile_stopsPreviousAndSkips() {

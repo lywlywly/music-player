@@ -225,7 +225,8 @@ void PlaybackController::playSong(const MSong &song, int row, Playlist *pl) {
   currentSongPk_ = songPk;
   completionTracker_.startSession();
   library_.markSongPlayedAtStart(songPk, QDateTime::currentSecsSinceEpoch());
-  playlists_.notifySongChanged(songPk);
+  // Play stats are per identity.
+  playlists_.notifySongsChanged(library_.songPksSharingIdentity(songPk));
 
   player()->setSource(QString::fromStdString(activeSong.at("filepath").text));
   player()->play();
@@ -258,7 +259,8 @@ void PlaybackController::maybeCountCompletedPlay() {
     return;
   }
   completionTracker_.markCounted();
-  playlists_.notifySongChanged(currentSongPk_);
+  playlists_.notifySongsChanged(
+      library_.songPksSharingIdentity(currentSongPk_));
   emit playCounted(currentSongPk_);
 }
 

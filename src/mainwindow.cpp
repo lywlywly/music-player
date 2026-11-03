@@ -239,6 +239,7 @@ void MainWindow::initSettings() {
       // Resolve added or removed custom fields in the display expressions.
       nowPlaying_->reloadExpressions();
       columnLayoutManager_.refreshFromRegistry();
+      playlists_->reloadAutoPlaylistExpressions();
       // TODO: refresh custom/computed attributes
     });
     connect(dialog, &SettingsDialog::cloudUuidChanged, this,

@@ -43,6 +43,7 @@ set(TEST_NAMES
     playlisttabs
     playlisttableview
     monitoredlibrary
+    autoplaylist
 )
 
 if(NOT WIN32)

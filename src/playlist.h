@@ -12,18 +12,25 @@ class DatabaseManager;
 // Canonical song metadata lives in SongLibrary.
 // A song appears at most once; adding a song already present is a no-op.
 // playlistId <= 0 is non-persistent (no DB reads or writes).
+// An Auto playlist (autoplaylist) has no `playlist_items`: its rows are set
+// by PlaylistCollection through resetRows, appendRows and removeRowsByPk, and
+// the write operations (addFiles, addSong, addSongByPk, removeSongs, clear)
+// are refused with a warning.
 class Playlist : public QObject {
   Q_OBJECT
 public:
   using ProgressFn = std::function<void(int current, int total)>;
+  enum class Kind { Manual, Auto };
 
   Playlist(int playlistId, SongLibrary &, DatabaseManager &,
-           QObject *parent = nullptr);
-  // Loads last_played and playlist_items (by position). Emits no signals.
-  // Returns false when the playlists row is missing or a query fails.
+           Kind kind = Kind::Manual, QObject *parent = nullptr);
+  // Loads last_played and, for a manual playlist, playlist_items (by
+  // position). Emits no signals. Returns false when the playlists row is
+  // missing or a query fails.
   bool loadState();
 
   int id() const;
+  Kind kind() const;
   int songCount() const;
   bool empty() const;
   bool containsPk(int songPk) const;
@@ -60,10 +67,19 @@ public:
   // order: 0 ascending, otherwise descending.
   void sortByField(const std::string &fieldId, int order = 0);
   // Re-parses metadata for all songs currently in this playlist and writes the
-  // refreshed values back to SongLibrary. progress is called after each
-  // processed song with (current, total). Assumes every row has a valid
-  // non-empty `filepath`; missing/empty filepath is treated as fatal.
+  // refreshed values back to SongLibrary, then emits songsRefreshed. progress
+  // is called after each processed song with (current, total). Assumes every
+  // row has a valid non-empty `filepath`; missing/empty filepath is treated as
+  // fatal.
   void refreshMetadataFromFiles(const ProgressFn &progress = {});
+  // Auto playlists only; none of these emits songPksRemoved. songPks must be
+  // songs in SongLibrary.
+  // Replaces the rows (reset signals).
+  void resetRows(const std::vector<int> &songPks);
+  // Appends the songs not already in the playlist (insert signals).
+  void appendRows(const std::vector<int> &songPks);
+  // Removes the rows of the songs (the remove signals of removeSongs).
+  void removeRowsByPk(const std::vector<int> &songPks);
   void setLastPlayed(int songPk);
   // Emits songDataChanged(row) when songPk >= 0 and is in this playlist.
   // Does not mutate song data.
@@ -80,14 +96,24 @@ signals:
   void songsReset();
   void songsReordered();
   void songDataChanged(int row);
+  // After refreshMetadataFromFiles: the songs whose data was re-read.
+  void songsRefreshed(const std::vector<int> &songPks);
 
 private:
+  // Logs a warning and returns true for an auto playlist.
+  bool refuseWrite(const char *operation) const;
+  // Logs a warning and returns true for a manual playlist.
+  bool refuseRowUpdate(const char *operation) const;
+  // Removes the rows (and, for a manual playlist, their `playlist_items`
+  // rows) with remove signals; returns their pks.
+  std::vector<int> removeRows(std::vector<int> rows);
   void appendSongPk(int songId);
   void appendSongToPlaylistInDb(int songId, int position);
   void removePlaylistItemInDb(int songId);
   void removePlaylistItemsInDb();
   void rebuildIndices();
   int playlistId_;
+  Kind kind_;
   SongLibrary &library_;
   DatabaseManager &databaseManager_;
   std::vector<int> songPKs_;

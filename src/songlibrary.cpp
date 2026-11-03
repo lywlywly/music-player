@@ -296,6 +296,25 @@ std::vector<int> SongLibrary::search(const Expr &expression) const {
   return matches;
 }
 
+bool SongLibrary::matches(const Expr &expression, int songPk) const {
+  if (songPk < 0 || songPk >= static_cast<int>(songs.size()) ||
+      songs[songPk].empty()) {
+    return false;
+  }
+  SongLibraryExprEvalContext context(songs[songPk]);
+  return expression.evaluate(context);
+}
+
+ExprParseResult parseSongFilter(const SongLibrary &library,
+                                const QString &expressionText) {
+  ExprParseResult result = library.parseLibraryExpression(expressionText);
+  if (result.ok() && inferExprStaticType(*result.expr) != ExprStaticType::Bool) {
+    result.expr.reset();
+    result.error = {.message = QStringLiteral("Expression must be a condition")};
+  }
+  return result;
+}
+
 std::vector<int> SongLibrary::query(std::string artist) const {
   std::vector<int> view;
   for (int i = 0; i < songs.size(); i++) {
@@ -787,6 +806,14 @@ std::string SongLibrary::songIdentityKeyBySongPk(int songPk) const {
     return {};
   }
   return it->second.text;
+}
+
+std::vector<int> SongLibrary::songPksSharingIdentity(int songPk) const {
+  const auto it = songIdsByIdentityId_.find(songIdentityIdBySongId(songPk));
+  if (it == songIdsByIdentityId_.end()) {
+    return {songPk};
+  }
+  return it->second;
 }
 
 std::vector<int>

@@ -1,8 +1,8 @@
 # Plan: Monitored Library, Autoplaylists and Playlist Search
 
-Status: phase 1 (monitored library, without the watcher) is implemented;
-phases 2-6 are planned. The efsw dependency is set up (`third_party/efsw`,
-1.7.3) but not used yet.
+Status: phases 1 (monitored library, without the watcher) and 2
+(autoplaylist backend) are implemented; phases 3-6 are planned. The efsw
+dependency is set up (`third_party/efsw`, 1.7.3) but not used yet.
 
 ## Summary
 
@@ -566,7 +566,8 @@ CREATE TABLE IF NOT EXISTS playlists (
   data: per-folder availability; new, changed and gone entries with parsed
   songs and stats; new failed entries.
 * `SongLibrary`
-  * `search(expr, candidatePks)`.
+  * `search(expr, candidatePks)` (phase 3).
+  * `matches(expr, pk)`, for autoplaylist membership.
   * `prepareParsedSong(MSong &) const`: computed fields and identity key,
     split out of `loadPreparedSongFromFile`.
   * `addTolibrary` canonicalises `filepath` (invariant 1).
@@ -597,7 +598,9 @@ CREATE TABLE IF NOT EXISTS playlists (
     no monitor), exposed as `monitoredLibrary()` for `openSongProperties`.
   * Adds `createAutoPlaylist(name, expression)`,
     `setAutoPlaylistExpression(id, expression)`, `isAuto(id)`,
-    `autoPlaylistError(id)` and `reloadAutoPlaylistExpressions()`.
+    `autoPlaylistExpression(id)`, `autoPlaylistError(id)` and
+    `reloadAutoPlaylistExpressions()`.
+  * `notifySongsChanged(pks)` (public), used for the identity fan-out.
   * `releaseSongs(pks)` replaces `removeSongsInNoPlaylist`: keeps pks in no
     manual playlist and not `MonitoredLibrary::holds`, calls
     `SongLibrary::removeSongs`, emits `songsRemovedFromLibrary` (signal

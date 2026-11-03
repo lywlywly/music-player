@@ -192,9 +192,9 @@ are the Qt frontend.
     created and loaded before insertion, and its address stays stable).
   * Owns playlist metadata behavior (`playlists` table): load, create/delete playlist rows, rename, persist/repair `tab_order`. Refuses to remove the last playlist.
   * `loadAll()` emits no signals; after it, `playlistCreated` / `playlistAboutToBeRemoved` / `playlistRemoved` / `playlistRenamed` report changes. `playlistAboutToBeRemoved` is sent while the `Playlist` still exists.
-  * `notifySongChanged(songPk)` refreshes a song's rows in every playlist after non-playlist song writes (play stats, cloud sync, Song Properties).
-  * `releaseSongs` is the only place that deletes songs: it removes from `SongLibrary` the songs that are in no playlist and not held by `MonitoredLibrary`. It runs on each playlist's `songPksRemoved` (Remove from Playlist, Clear Playlist), in `removePlaylist` (Remove Tab), and on `MonitoredLibrary::songsLeft`. Then emits `songsRemovedFromLibrary(songPks)`.
-  * Refreshes rows of songs the monitored library added or re-read (`songsEntered`, `songsUpdated`).
+  * `notifySongChanged(songPk)` / `notifySongsChanged(songPks)` update autoplaylist rows and refresh a song's rows in every playlist after non-playlist song writes (play stats, cloud sync, Song Properties, `Playlist::songsRefreshed`, and the songs `MonitoredLibrary` added or re-read: `songsEntered`, `songsUpdated`).
+  * Autoplaylists (`createAutoPlaylist`, `setAutoPlaylistExpression`, `reloadAutoPlaylistExpressions`): their rows are the `MonitoredLibrary` songs matching a `parseSongFilter` expression, filled in `filepath` order, with songs that start matching appended. An invalid expression gives no rows and `autoPlaylistError`. See [monitored-library.md](monitored-library.md).
+  * `releaseSongs` is the only place that deletes songs: it removes from `SongLibrary` the songs that are in no manual playlist and not held by `MonitoredLibrary`. It runs on each playlist's `songPksRemoved` (Remove from Playlist, Clear Playlist), in `removePlaylist` (Remove Tab), and on `MonitoredLibrary::songsLeft`. Then emits `songsRemovedFromLibrary(songPks)`.
 * `PlaylistTabs` (frontend)
   * Builds tabs from a loaded `PlaylistCollection` and follows its signals; delegates create/remove/rename/reorder to it.
   * Creates one `PlaylistTableView` per tab and handles its row context menu and double-click.
@@ -207,6 +207,7 @@ are the Qt frontend.
     `Alt+Enter` elsewhere); the table handles the keys (see `PlaylistTableView`).
 * `Playlist` (backend)
   * One playlist: song-id ordering, sorting, `last_played`, and per-playlist operations (`addFiles`, `addSong`, `addSongByPk`, `removeSongs`, `clear`, `sortByField`, `refreshMetadataFromFiles`).
+  * `Kind::Manual` or `Kind::Auto`. An auto playlist stores no `playlist_items` and refuses the write operations; `PlaylistCollection` sets its rows with `resetRows`, `appendRows` and `removeRowsByPk`, which never emit `songPksRemoved`.
   * A song appears at most once per playlist. Adding a song already present is a silent no-op (`addSong` / `addSongByPk` return `false`; `addFiles` skips it and returns only the appended pks). `playlist_items` enforces this with `UNIQUE (playlist_id, song_id)`.
   * Ingests/refreshes songs through `SongLibrary`; owns `playlist_items` and `playlists.last_played` persistence. `playlistId <= 0` is non-persistent (used by tests).
   * Sends before/after signals for insert, remove and reset, and after-only signals for reorder and song-data changes. `addFiles` parses and ingests all paths first, then sends one insert pair for the batch. `removeSongs` sends one remove pair per row; after it and `clear`, `songPksRemoved(songPks)` reports the songs that left. Does not know playback status.
