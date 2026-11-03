@@ -1,7 +1,11 @@
 #include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QObject>
 #include <QSqlDatabase>
 #include <QSqlQuery>
+#include <QTemporaryDir>
 #include <QTest>
 #include <QUuid>
 
@@ -49,6 +53,7 @@ private slots:
   void cleanup();
 
   void addToLibrary_sameFilepathUpdatesExistingSong();
+  void addToLibrary_canonicalisesFilepath();
   void loadFromDatabase_loadsBuiltInAndDynamicAttributes();
   void loadFromDatabase_assignsFieldIdsForAllLoadedFields();
   void loadFromDatabase_removesUnknownDynamicAttributes();
@@ -110,6 +115,36 @@ void TestSongLibrary::cleanup() {
   delete registry_;
   registry_ = nullptr;
   QSqlDatabase::removeDatabase(connectionName_);
+}
+
+void TestSongLibrary::addToLibrary_canonicalisesFilepath() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  const QString root = QFileInfo(dir.path()).canonicalFilePath();
+  QVERIFY(QDir().mkpath(root + "/music"));
+  QFile file(root + "/music/a.mp3");
+  QVERIFY(file.open(QIODevice::WriteOnly));
+  file.close();
+  QVERIFY(QFile::link(root + "/music", root + "/link"));
+
+  const int pk =
+      library_->addTolibrary(makeSong("A", "Artist", root + "/music/a.mp3"));
+  QCOMPARE(library_->addTolibrary(
+               makeSong("A", "Artist", root + "/music/../music/a.mp3")),
+           pk);
+  QCOMPARE(
+      library_->addTolibrary(makeSong("A", "Artist", root + "/link/a.mp3")),
+      pk);
+  QCOMPARE(
+      QString::fromStdString(library_->getSongByPK(pk).at("filepath").text),
+      root + "/music/a.mp3");
+
+  // A missing file keeps its cleaned absolute path.
+  const int missingPk =
+      library_->addTolibrary(makeSong("X", "Artist", root + "/gone/../x.mp3"));
+  QCOMPARE(QString::fromStdString(
+               library_->getSongByPK(missingPk).at("filepath").text),
+           root + "/x.mp3");
 }
 
 void TestSongLibrary::addToLibrary_sameFilepathUpdatesExistingSong() {

@@ -62,9 +62,17 @@ public:
                        DatabaseManager &databaseManager);
 #endif
   // Adds a fully prepared song map to library/DB and returns primary key.
-  // If filepath already exists, syncs DB and in-memory fields from prepared
-  // song instead of creating a new row.
+  // First rewrites filepath to its canonical form
+  // (QFileInfo::canonicalFilePath, or the cleaned absolute path when the file
+  // does not exist), so one file never gets two rows. If that path already
+  // exists, syncs DB and in-memory fields from prepared song instead of
+  // creating a new row.
   int addTolibrary(MSong &&);
+  // Fills the computed fields and song_identity_key of a song parsed by
+  // SongParser::parse, using the live ColumnRegistry. loadSongFromFile does
+  // this itself; callers that parse elsewhere (the library scanner) call it
+  // before addTolibrary.
+  void prepareParsedSong(MSong &song) const;
   const MSong &getSongByPK(int) const;
   ExprParseResult parseLibraryExpression(const QString &expressionText) const;
   std::vector<int> search(const Expr &expression) const;

@@ -98,7 +98,8 @@ bool DatabaseManager::createTables() {
 
   return ensureSongIdentitiesSchema(q) && ensureSongsSchema(q) &&
          ensurePlaylistsSchema(q) && ensureDynamicAttributesSchema(q) &&
-         ensureComputedAttributesSchema(q) && ensurePlayStatsSchema(q);
+         ensureComputedAttributesSchema(q) && ensurePlayStatsSchema(q) &&
+         ensureMonitoredLibrarySchema(q);
 }
 
 bool DatabaseManager::ensureSongIdentitiesSchema(QSqlQuery &q) {
@@ -153,7 +154,12 @@ bool DatabaseManager::ensurePlaylistsSchema(QSqlQuery &q) {
             playlist_id  INTEGER PRIMARY KEY AUTOINCREMENT,
             name         TEXT NOT NULL,
             last_played  INTEGER NOT NULL,
-            tab_order    INTEGER NOT NULL DEFAULT 0
+            tab_order    INTEGER NOT NULL DEFAULT 0,
+            kind         TEXT NOT NULL DEFAULT 'manual'
+                         CHECK (kind IN ('manual', 'auto')),
+            -- set exactly when kind = 'auto'
+            expression   TEXT,
+            CHECK ((kind = 'auto') = (expression IS NOT NULL))
         );
     )",
                   "Error creating playlists table:")) {
@@ -292,6 +298,41 @@ bool DatabaseManager::ensurePlayStatsSchema(QSqlQuery &q) {
   q.exec(R"(
       CREATE INDEX IF NOT EXISTS idx_song_play_stats_last_played
       ON song_play_stats(last_played_timestamp);
+  )");
+
+  return true;
+}
+
+bool DatabaseManager::ensureMonitoredLibrarySchema(QSqlQuery &q) {
+  if (!execOrWarn(q,
+                  R"(
+        CREATE TABLE IF NOT EXISTS library_folders (
+            folder_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path      TEXT NOT NULL UNIQUE  -- canonical path
+        );
+    )",
+                  "Error creating library_folders table:")) {
+    return false;
+  }
+
+  if (!execOrWarn(q,
+                  R"(
+        CREATE TABLE IF NOT EXISTS monitored_files (
+            song_id   INTEGER PRIMARY KEY
+                      REFERENCES songs(song_id) ON DELETE CASCADE,
+            folder_id INTEGER NOT NULL
+                      REFERENCES library_folders(folder_id) ON DELETE CASCADE,
+            mtime     INTEGER NOT NULL,  -- last_write_time, ns
+            size      INTEGER NOT NULL   -- bytes
+        );
+    )",
+                  "Error creating monitored_files table:")) {
+    return false;
+  }
+
+  q.exec(R"(
+      CREATE INDEX IF NOT EXISTS idx_monitored_files_folder
+      ON monitored_files(folder_id);
   )");
 
   return true;

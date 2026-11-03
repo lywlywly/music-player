@@ -7,6 +7,7 @@
 #include "databasemanager.h"
 #include "globalcolumnlayoutmanager.h"
 #include "lyricspresenter.h"
+#include "monitoredlibrary.h"
 #include "playbackcontroller.h"
 #include "playlist.h"
 #include "playlistcollection.h"
@@ -69,6 +70,7 @@ private:
   GlobalColumnLayoutManager columnLayoutManager_;
   DatabaseManager databaseManager_;
   SongLibrary songLibrary;
+  MonitoredLibrary monitoredLibrary_;
   // Child QObject created after ui->setupUi, so UI widgets (tabs, views,
   // models) are destroyed before the playlists they show.
   PlaylistCollection *playlists_ = nullptr;

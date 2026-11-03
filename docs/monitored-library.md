@@ -1,7 +1,8 @@
 # Plan: Monitored Library, Autoplaylists and Playlist Search
 
-Status: planned. Only the efsw dependency is set up (`third_party/efsw`,
-1.7.3); no feature code exists yet.
+Status: phase 1 (monitored library, without the watcher) is implemented;
+phases 2-6 are planned. The efsw dependency is set up (`third_party/efsw`,
+1.7.3) but not used yet.
 
 ## Summary
 
@@ -317,7 +318,8 @@ file's mtime and size and fires the watcher.
 * `SongPropertiesDialog` already calls `SongLibrary::refreshSongFromFile`
   after `writeTags` and then emits `songUpdated(pk)`. `openSongProperties`
   (`songdialogs.cpp`) connects that signal to
-  `MonitoredLibrary::noteSongWritten(pk)` as well as `notifySongChanged`.
+  `MonitoredLibrary::noteSongWritten(pk)` (reached through
+  `PlaylistCollection::monitoredLibrary()`) as well as `notifySongChanged`.
   If the pk is monitored, it `stat`s the file and stores the new stats in
   memory and in `monitored_files`; otherwise it does nothing.
 * The watcher event that follows (queued, then debounced) finds the file
@@ -537,15 +539,18 @@ CREATE TABLE IF NOT EXISTS playlists (
 * `MonitoredLibrary` (new, owned by `MainWindow`, constructed before
   `PlaylistCollection`)
   * Constructor: `SongLibrary &`, `const ColumnRegistry &`,
-    `DatabaseManager &`, `IFileSystemMonitor *` (null until phase 5 and in
-    tests that don't need it).
+    `DatabaseManager &`, and a parse function (defaults to
+    `SongParser::parse`; tests inject one). Phase 5 adds an
+    `IFileSystemMonitor *` (null in tests that don't need it).
   * Owns `library_folders`, `monitored_files`, and in memory
     `pk -> {folder_id, mtime, size}`, folder availability and the failed set.
   * API: `load()` (reads both tables on the main thread; they are small),
     `addFolder(path)` (canonicalises, rejects overlap by path component,
     case-insensitively on macOS and Windows), `removeFolder(id)`,
-    `folders()`, `rescan()`, `removeMissingSongs(folderId)`, `holds(pk)`,
-    `songPks()`, `noteSongWritten(pk)`.
+    `folders()`, `rescan()`, `removeMissingSongs(folderId)`,
+    `scanPaths(paths)` (path scopes: stale results now, watcher events in
+    phase 5), `isScanning()`, `holds(pk)`, `songPks()`,
+    `noteSongWritten(pk)`.
   * Signals: `songsEntered(pks)`, `songsUpdated(pks)`, `songsLeft(pks)`
     (left the monitored library; the row may survive),
     `folderAvailabilityChanged(folderId, online)`, `scanProgress(done,
@@ -589,7 +594,7 @@ CREATE TABLE IF NOT EXISTS playlists (
   * New signal `songsRefreshed(pks)` after `refreshMetadataFromFiles`.
 * `PlaylistCollection`
   * Constructor adds `MonitoredLibrary &` (existing tests construct one with
-    no monitor).
+    no monitor), exposed as `monitoredLibrary()` for `openSongProperties`.
   * Adds `createAutoPlaylist(name, expression)`,
     `setAutoPlaylistExpression(id, expression)`, `isAuto(id)`,
     `autoPlaylistError(id)` and `reloadAutoPlaylistExpressions()`.
@@ -624,8 +629,7 @@ CREATE TABLE IF NOT EXISTS playlists (
   distinct icon (and the warning icon for an invalid expression); context
   menus follow "Operations by playlist kind".
 * `MainWindow`: Open, Add Folder and Clear Playlist actions are disabled
-  while an autoplaylist tab is shown; `openSongProperties` gets the
-  `MonitoredLibrary` for `noteSongWritten`.
+  while an autoplaylist tab is shown.
 * Status bar: "Scanning library… 120 / 3000" during a scan, then the normal
   message.
 

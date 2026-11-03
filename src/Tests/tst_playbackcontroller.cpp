@@ -9,6 +9,7 @@
 #include "../columnregistry.h"
 #include "../databasemanager.h"
 #include "../dummyaudioplayer.h"
+#include "../monitoredlibrary.h"
 #include "../playbackcontroller.h"
 #include "../playlistcollection.h"
 #include "../songlibrary.h"
@@ -70,6 +71,7 @@ private:
   ColumnRegistry *registry_ = nullptr;
   DatabaseManager *databaseManager_ = nullptr;
   SongLibrary *library_ = nullptr;
+  MonitoredLibrary *monitored_ = nullptr;
   PlaylistCollection *playlists_ = nullptr;
   PlaybackController *controller_ = nullptr;
   Playlist *playlist_ = nullptr;
@@ -88,7 +90,9 @@ void TestPlaybackController::init() {
   databaseManager_ =
       new DatabaseManager(*registry_, ":memory:", connectionName_);
   library_ = new SongLibrary(*registry_, *databaseManager_);
-  playlists_ = new PlaylistCollection(*library_, *databaseManager_);
+  monitored_ = new MonitoredLibrary(*library_, *registry_, *databaseManager_);
+  playlists_ =
+      new PlaylistCollection(*library_, *databaseManager_, *monitored_);
   playlists_->loadAll();
   playlist_ = playlists_->playlist(1);
   QVERIFY(playlist_ != nullptr);
@@ -106,6 +110,8 @@ void TestPlaybackController::cleanup() {
   controller_ = nullptr;
   delete playlists_;
   playlists_ = nullptr;
+  delete monitored_;
+  monitored_ = nullptr;
   delete library_;
   library_ = nullptr;
   delete databaseManager_;

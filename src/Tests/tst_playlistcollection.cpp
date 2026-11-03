@@ -7,6 +7,7 @@
 
 #include "../columnregistry.h"
 #include "../databasemanager.h"
+#include "../monitoredlibrary.h"
 #include "../playlistcollection.h"
 #include "../songlibrary.h"
 #include "../utils.h"
@@ -56,6 +57,7 @@ private:
   ColumnRegistry *registry_ = nullptr;
   DatabaseManager *databaseManager_ = nullptr;
   SongLibrary *library_ = nullptr;
+  MonitoredLibrary *monitored_ = nullptr;
   PlaylistCollection *collection_ = nullptr;
   QString connectionName_;
 };
@@ -68,12 +70,16 @@ void TestPlaylistCollection::init() {
   databaseManager_ =
       new DatabaseManager(*registry_, ":memory:", connectionName_);
   library_ = new SongLibrary(*registry_, *databaseManager_);
-  collection_ = new PlaylistCollection(*library_, *databaseManager_);
+  monitored_ = new MonitoredLibrary(*library_, *registry_, *databaseManager_);
+  collection_ =
+      new PlaylistCollection(*library_, *databaseManager_, *monitored_);
 }
 
 void TestPlaylistCollection::cleanup() {
   delete collection_;
   collection_ = nullptr;
+  delete monitored_;
+  monitored_ = nullptr;
   delete library_;
   library_ = nullptr;
   delete databaseManager_;

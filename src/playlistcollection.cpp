@@ -1,5 +1,6 @@
 #include "playlistcollection.h"
 #include "databasemanager.h"
+#include "monitoredlibrary.h"
 #include <QDebug>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -16,8 +17,18 @@ struct PlaylistDefinition {
 
 PlaylistCollection::PlaylistCollection(SongLibrary &library,
                                        DatabaseManager &databaseManager,
+                                       MonitoredLibrary &monitoredLibrary,
                                        QObject *parent)
-    : QObject(parent), library_{library}, databaseManager_{databaseManager} {}
+    : QObject(parent), library_{library}, databaseManager_{databaseManager},
+      monitoredLibrary_{monitoredLibrary} {
+  // Entered songs may be existing rows refreshed from their file.
+  connect(&monitoredLibrary_, &MonitoredLibrary::songsEntered, this,
+          &PlaylistCollection::notifySongsChanged);
+  connect(&monitoredLibrary_, &MonitoredLibrary::songsUpdated, this,
+          &PlaylistCollection::notifySongsChanged);
+  connect(&monitoredLibrary_, &MonitoredLibrary::songsLeft, this,
+          &PlaylistCollection::releaseSongs);
+}
 
 void PlaylistCollection::loadAll() {
   QSqlQuery q(databaseManager_.db());
@@ -162,7 +173,7 @@ bool PlaylistCollection::removePlaylist(int playlistId) {
         << "PlaylistCollection::removePlaylist failed to persist tab_order";
   }
   emit playlistRemoved(playlistId);
-  removeSongsInNoPlaylist(songPks);
+  releaseSongs(songPks);
   return true;
 }
 
@@ -206,6 +217,16 @@ void PlaylistCollection::notifySongChanged(int songPk) {
   }
 }
 
+void PlaylistCollection::notifySongsChanged(const std::vector<int> &songPks) {
+  for (int songPk : songPks) {
+    notifySongChanged(songPk);
+  }
+}
+
+MonitoredLibrary &PlaylistCollection::monitoredLibrary() const {
+  return monitoredLibrary_;
+}
+
 Playlist &PlaylistCollection::addLoadedPlaylist(int playlistId,
                                                 const QString &name) {
   auto playlist =
@@ -220,18 +241,18 @@ Playlist &PlaylistCollection::addLoadedPlaylist(int playlistId,
     qFatal("PlaylistCollection::addLoadedPlaylist: duplicate playlist id");
   }
   connect(it->second.get(), &Playlist::songPksRemoved, this,
-          &PlaylistCollection::removeSongsInNoPlaylist);
+          &PlaylistCollection::releaseSongs);
   order_.push_back(playlistId);
   names_[playlistId] = name;
   return *it->second;
 }
 
-void PlaylistCollection::removeSongsInNoPlaylist(
-    const std::vector<int> &songPks) {
+void PlaylistCollection::releaseSongs(const std::vector<int> &songPks) {
   std::vector<int> unused;
   std::copy_if(songPks.begin(), songPks.end(), std::back_inserter(unused),
                [this](int songPk) {
-                 return std::none_of(playlists_.begin(), playlists_.end(),
+                 return !monitoredLibrary_.holds(songPk) &&
+                        std::none_of(playlists_.begin(), playlists_.end(),
                                      [songPk](const auto &entry) {
                                        return entry.second->containsPk(songPk);
                                      });

@@ -20,6 +20,8 @@ private slots:
   void createsPlayStatsSchema();
   void deleteSong_cascadesToPlaylistItemsAndSongAttributes();
   void playlistItems_rejectDuplicateSongInPlaylist();
+  void playlists_expressionSetExactlyForAutoKind();
+  void monitoredFiles_cascadeFromFolderAndSong();
 
 private:
   ColumnRegistry *registry_ = nullptr;
@@ -119,6 +121,52 @@ void TestDatabaseManager::playlistItems_rejectDuplicateSongInPlaylist() {
                   "VALUES (1, 10, 2)"));
   QVERIFY(q.exec("INSERT INTO playlist_items(playlist_id, song_id, position) "
                  "VALUES (2, 10, 1)"));
+}
+
+void TestDatabaseManager::playlists_expressionSetExactlyForAutoKind() {
+  QSqlQuery q(databaseManager_->db());
+  QVERIFY(q.exec("INSERT INTO playlists(playlist_id, name, last_played) VALUES "
+                 "(1, 'Manual', 1)"));
+  QVERIFY(q.exec("SELECT kind, expression FROM playlists WHERE playlist_id=1"));
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toString(), QString("manual"));
+  QVERIFY(q.value(1).isNull());
+
+  QVERIFY(q.exec("INSERT INTO playlists(name, last_played, kind, expression) "
+                 "VALUES ('Auto', 1, 'auto', 'true')"));
+  QVERIFY(!q.exec("INSERT INTO playlists(name, last_played, kind) "
+                  "VALUES ('Auto without expression', 1, 'auto')"));
+  QVERIFY(!q.exec("INSERT INTO playlists(name, last_played, expression) "
+                  "VALUES ('Manual with expression', 1, 'true')"));
+  QVERIFY(!q.exec("INSERT INTO playlists(name, last_played, kind, expression) "
+                  "VALUES ('Unknown kind', 1, 'smart', 'true')"));
+}
+
+void TestDatabaseManager::monitoredFiles_cascadeFromFolderAndSong() {
+  QSqlQuery q(databaseManager_->db());
+  QVERIFY(q.exec("INSERT INTO library_folders(folder_id, path) VALUES "
+                 "(1, '/music'), (2, '/other')"));
+  QVERIFY(!q.exec("INSERT INTO library_folders(path) VALUES ('/music')"));
+  QVERIFY(q.exec("INSERT INTO song_identities(identity_id, song_identity_key) "
+                 "VALUES (1, 'song|artist|album')"));
+  QVERIFY(q.exec("INSERT INTO songs(song_id, title, filepath, identity_id) "
+                 "VALUES (10, 'A', '/music/a.mp3', 1), "
+                 "(11, 'B', '/other/b.mp3', 1)"));
+  QVERIFY(q.exec("INSERT INTO monitored_files(song_id, folder_id, mtime, size) "
+                 "VALUES (10, 1, 1, 1), (11, 2, 1, 1)"));
+  // One row per song.
+  QVERIFY(!q.exec("INSERT INTO monitored_files(song_id, folder_id, mtime, "
+                  "size) VALUES (10, 2, 1, 1)"));
+
+  QVERIFY(q.exec("DELETE FROM library_folders WHERE folder_id=1"));
+  QVERIFY(q.exec("DELETE FROM songs WHERE song_id=11"));
+  QVERIFY(q.exec("SELECT COUNT(*) FROM monitored_files"));
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toInt(), 0);
+  // The folder's songs stay: only PlaylistCollection deletes songs.
+  QVERIFY(q.exec("SELECT COUNT(*) FROM songs WHERE song_id=10"));
+  QVERIFY(q.next());
+  QCOMPARE(q.value(0).toInt(), 1);
 }
 
 void TestDatabaseManager::

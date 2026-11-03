@@ -1,5 +1,6 @@
 #include "playlistdialogs.h"
 
+#include "audiofileformats.h"
 #include "playlist.h"
 #include <QApplication>
 #include <QDir>
@@ -12,13 +13,6 @@
 #include <vector>
 
 namespace {
-// Name filters for the audio files that Open and Add Folder pick up.
-const QStringList &audioFileNameFilters() {
-  static const QStringList filters = {"*.mp3", "*.flac", "*.m4a", "*.wav",
-                                      "*.ogg", "*.opus", "*.alac"};
-  return filters;
-}
-
 // Runs work with a window-modal progress dialog (no cancel) over parent. The
 // callback passed to work updates the dialog and processes events.
 void runWithProgressDialog(

@@ -126,7 +126,8 @@ The SQLite database every other class reads and writes through.
 
 * `DatabaseManager`
   * Owns SQLite connection, pragmas, and schema setup.
-  * Creates tables for songs, playlists, dynamic/computed attributes, and play stats.
+  * Creates tables for songs, playlists, dynamic/computed attributes, play
+    stats, and the monitored library (`library_folders`, `monitored_files`).
 
 ### Column and layout metadata
 
@@ -155,12 +156,21 @@ The in-memory song store and reading/writing audio file tags.
   * Parses/imports files, refreshes metadata, evaluates computed fields, and
     evaluates library search expressions.
   * Maintains identity-based play stats using normalized `title|artist|album`.
+  * `addTolibrary` stores the canonical file path
+    (`QFileInfo::canonicalFilePath`, or the cleaned absolute path for a
+    missing file), so one file never gets two rows.
   * `removeSongs(songPks)` deletes songs from `songs` (attributes and
     `playlist_items` cascade) and from memory, including registered queries.
     Identities and play stats are kept, so a re-added file gets its play count
     back under a new pk (`song_id` is `AUTOINCREMENT`, never reused).
   * Exposes a plain-data `Snapshot` used to transfer worker-loaded library
     state back to the main-thread instance.
+* `MonitoredLibrary` (backend, owned by `MainWindow`)
+  * Watched folders (`library_folders`) and the songs found under them
+    (`monitored_files`), kept in sync by scans (`LibraryScanner` on a worker
+    thread, applied on the main thread). Never deletes song rows; songs that
+    leave it are announced with `songsLeft`. See
+    [monitored-library.md](monitored-library.md).
 * `SongParser`
   * Parses file tags into built-in + dynamic fields and remaining raw tag fields.
   * Multi-value tag fields are displayed as comma-separated text (`", "`).
@@ -183,7 +193,8 @@ are the Qt frontend.
   * Owns playlist metadata behavior (`playlists` table): load, create/delete playlist rows, rename, persist/repair `tab_order`. Refuses to remove the last playlist.
   * `loadAll()` emits no signals; after it, `playlistCreated` / `playlistAboutToBeRemoved` / `playlistRemoved` / `playlistRenamed` report changes. `playlistAboutToBeRemoved` is sent while the `Playlist` still exists.
   * `notifySongChanged(songPk)` refreshes a song's rows in every playlist after non-playlist song writes (play stats, cloud sync, Song Properties).
-  * Removes from `SongLibrary` the songs that leave their last playlist: on each playlist's `songPksRemoved` (Remove from Playlist, Clear Playlist) and in `removePlaylist` (Remove Tab). Then emits `songsRemovedFromLibrary(songPks)`.
+  * `releaseSongs` is the only place that deletes songs: it removes from `SongLibrary` the songs that are in no playlist and not held by `MonitoredLibrary`. It runs on each playlist's `songPksRemoved` (Remove from Playlist, Clear Playlist), in `removePlaylist` (Remove Tab), and on `MonitoredLibrary::songsLeft`. Then emits `songsRemovedFromLibrary(songPks)`.
+  * Refreshes rows of songs the monitored library added or re-read (`songsEntered`, `songsUpdated`).
 * `PlaylistTabs` (frontend)
   * Builds tabs from a loaded `PlaylistCollection` and follows its signals; delegates create/remove/rename/reorder to it.
   * Creates one `PlaylistTableView` per tab and handles its row context menu and double-click.
@@ -491,10 +502,12 @@ is ready.
   snapshot to the app-owned `SongLibrary`, and calls back. The watcher for the
   worker is a child of `MainWindow`, so destroying the window during the load
   drops the result.
-* In the callback, `MainWindow` loads playlists
-  (`PlaylistCollection::loadAll()`), creates playlist tabs/models, re-enables
-  actions, restores the normal status-bar message (through
-  `NowPlayingPresenter::reloadExpressions()`), and starts cloud sync.
+* In the callback, `MainWindow` loads the monitored library
+  (`MonitoredLibrary::load()`) and playlists (`PlaylistCollection::loadAll()`),
+  creates playlist tabs/models, re-enables actions, restores the normal
+  status-bar message (through `NowPlayingPresenter::reloadExpressions()`),
+  starts the monitored library scan in the background
+  (`MonitoredLibrary::rescan()`), and starts cloud sync.
 * Custom (`attr:`) columns enter `ColumnRegistry` through
   `ColumnRegistry::loadDynamicColumns` in `loadLibrary`, but the display
   expressions are parsed earlier, when the `MainWindow` constructor creates
@@ -531,7 +544,7 @@ How files become songs, and how songs are refreshed after their tags change.
 * Computed values are namespaced in memory (`computed:<key>`) but persisted in
   DB with plain keys (`<key>`) in `song_computed_attributes`.
 * Properties save path:
-  * collect dirty/removed rows -> `SongParser::writeTags(...)` -> `SongLibrary::refreshSongFromFile(...)` -> emit song-updated signal -> `PlaylistCollection::notifySongChanged(...)` refreshes the song's rows.
+  * collect dirty/removed rows -> `SongParser::writeTags(...)` -> `SongLibrary::refreshSongFromFile(...)` -> emit song-updated signal -> `MonitoredLibrary::noteSongWritten(...)` stores the file's new stats (so the next scan does not re-parse it) and `PlaylistCollection::notifySongChanged(...)` refreshes the song's rows.
 * Two bulk user-triggered flows are intentionally blocking with progress UI:
   * `refreshMetadataWithProgress(...)` (playlist-wide metadata refresh
     via `Playlist::refreshMetadataFromFiles(...)`)
@@ -607,8 +620,8 @@ What is saved per playlist, and which class writes each table.
   `tab_order`); `Playlist` owns `playlist_items` and `playlists.last_played`.
 * Playlist metadata writes (`playlists` row create/update/delete) stay synchronous.
 * Removing a row from a playlist also deletes its `playlist_items` row; a
-  song left in no playlist is also deleted from `songs` (see
-  `PlaylistCollection`). Sort order is not persisted.
+  song left in no playlist and not in the monitored library is also deleted
+  from `songs` (see `PlaylistCollection`). Sort order is not persisted.
 * New `playlist_items` rows get a position above every stored one, so
   positions may have gaps but never collide.
 
@@ -621,6 +634,9 @@ What is saved per playlist, and which class writes each table.
   the main thread.
 * Cloud sync worker tasks are serialized through the worker thread event queue.
   See [cloud-sync.md](cloud-sync.md) for the sync design.
+* Monitored library scans walk and parse files on a `QtConcurrent` worker
+  with copies of their input; `MonitoredLibrary` applies the result on the
+  main thread in batches, one transaction each. One scan runs at a time.
 * GStreamer GLib loop uses a dedicated `std::thread` on macOS/Windows.
 * Playlist DB writes, including the bulk `playlist_items` delete in
   `Playlist::clear()`, are synchronous, so rows appended right after a clear

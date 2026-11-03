@@ -1,6 +1,7 @@
 #include "songdialogs.h"
 
 #include "filemanagerutils.h"
+#include "monitoredlibrary.h"
 #include "playlistcollection.h"
 #include "songpropertiesdialog.h"
 #include <QFileInfo>
@@ -28,6 +29,11 @@ void openSongProperties(QWidget *parent, int songPk, SongLibrary &library,
                                remainingFields, registry, parent);
   dialog->setAttribute(Qt::WA_DeleteOnClose);
   dialog->setModal(true);
+  // Store the file's new stats first, so the scan the write triggers finds
+  // nothing to re-parse.
+  QObject::connect(dialog, &SongPropertiesDialog::songUpdated,
+                   &collection.monitoredLibrary(),
+                   &MonitoredLibrary::noteSongWritten);
   QObject::connect(dialog, &SongPropertiesDialog::songUpdated, &collection,
                    &PlaylistCollection::notifySongChanged);
   dialog->show();

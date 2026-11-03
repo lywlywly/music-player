@@ -3,6 +3,8 @@
 #include "songparser.h"
 #include "utils.h"
 #include <QDebug>
+#include <QDir>
+#include <QFileInfo>
 #include <QSet>
 #include <QSqlError>
 #include <QSqlQuery>
@@ -176,11 +178,23 @@ void evaluateComputedFieldsInSong(MSong &song, const ColumnRegistry &registry) {
 }
 } // namespace
 
+namespace {
+std::string canonicalSongPath(const std::string &path) {
+  const QFileInfo info(QString::fromStdString(path));
+  QString canonical = info.canonicalFilePath();
+  if (canonical.isEmpty()) {
+    canonical = QDir::cleanPath(info.absoluteFilePath());
+  }
+  return canonical.toStdString();
+}
+} // namespace
+
 int SongLibrary::addTolibrary(MSong &&s) {
-  const std::string path = s.at("filepath").text;
-  if (path.empty()) {
+  if (s.at("filepath").text.empty()) {
     qFatal("addTolibrary: filepath is empty");
   }
+  const std::string path = canonicalSongPath(s.at("filepath").text);
+  s.insert_or_assign("filepath", FieldValue(path, "filepath"));
 
   auto pathIt = paths.find(path);
   if (pathIt != paths.end()) {
@@ -907,11 +921,15 @@ std::optional<MSong> SongLibrary::loadPreparedSongFromFile(
   if (!parsed) {
     return std::nullopt;
   }
-  evaluateComputedFieldsInSong(*parsed, columnRegistry_);
-  parsed->insert_or_assign(
-      "song_identity_key",
-      FieldValue(songIdentityKeyFromSong(*parsed), "song_identity_key"));
+  prepareParsedSong(*parsed);
   return parsed;
+}
+
+void SongLibrary::prepareParsedSong(MSong &song) const {
+  evaluateComputedFieldsInSong(song, columnRegistry_);
+  song.insert_or_assign(
+      "song_identity_key",
+      FieldValue(songIdentityKeyFromSong(song), "song_identity_key"));
 }
 
 const MSong &SongLibrary::refreshSongFromFile(

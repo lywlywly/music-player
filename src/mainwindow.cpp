@@ -83,11 +83,13 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
       databaseManager_(columnRegistry_, std::move(databaseName),
                        std::move(connectionName)),
       songLibrary(columnRegistry_, databaseManager_),
+      monitoredLibrary_(songLibrary, columnRegistry_, databaseManager_),
       cloudPlayStatsSyncCoordinator_(songLibrary, this) {
   prewarmSelectedPlaybackBackend();
   Q_INIT_RESOURCE(resources);
   ui->setupUi(this);
-  playlists_ = new PlaylistCollection(songLibrary, databaseManager_, this);
+  playlists_ = new PlaylistCollection(songLibrary, databaseManager_,
+                                      monitoredLibrary_, this);
   playback_ = new PlaybackController(songLibrary, *playlists_, this);
   coverArt_ = new CoverArtPresenter(ui->label, this);
   lyrics_ = new LyricsPresenter(ui->lyricsPanel, this);
@@ -178,6 +180,7 @@ void MainWindow::finishSetUpPlaylist() {
   // the custom columns, so their custom fields were unresolved.
   nowPlaying_->reloadExpressions();
   columnLayoutManager_.refreshFromRegistry();
+  monitoredLibrary_.load();
   playlists_->loadAll();
   playlistTabs->init(&songLibrary, &playback_->queue(), &playback_->manager(),
                      playbackOrderMenuActionGroup, &columnRegistry_,
@@ -196,6 +199,8 @@ void MainWindow::finishSetUpPlaylist() {
   playlistReady_ = true;
   playback_->setReady(true);
   setPlaylistDependentActionsEnabled(true);
+  // Playback is available before the scan; it runs in the background.
+  monitoredLibrary_.rescan();
   cloudPlayStatsSyncCoordinator_.startSync();
 }
 

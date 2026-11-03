@@ -29,6 +29,7 @@ private:
   bool ensureDynamicAttributesSchema(QSqlQuery &q);
   bool ensureComputedAttributesSchema(QSqlQuery &q);
   bool ensurePlayStatsSchema(QSqlQuery &q);
+  bool ensureMonitoredLibrarySchema(QSqlQuery &q);
 
   const ColumnRegistry &columnRegistry_;
   QSqlDatabase db_;

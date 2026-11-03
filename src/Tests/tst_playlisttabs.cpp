@@ -23,6 +23,7 @@
 #include "../columnregistry.h"
 #include "../databasemanager.h"
 #include "../globalcolumnlayoutmanager.h"
+#include "../monitoredlibrary.h"
 #include "../playbackmanager.h"
 #include "../playbackqueue.h"
 #include "../playlistcollection.h"
@@ -162,6 +163,7 @@ private:
   PlaybackQueue *queue_ = nullptr;
   PlaybackManager *manager_ = nullptr;
   QActionGroup *playbackOrderGroup_ = nullptr;
+  MonitoredLibrary *monitored_ = nullptr;
   PlaylistCollection *collection_ = nullptr;
   PlaylistTabs *tabs_ = nullptr;
   QString connectionName_;
@@ -206,7 +208,10 @@ void TestPlaylistTabs::init() {
 void TestPlaylistTabs::recreateTabs() {
   delete tabs_;
   delete collection_;
-  collection_ = new PlaylistCollection(*library_, *databaseManager_);
+  delete monitored_;
+  monitored_ = new MonitoredLibrary(*library_, *registry_, *databaseManager_);
+  collection_ =
+      new PlaylistCollection(*library_, *databaseManager_, *monitored_);
   collection_->loadAll();
   tabs_ = new PlaylistTabs();
   tabs_->init(library_, queue_, manager_, playbackOrderGroup_, registry_,
@@ -218,6 +223,8 @@ void TestPlaylistTabs::cleanup() {
   tabs_ = nullptr;
   delete collection_;
   collection_ = nullptr;
+  delete monitored_;
+  monitored_ = nullptr;
   delete playbackOrderGroup_;
   playbackOrderGroup_ = nullptr;
   delete manager_;
