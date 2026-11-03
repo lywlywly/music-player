@@ -62,6 +62,8 @@ public:
   void navigateIndex(int row, Playlist *pl);
   // PlaylistTableView::firstSelectedRow of the current tab, or -1 without one.
   int firstSelectedRow() const;
+  // Opens Song Properties for row of the current playlist.
+  void openPropertiesForRow(int row);
 
 signals:
   void doubleClicked(const QModelIndex &index);
@@ -92,7 +94,6 @@ private:
   Policy selectedPlaybackPolicy() const;
   // Whether row is a row of the current playlist.
   bool isSongRow(int row) const;
-  void openPropertiesForRow(int row);
   bool eventFilter(QObject *obj, QEvent *event) override;
   Ui::PlaylistTabs *ui;
   PlaylistTableView *currentTableView;

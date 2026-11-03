@@ -1,8 +1,9 @@
 # Plan: Monitored Library, Autoplaylists and Playlist Search
 
 Status: phases 1 (monitored library, without the watcher), 2 (autoplaylist
-backend) and 3 (UI) are implemented; phases 4-6 are planned. The efsw
-dependency is set up (`third_party/efsw`, 1.7.3) but not used yet.
+backend), 3 (UI) and 4 (Playlist Search) are implemented; phases 5-6 are
+planned. The efsw dependency is set up (`third_party/efsw`, 1.7.3) but not
+used yet.
 
 ## Summary
 
@@ -444,9 +445,11 @@ returns no pks, `addSong` / `addSongByPk` return false, `removeSongs` and
 
 * `PlaylistSearchDialog`: non-modal, one at a time. A query box, a match
   count, a mode indicator ("Text" / "Expression"), and a results table with
-  the playlist's columns (`GlobalColumnLayoutManager`).
+  the playlist's song columns (`LibrarySearchResultsModel` over
+  `GlobalColumnLayoutManager`, so no Status column). An empty query shows no
+  results.
 * **Target**: the playlist shown in the UI (`PlaylistTabs::currentPlaylist()`),
-  not the playing one. The title shows its name.
+  not the playing one. The title ("Search Playlist: <name>") shows its name.
   * Switching tabs re-targets the panel and re-runs the query. `PlaylistTabs`
     gets a `currentPlaylistChanged(Playlist *)` signal for this.
   * Starting playback in another playlist does not.
@@ -454,13 +457,13 @@ returns no pks, `addSong` / `addSongByPk` return false, `removeSongs` and
     (through the same signal).
 * **Mode**, decided on every edit (results of the current parser, checked):
   * **Expression** if the text parses and its static type is boolean.
-    Examples: `year >= 2000 AND genre HAS jazz`, `true`, a boolean custom
+    Examples: `genre HAS jazz AND title != x`, `true`, a boolean custom
     field.
   * **Plain text** otherwise, and always when the whole text is in double
-    quotes (the quotes are removed). The text is split on whitespace, and a
-    row matches when every word is a case-insensitive substring of the
-    displayed value (`FieldValue::display()`) of at least one visible
-    column. Examples: `davis blue` and `title` (both parse as text, not
+    quotes with none inside (the quotes are removed). The text is split on
+    whitespace, and a row matches when every word is a case-insensitive
+    substring of the displayed value (`FieldValue::display()`) of at least
+    one visible column. Examples: `davis blue` and `title` (both parse as text, not
     boolean), `simon and garfunkel` (fails to parse: "AND operands must be
     boolean"), `ac/dc`.
   * **Error**: if the text fails to parse and contains an expression symbol
@@ -473,19 +476,22 @@ returns no pks, `addSong` / `addSongByPk` return false, `removeSongs` and
 * **Updates**: results update as you type (debounced about 150 ms), and
   whenever the target playlist inserts, removes, resets, reorders or changes
   rows (debounced), so an autoplaylist changing underneath stays correct.
+  The selected result stays selected while its song still matches.
 * **Actions on a result row** (each looks up the row by pk at action time,
-  because the result list can lag the playlist by the debounce):
+  because the result list can lag the playlist by the debounce; a song no
+  longer in the playlist does nothing):
   * Double-click or Enter: play the row (`PlaybackController::playRow`, which
     plays from the shown playlist, the same one) and select it in the
-    playlist.
-  * "Show in playlist": select and scroll to the row
+    playlist. Enter is handled by the dialog, since item views don't emit
+    `activated` for it on macOS.
+  * "Show in Playlist" button: select and scroll to the row
     (`PlaylistTabs::navigateIndex`) without playing.
-  * "Add to Playback Queue", "Properties": as in the playlist's row context
-    menu.
+  * "Add to Playback Queue", "Properties" buttons: as in the playlist's row
+    context menu.
 * **Backend split**: `matchPlaylistRows(const Playlist &, const SongMatcher &)`
-  returns the matching rows. `SongMatcher` is built from the query text, the
-  `SongLibrary` (for parsing) and the visible field ids (plain strings), so
-  it has no UI types and is tested without a view.
+  returns the pks of the matching rows, in row order. `SongMatcher` is built
+  from the query text, the `SongLibrary` (for parsing) and the visible field
+  ids (plain strings), so it has no UI types and is tested without a view.
 
 ## Schema
 

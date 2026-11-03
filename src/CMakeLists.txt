@@ -192,6 +192,10 @@ set(PROJECT_SOURCES
   playlisttabs.ui
   playlisttabs.h
   playlisttabs.cpp
+  playlistsearch.h
+  playlistsearch.cpp
+  playlistsearchdialog.h
+  playlistsearchdialog.cpp
   qfilesystemmonitor.h
   qfilesystemmonitor.cpp
   qtaudioplayer.h

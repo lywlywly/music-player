@@ -15,9 +15,11 @@
 #include "songlibrary.h"
 #include "systemmediapresenter.h"
 #include <QMainWindow>
+#include <QPointer>
 #include <QString>
 
 class NowPlayingPresenter;
+class PlaylistSearchDialog;
 class SettingsDialog;
 
 QT_BEGIN_NAMESPACE
@@ -68,6 +70,9 @@ private:
   void initCloudSync();
   void setUpMenuBar();
   void openLibrarySearchDialog();
+  // Shows the Playlist Search dialog, creating it if none is open. It
+  // follows the playlist shown.
+  void openPlaylistSearchDialog();
   void triggerManualCloudRebase();
   void refreshManualCloudRebaseActionEnabled();
   Ui::MainWindow *ui;
@@ -88,5 +93,6 @@ private:
   QActionGroup *playbackOrderMenuActionGroup;
   CloudPlayStatsSyncCoordinator cloudPlayStatsSyncCoordinator_;
   bool playlistReady_ = false;
+  QPointer<PlaylistSearchDialog> playlistSearchDialog_;
 };
 #endif // MAINWINDOW_H

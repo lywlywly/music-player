@@ -294,6 +294,7 @@
     <property name="title">
      <string>Edit</string>
     </property>
+    <addaction name="actionSearch_playlist"/>
    </widget>
    <widget class="QMenu" name="menuView">
     <property name="title">
@@ -389,6 +390,11 @@
   <action name="actionSearch">
    <property name="text">
     <string>Search</string>
+   </property>
+  </action>
+  <action name="actionSearch_playlist">
+   <property name="text">
+    <string>Search Playlist...</string>
    </property>
   </action>
   <action name="actionLoad_playlist">

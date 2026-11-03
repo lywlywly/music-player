@@ -31,6 +31,10 @@ for the rest of the app.
   * Parse the query with `parseSongFilter` (conditions only), evaluate it over
     the monitored library (`SongLibrary::search(expr, candidatePks)`), then
     present the matching songs in `filepath` order.
+* `SongMatcher` (Playlist Search)
+  * Uses the query as a condition when `parseSongFilter` accepts it, and as
+    plain words otherwise. See "Playlist Search" in
+    [monitored-library.md](monitored-library.md).
 
 ## Parsing
 

@@ -35,6 +35,7 @@
 #include "../monitoredlibrary.h"
 #include "../playbackbackendmanager.h"
 #include "../playlistcollection.h"
+#include "../playlistsearchdialog.h"
 #include "../playlisttablemodel.h"
 #include "../playlisttabs.h"
 #include "../settingsdialog.h"
@@ -136,6 +137,7 @@ private slots:
   void librarySearchDialog_canCreateNewPlaylistTabFromResults();
   void librarySearchDialog_savesAutoPlaylist();
   void newAutoPlaylistAction_opensDialog();
+  void playlistSearch_followsShownPlaylistAndPlaysResults();
   void libraryScanStatus_showsProgressThenOfflineFolders();
   void countedPlay_isPushedToCloud();
   void cloudSync_startupRebase_runsOnWindowStartup();
@@ -329,6 +331,8 @@ void TestMainWindow::
   QAction *playAction = window_->findChild<QAction *>("actionPlay");
   QAction *newAutoPlaylistAction =
       window_->findChild<QAction *>("actionNew_autoplaylist");
+  QAction *searchPlaylistAction =
+      window_->findChild<QAction *>("actionSearch_playlist");
   QAction *manualRebase =
       window_->findChild<QAction *>("actionManual_cloud_rebase");
   QStatusBar *statusBar = window_->findChild<QStatusBar *>("statusbar");
@@ -336,6 +340,7 @@ void TestMainWindow::
   QVERIFY(openAction != nullptr);
   QVERIFY(playAction != nullptr);
   QVERIFY(newAutoPlaylistAction != nullptr);
+  QVERIFY(searchPlaylistAction != nullptr);
   QVERIFY(manualRebase != nullptr);
   QVERIFY(statusBar != nullptr);
   QVERIFY(media != nullptr);
@@ -343,6 +348,7 @@ void TestMainWindow::
   QVERIFY(!openAction->isEnabled());
   QVERIFY(!playAction->isEnabled());
   QVERIFY(!newAutoPlaylistAction->isEnabled());
+  QVERIFY(!searchPlaylistAction->isEnabled());
   QVERIFY(!manualRebase->isEnabled());
   QCOMPARE(statusBar->currentMessage(), QStringLiteral("Loading library..."));
 
@@ -355,6 +361,7 @@ void TestMainWindow::
   QTRY_VERIFY(openAction->isEnabled());
   QTRY_VERIFY(playAction->isEnabled());
   QVERIFY(newAutoPlaylistAction->isEnabled());
+  QVERIFY(searchPlaylistAction->isEnabled());
   QCOMPARE(statusBar->currentMessage(), QString{});
   qunsetenv("MYPLAYER_TEST_LIBRARY_LOAD_DELAY_MS");
 }
@@ -1071,6 +1078,44 @@ void TestMainWindow::newAutoPlaylistAction_opensDialog() {
   QVERIFY(action != nullptr);
   action->trigger();
   QTRY_VERIFY(window_->findChild<AutoPlaylistDialog *>() != nullptr);
+}
+
+void TestMainWindow::playlistSearch_followsShownPlaylistAndPlaysResults() {
+  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  QAction *action = window_->findChild<QAction *>("actionSearch_playlist");
+  QVERIFY(tabs != nullptr);
+  QVERIFY(action != nullptr);
+  QCOMPARE(action->shortcut(), QKeySequence(QKeySequence::Find));
+  Playlist *playlist = tabs->currentPlaylist();
+  for (const QString &title : {"Song1", "Song2", "Other"}) {
+    const QString wav = workDir_->filePath(title + ".wav");
+    QVERIFY(writeSilentWav(wav));
+    QVERIFY(playlist->addSong(makeSong(title, "Artist", wav)));
+  }
+  const int statusCol = statusColumn(playlist);
+  QVERIFY(statusCol >= 0);
+
+  action->trigger();
+  action->trigger();
+  QCOMPARE(window_->findChildren<PlaylistSearchDialog *>().size(), 1);
+  auto *dialog = window_->findChild<PlaylistSearchDialog *>();
+  auto *table =
+      dialog->findChild<QTableView *>("playlist_search_results_table");
+  QTest::keyClicks(dialog->findChild<QLineEdit *>("playlist_search_query_edit"),
+                   "song");
+  QTRY_COMPARE(table->model()->rowCount(), 2);
+
+  table->selectRow(1);
+  QTest::keyClick(table, Qt::Key_Return);
+  QTRY_COMPARE(statusAt(playlist, 1, statusCol), QString::fromUtf8("\u25B6"));
+  QCOMPARE(tabs->firstSelectedRow(), 1);
+  table->selectRow(0);
+  dialog->findChild<QPushButton *>("playlist_search_queue_button")->click();
+  QCOMPARE(statusAt(playlist, 0, statusCol), QString("1"));
+
+  tabs->createNewPlaylistTabFromSongIds({playlist->getPkByIndex(2)});
+  QCOMPARE(dialog->windowTitle(), QString("Search Playlist: New Playlist"));
+  QTRY_COMPARE(table->model()->rowCount(), 0);
 }
 
 void TestMainWindow::libraryScanStatus_showsProgressThenOfflineFolders() {

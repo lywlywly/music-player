@@ -37,7 +37,7 @@ The backend must not depend on how (or whether) it is displayed.
 
 * Backend: `SongLibrary`, `DatabaseManager`, `Playlist`, `PlaylistCollection`,
   `PlaybackQueue`, `PlaybackManager`, playback policies,
-  `PlayCompletionTracker`, `PlaybackController`.
+  `PlayCompletionTracker`, `PlaybackController`, `SongMatcher`.
 * Frontend (Qt view adapters and widgets): `PlaylistTableModel`,
   `PlaylistTableView`, `PlaylistTabs`, `LibrarySearchResultsModel`, dialogs,
   `MainWindow`.
@@ -125,6 +125,12 @@ The top-level window and what it owns.
     `PlaylistTabs::newAutoPlaylist`.
   * A permanent status bar label shows `MonitoredLibrary` scan progress, then
     the number of offline watched folders, if any.
+  * Edit > Search Playlist (`QKeySequence::Find`) shows the one
+    `PlaylistSearchDialog`, kept on the shown playlist through
+    `currentPlaylistChanged`. Its row requests go to `PlaybackController::playRow`,
+    `PlaylistTabs::navigateIndex`, `PlaybackManager::queueEnd` and
+    `PlaylistTabs::openPropertiesForRow`. The destructor deletes it first, as it
+    uses `columnLayoutManager_`, a member destroyed before the window's children.
 
 ### Persistence and schema
 
@@ -224,6 +230,17 @@ are the Qt frontend.
   * A song appears at most once per playlist. Adding a song already present is a silent no-op (`addSong` / `addSongByPk` return `false`; `addFiles` skips it and returns only the appended pks). `playlist_items` enforces this with `UNIQUE (playlist_id, song_id)`.
   * Ingests/refreshes songs through `SongLibrary`; owns `playlist_items` and `playlists.last_played` persistence. `playlistId <= 0` is non-persistent (used by tests).
   * Sends before/after signals for insert, remove and reset, and after-only signals for reorder and song-data changes. `addFiles` parses and ingests all paths first, then sends one insert pair for the batch. `removeSongs` sends one remove pair per row; after it and `clear`, `songPksRemoved(songPks)` reports the songs that left. Does not know playback status.
+* `SongMatcher`, `matchPlaylistRows` (backend, playlistsearch.h)
+  * A Playlist Search query: a `parseSongFilter` condition, else plain words
+    matched case-insensitively against the displayed values of the given
+    fields, or an error for a broken expression. `matchPlaylistRows` returns
+    the pks of a playlist's matching rows in row order.
+* `PlaylistSearchDialog` (frontend)
+  * Non-modal search over one playlist with `SongMatcher` and the visible
+    columns, results in a `LibrarySearchResultsModel`. Re-runs (debounced) on
+    typing, row changes and column layout changes. Double-click or Enter,
+    Show in Playlist, Add to Playback Queue and Properties emit the result's
+    current row, looked up by pk when they run.
 * `PlaylistTableModel` (frontend)
   * `QAbstractTableModel` adapter for one `Playlist`: columns, header, cell text, sortable-column check (`sortByColumnId`).
   * Renders the status column from `PlaybackQueue::statusOf` and refreshes only the status cell on `PlaybackQueue::statusChanged` for its own playlist.

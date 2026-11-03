@@ -9,6 +9,7 @@
 #include "nowplayingpresenter.h"
 #include "playbackbuttonstyle.h"
 #include "playlistdialogs.h"
+#include "playlistsearchdialog.h"
 #include "settingsdialog.h"
 #include "systemmediainterfacefactory.h"
 #include <QActionGroup>
@@ -165,6 +166,9 @@ void MainWindow::setUpMenuBar() {
 
   connect(ui->actionSearch, &QAction::triggered, this,
           &MainWindow::openLibrarySearchDialog);
+  ui->actionSearch_playlist->setShortcut(QKeySequence::Find);
+  connect(ui->actionSearch_playlist, &QAction::triggered, this,
+          &MainWindow::openPlaylistSearchDialog);
   connect(ui->actionManual_cloud_rebase, &QAction::triggered, this,
           &MainWindow::triggerManualCloudRebase);
 }
@@ -214,6 +218,7 @@ void MainWindow::setPlaylistDependentActionsEnabled(bool enabled) {
   updatePlaylistWriteActionsEnabled();
   ui->actionNew_autoplaylist->setEnabled(enabled);
   ui->actionSearch->setEnabled(enabled);
+  ui->actionSearch_playlist->setEnabled(enabled);
   ui->actionPlay->setEnabled(enabled);
   ui->actionPause->setEnabled(enabled);
   ui->actionStop->setEnabled(enabled);
@@ -463,7 +468,40 @@ void MainWindow::openLibrarySearchDialog() {
   dialog->show();
 }
 
-MainWindow::~MainWindow() { delete ui; }
+void MainWindow::openPlaylistSearchDialog() {
+  if (playlistSearchDialog_) {
+    playlistSearchDialog_->raise();
+    playlistSearchDialog_->activateWindow();
+    return;
+  }
+  auto *dialog = new PlaylistSearchDialog(songLibrary, *playlists_,
+                                          columnLayoutManager_, this);
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  dialog->setPlaylist(playlistTabs->currentPlaylist());
+  connect(playlistTabs, &PlaylistTabs::currentPlaylistChanged, dialog,
+          &PlaylistSearchDialog::setPlaylist);
+  // The rows are rows of the shown playlist, which the dialog searches.
+  connect(dialog, &PlaylistSearchDialog::playRequested, this, [this](int row) {
+    playback_->playRow(row);
+    playlistTabs->navigateIndex(row, playlistTabs->currentPlaylist());
+  });
+  connect(dialog, &PlaylistSearchDialog::showRequested, this, [this](int row) {
+    playlistTabs->navigateIndex(row, playlistTabs->currentPlaylist());
+  });
+  connect(dialog, &PlaylistSearchDialog::queueRequested, this,
+          [this](int row) { playback_->manager().queueEnd(row); });
+  connect(dialog, &PlaylistSearchDialog::propertiesRequested, playlistTabs,
+          &PlaylistTabs::openPropertiesForRow);
+  playlistSearchDialog_ = dialog;
+  dialog->show();
+}
+
+MainWindow::~MainWindow() {
+  // It uses columnLayoutManager_, which is destroyed before the window's
+  // children.
+  delete playlistSearchDialog_;
+  delete ui;
+}
 
 void MainWindow::triggerManualCloudRebase() {
   if (!playlistReady_) {
