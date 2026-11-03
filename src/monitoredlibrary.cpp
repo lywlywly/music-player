@@ -2,6 +2,7 @@
 
 #include "columnregistry.h"
 #include "databasemanager.h"
+#include "ifilesystemmonitor.h"
 #include "songlibrary.h"
 #include <QDebug>
 #include <QFileInfo>
@@ -25,9 +26,26 @@ void execOrFatal(QSqlQuery &q, const char *context) {
 MonitoredLibrary::MonitoredLibrary(SongLibrary &library,
                                    const ColumnRegistry &registry,
                                    DatabaseManager &databaseManager,
-                                   ScanParseFn parse, QObject *parent)
+                                   ScanParseFn parse,
+                                   IFileSystemMonitor *monitor, QObject *parent)
     : QObject(parent), library_{library}, registry_{registry},
-      databaseManager_{databaseManager}, parse_{std::move(parse)} {}
+      databaseManager_{databaseManager}, parse_{std::move(parse)},
+      monitor_{monitor}, watchDebounceTimer_{new QTimer(this)},
+      offlinePollTimer_{new QTimer(this)} {
+  watchDebounceTimer_->setSingleShot(true);
+  watchDebounceTimer_->setInterval(kWatchDebounceMs);
+  connect(watchDebounceTimer_, &QTimer::timeout, this,
+          [this]() { scanPaths(std::exchange(changedPaths_, {})); });
+  offlinePollTimer_->setInterval(kOfflinePollMs);
+  connect(offlinePollTimer_, &QTimer::timeout, this,
+          &MonitoredLibrary::checkOfflineFolders);
+  if (monitor_) {
+    connect(monitor_, &IFileSystemMonitor::pathsChanged, this,
+            &MonitoredLibrary::onPathsChanged);
+    connect(monitor_, &IFileSystemMonitor::folderNeedsRescan, this,
+            &MonitoredLibrary::onFolderNeedsRescan);
+  }
+}
 
 MonitoredLibrary::~MonitoredLibrary() = default;
 
@@ -65,6 +83,10 @@ void MonitoredLibrary::load() {
                                             .size = q.value(3).toLongLong()}};
     pkByPath_.insert(path, pk);
   }
+
+  for (Folder &folder : folders_) {
+    updateWatch(folder);
+  }
 }
 
 MonitoredLibrary::AddFolderResult
@@ -99,7 +121,9 @@ MonitoredLibrary::addFolder(const QString &path) {
   folders_.push_back(Folder{.id = folderId, .path = canonical});
   std::sort(folders_.begin(), folders_.end(),
             [](const Folder &a, const Folder &b) { return a.path < b.path; });
+  updateWatch(*findFolder(folderId));
   requestFull(folderId);
+  startNextScan();
   return {.folderId = folderId};
 }
 
@@ -120,6 +144,10 @@ bool MonitoredLibrary::removeFolder(int folderId) {
   const QString root = folderIt->path;
   folders_.erase(folderIt);
   pending_.erase(folderId);
+  if (watched_.erase(folderId) > 0) {
+    monitor_->removePath(root);
+  }
+  updateOfflinePoll();
 
   std::vector<int> left;
   for (auto it = entries_.begin(); it != entries_.end();) {
@@ -148,11 +176,13 @@ void MonitoredLibrary::rescan() {
   for (const Folder &folder : folders_) {
     requestFull(folder.id);
   }
+  startNextScan();
 }
 
 void MonitoredLibrary::removeMissingSongs(int folderId) {
   if (findFolder(folderId)) {
     requestFull(folderId, true);
+    startNextScan();
   }
 }
 
@@ -165,6 +195,7 @@ void MonitoredLibrary::scanPaths(const QStringList &paths) {
       }
     }
   }
+  startNextScan();
 }
 
 bool MonitoredLibrary::isScanning() const {
@@ -205,13 +236,30 @@ void MonitoredLibrary::noteSongWritten(int songPk) {
   execOrFatal(q, "MonitoredLibrary::noteSongWritten");
 }
 
+void MonitoredLibrary::checkOfflineFolders() {
+  std::vector<int> available;
+  for (const Folder &folder : folders_) {
+    if (!folder.online &&
+        isFolderRootAvailable(folder.path, hasFiles(folder.id))) {
+      available.push_back(folder.id);
+    }
+  }
+  // Looked up again: folderAvailabilityChanged handlers may change folders_.
+  for (const int folderId : available) {
+    if (Folder *folder = findFolder(folderId); folder && !folder->online) {
+      setOnline(*folder, true);
+      requestFull(folderId);
+    }
+  }
+  startNextScan();
+}
+
 void MonitoredLibrary::requestFull(int folderId, bool skipAvailabilityCheck) {
   Request &request = pending_[folderId];
   request.full = true;
   request.paths.clear();
   request.skipAvailabilityCheck =
       request.skipAvailabilityCheck || skipAvailabilityCheck;
-  startNextScan();
 }
 
 void MonitoredLibrary::requestPath(int folderId, const QString &path) {
@@ -219,7 +267,6 @@ void MonitoredLibrary::requestPath(int folderId, const QString &path) {
   if (!request.full && !request.paths.contains(path)) {
     request.paths.push_back(path);
   }
-  startNextScan();
 }
 
 void MonitoredLibrary::startNextScan() {
@@ -305,8 +352,7 @@ void MonitoredLibrary::onScanFinished() {
        result.availability) {
     Folder *folder = findFolder(availability.folderId);
     if (folder && folder->online != availability.online) {
-      folder->online = availability.online;
-      emit folderAvailabilityChanged(folder->id, folder->online);
+      setOnline(*folder, availability.online);
     }
   }
   for (const QString &path : result.clearedFailed) {
@@ -435,7 +481,7 @@ void MonitoredLibrary::applyNextBatch() {
   if (!left.empty()) {
     emit songsLeft(left);
   }
-  // Queued only: the scan starts after this one finishes.
+  // The scan starts after this one finishes (finishApply).
   for (const auto &[folderId, path] : stale) {
     requestPath(folderId, path);
   }
@@ -452,6 +498,71 @@ void MonitoredLibrary::finishApply() {
   applyIndex_ = 0;
   emit scanFinished();
   startNextScan();
+}
+
+void MonitoredLibrary::onPathsChanged(const QStringList &paths) {
+  for (const QString &path : paths) {
+    if (!changedPaths_.contains(path)) {
+      changedPaths_.push_back(path);
+    }
+  }
+  watchDebounceTimer_->start();
+}
+
+void MonitoredLibrary::onFolderNeedsRescan(const QString &path) {
+  for (const Folder &folder : folders_) {
+    if (isSameOrUnderPath(path, folder.path)) {
+      requestFull(folder.id);
+      startNextScan();
+      return;
+    }
+  }
+}
+
+void MonitoredLibrary::setOnline(Folder &folder, bool online) {
+  folder.online = online;
+  updateWatch(folder);
+  updateOfflinePoll();
+  emit folderAvailabilityChanged(folder.id, online);
+}
+
+void MonitoredLibrary::updateWatch(Folder &folder) {
+  if (!monitor_) {
+    return;
+  }
+  const bool watched = watched_.contains(folder.id);
+  if (folder.online && !watched) {
+    if (monitor_->addPath(folder.path)) {
+      watched_.insert(folder.id);
+      folder.liveUpdatesUnavailable = false;
+    } else {
+      // A missing root is not reported: the next scan marks it offline.
+      folder.liveUpdatesUnavailable = QFileInfo(folder.path).isDir();
+    }
+  } else if (!folder.online) {
+    if (watched) {
+      monitor_->removePath(folder.path);
+      watched_.erase(folder.id);
+    }
+    folder.liveUpdatesUnavailable = false;
+  }
+}
+
+void MonitoredLibrary::updateOfflinePoll() {
+  const bool anyOffline =
+      std::any_of(folders_.begin(), folders_.end(),
+                  [](const Folder &folder) { return !folder.online; });
+  if (!anyOffline) {
+    offlinePollTimer_->stop();
+  } else if (!offlinePollTimer_->isActive()) {
+    offlinePollTimer_->start();
+  }
+}
+
+bool MonitoredLibrary::hasFiles(int folderId) const {
+  return std::any_of(entries_.begin(), entries_.end(), [&](const auto &item) {
+    return item.second.folderId == folderId;
+  });
 }
 
 const MonitoredLibrary::Folder *

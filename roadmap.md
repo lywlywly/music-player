@@ -20,7 +20,10 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
 - ✅ Playlist management
   - ✅ Persistent playlist identity (`playlist_id`) and tab order (`tab_order`)
   - ✅ Rename/remove/reorder playlist tabs with DB persistence
-  - ✅ Remove songs from a playlist; songs left in no playlist leave the library
+  - ✅ Remove songs from a playlist; songs left in no playlist and not in the
+    monitored library leave the library
+  - ✅ Autoplaylists (expression over the monitored library, live updates)
+  - ✅ Playlist Search (plain text or expression over the shown playlist)
   - ✅ Last opened playlist restored on startup
 - ✅ Song Properties dialog
   - ✅ View parsed/computed fields and remaining raw tag fields
@@ -39,7 +42,11 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
   - ✅ macOS (`MediaPlayer`)
   - ✅ Linux (`MPRIS`)
   - ✅ Windows (`WinRT SMTC`)
-- ⬜ Media library folder monitoring
+- ✅ Media library folder monitoring
+  - ✅ Watched folders with scans (mtime + size) at startup and on demand
+  - ✅ Live updates through efsw, debounced into path scans
+  - ✅ Offline folders (unmounted drives) release nothing and are polled
+  - See `docs/monitored-library.md`
 - ⬜ CLI tool and headless mode
 
 ## Architecture

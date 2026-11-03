@@ -8,9 +8,10 @@ class QLabel;
 class QListWidget;
 class QPushButton;
 
-// The Settings > Library page: the monitored library's watched folders, with
-// Add…, Remove, Rescan now, and Remove missing songs for a folder that is
-// offline because its root is empty. Actions apply at once, not on the
+// The Settings > Library page: the monitored library's watched folders, marked
+// Offline or Live updates unavailable, with Add…, Remove, Rescan now, and
+// Remove missing songs for a folder that is offline because its root is
+// empty. Actions apply at once, not on the
 // dialog's OK. Shows scan progress.
 class LibraryFoldersPage : public QWidget {
   Q_OBJECT

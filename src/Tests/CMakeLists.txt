@@ -16,7 +16,6 @@ set(TEST_NAMES
     basics
     parser
     lyrics
-    # checksum    # temporarily disabled
     playbackmanager
     playbackcontroller
     songlibrary
@@ -46,11 +45,8 @@ set(TEST_NAMES
     autoplaylist
     playlistsearch
     playlistsearchdialog_ui
+    efswfilesystemmonitor
 )
-
-if(NOT WIN32)
-    list(APPEND TEST_NAMES fsmonitor)
-endif()
 
 SETUP_TESTS(${TEST_NAMES})
 

@@ -3,10 +3,13 @@
 This file contains implementation-level details that are intentionally kept out
 of `README.md`.
 
-Two topics have their own files:
+Three topics have their own files:
 
-* [expressions.md](expressions.md): the expression language used by library
-  search, computed fields, and the status bar and window title.
+* [expressions.md](expressions.md): the expression language used by Library
+  Search, autoplaylists, Playlist Search, computed fields, and the status bar
+  and window title.
+* [monitored-library.md](monitored-library.md): watched folders, scans and the
+  file system watcher, autoplaylists, and Playlist Search.
 * [cloud-sync.md](cloud-sync.md): optional play-count sync through AWS Lambda
   and DynamoDB.
 
@@ -14,16 +17,21 @@ Two topics have their own files:
 
 `MainWindow` wires the subsystems together. Songs and play stats live in
 `SongLibrary`, stored in SQLite (`DatabaseManager`) and described by
-`ColumnRegistry`. Playlists (`Playlist`, `PlaylistCollection`) order songs,
+`ColumnRegistry`. Songs enter the library from manual playlists (Open, Add
+Folder) or from watched folders (`MonitoredLibrary`). Playlists (`Playlist`,
+`PlaylistCollection`) order songs; autoplaylists are views of the watched
+folders' songs that match an expression.
 `PlaybackQueue` and `PlaybackManager` decide what plays, `PlaybackController`
 runs playback on top of them, and an `AudioPlayer` backend (Qt Multimedia or
 GStreamer) plays it. Qt models, widgets and dialogs
 (`PlaylistTableModel`, `PlaylistTabs`, ...) only present backend state.
 
 * Startup: load the library on a worker thread, then build playlists and tabs
-  on the main thread, then start cloud sync ("Startup loading").
-* Adding files: parse tags, store the song, append it to the playlist
-  ("Song ingest and metadata refresh").
+  on the main thread, then scan the watched folders in the background and
+  start cloud sync ("Startup loading").
+* Adding files: parse tags, store the song, append it to the playlist; or a
+  scan finds the file in a watched folder ("Song ingest and metadata
+  refresh").
 * Playback: pick the next song, play it, follow its position to update the
   status bar, lyrics and system media, and count the play once it is mostly
   listened to ("Playback domain", "Play statistics").
@@ -37,7 +45,8 @@ The backend must not depend on how (or whether) it is displayed.
 
 * Backend: `SongLibrary`, `DatabaseManager`, `Playlist`, `PlaylistCollection`,
   `PlaybackQueue`, `PlaybackManager`, playback policies,
-  `PlayCompletionTracker`, `PlaybackController`, `SongMatcher`.
+  `PlayCompletionTracker`, `PlaybackController`, `MonitoredLibrary`,
+  `LibraryScanner`, `IFileSystemMonitor` implementations, `SongMatcher`.
 * Frontend (Qt view adapters and widgets): `PlaylistTableModel`,
   `PlaylistTableView`, `PlaylistTabs`, `LibrarySearchResultsModel`, dialogs,
   `MainWindow`.
@@ -183,8 +192,17 @@ The in-memory song store and reading/writing audio file tags.
     thread, applied on the main thread). Never deletes song rows; songs that
     leave it are announced with `songsLeft`. See
     [monitored-library.md](monitored-library.md).
+  * Watches online folders through an `IFileSystemMonitor`
+    (`EfswFileSystemMonitor` in the app). Watcher events only mark paths,
+    which are scanned 1 s after the last event; offline folders are polled
+    every 60 s instead.
+* `EfswFileSystemMonitor` (backend, owned by `MainWindow`)
+  * Recursive efsw watches. Events arrive on efsw's thread and are forwarded
+    to the main thread as queued `pathsChanged` / `folderNeedsRescan`
+    signals. `DummyFileSystemMonitor` replaces it in tests.
 * `LibraryFoldersPage` (frontend, the Settings > Library tab)
-  * Lists the watched folders (marked "Offline") and calls `MonitoredLibrary`
+  * Lists the watched folders (marked "Offline" or "Live updates
+    unavailable") and calls `MonitoredLibrary`
     for Add, Remove, Rescan Now and Remove Missing Songs (enabled for a folder
     offline although its root exists, so offline because empty). Actions apply
     at once, not on the Settings dialog's OK.
@@ -533,8 +551,8 @@ is ready.
   snapshot to the app-owned `SongLibrary`, and calls back. The watcher for the
   worker is a child of `MainWindow`, so destroying the window during the load
   drops the result.
-* In the callback, `MainWindow` loads the monitored library
-  (`MonitoredLibrary::load()`) and playlists (`PlaylistCollection::loadAll()`),
+* In the callback, `MainWindow` loads and watches the monitored library
+  (`MonitoredLibrary::load()`) and loads playlists (`PlaylistCollection::loadAll()`),
   creates playlist tabs/models, re-enables actions, restores the normal
   status-bar message (through `NowPlayingPresenter::reloadExpressions()`),
   starts the monitored library scan in the background
@@ -563,7 +581,9 @@ How files become songs, and how songs are refreshed after their tags change.
 * Ingest path: parse file -> evaluate computed fields -> generate identity key -> upsert song -> sync dynamic/computed attributes.
   Adding files to a playlist (open, add folder) goes through
   `Playlist::addFiles(...)`, which runs this path for each file and then
-  appends the rows.
+  appends the rows. A monitored library scan parses on a worker thread
+  (`LibraryScanner`); `MonitoredLibrary` then runs the rest of the path on
+  the main thread (`SongLibrary::prepareParsedSong`, `addTolibrary`).
 * `SongParser::parse` returns `std::nullopt` when TagLib cannot open the file
   (missing, unreadable, or unsupported); a readable file without tags is not
   a failure. `Playlist::addFiles(...)` skips such paths and reports them
@@ -644,7 +664,9 @@ What is saved per playlist, and which class writes each table.
   playing resumes it, or starts at the first row when that song is not in the
   playlist (new playlists start with `last_played = 1`, or the song was
   removed); an empty playlist does nothing.
-* Playlist membership is persisted in `playlist_items(position)`.
+* Manual playlist membership is persisted in `playlist_items(position)`.
+  Autoplaylists store only `playlists.kind = 'auto'` and `expression`; their
+  rows are computed at load and kept current in memory.
 * Playlist tab name edits are done inline on the tab bar and persisted to
   `playlists.name`.
 * Writers: `PlaylistCollection` owns `playlists` rows (insert, delete, `name`,
@@ -668,6 +690,8 @@ What is saved per playlist, and which class writes each table.
 * Monitored library scans walk and parse files on a `QtConcurrent` worker
   with copies of their input; `MonitoredLibrary` applies the result on the
   main thread in batches, one transaction each. One scan runs at a time.
+* efsw runs its own watcher thread; `EfswFileSystemMonitor` only queues its
+  events to the main thread.
 * GStreamer GLib loop uses a dedicated `std::thread` on macOS/Windows.
 * Playlist DB writes, including the bulk `playlist_items` delete in
   `Playlist::clear()`, are synchronous, so rows appended right after a clear

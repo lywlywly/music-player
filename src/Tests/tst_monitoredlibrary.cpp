@@ -7,12 +7,14 @@
 #include <QSqlQuery>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTimer>
 #include <QUuid>
 #include <atomic>
 #include <filesystem>
 
 #include "../columnregistry.h"
 #include "../databasemanager.h"
+#include "../dummyfilesystemmonitor.h"
 #include "../libraryscanner.h"
 #include "../monitoredlibrary.h"
 #include "../playlistcollection.h"
@@ -89,23 +91,30 @@ private slots:
   void walk_skipsHiddenSymlinksAndOtherExtensions();
   void addFolder_rejectsOverlapAndMissing();
   void requestsDuringScan_mergeIntoOneFollowUp();
+  void rescanOfSeveralFolders_isOneScan();
   void removeFolderDuringScan_dropsItsResults();
   void manyFiles_applyInBatchesAndReportProgress();
   void staleResult_isSkippedAndRescanned();
   void noteSongWritten_avoidsReparse();
   void load_restoresFoldersAndFiles();
   void scanLibrary_pathScopeLimitsGoneAndClearedFailed();
+  void watcherEvents_areDebouncedIntoOnePathScan();
+  void watcherMissedEvents_rescanTheFolder();
+  void offlineFolder_isUnwatchedUntilPollFindsItBack();
+  void failedWatch_marksLiveUpdatesUnavailable();
 
 private:
   // A full scan of every folder, then waits until no scan is pending.
   void rescanAndWait();
   void waitIdle();
   QString root() const;
+  bool offlinePollActive() const;
 
   QTemporaryDir *dir_ = nullptr;
   ColumnRegistry *registry_ = nullptr;
   DatabaseManager *databaseManager_ = nullptr;
   SongLibrary *library_ = nullptr;
+  DummyFileSystemMonitor *monitor_ = nullptr;
   MonitoredLibrary *monitored_ = nullptr;
   PlaylistCollection *collection_ = nullptr;
   QString connectionName_;
@@ -129,12 +138,14 @@ void TestMonitoredLibrary::init() {
                         return fakeParse(path);
                       });
   parseCount_ = 0;
+  monitor_ = new DummyFileSystemMonitor();
   monitored_ = new MonitoredLibrary(
       *library_, *registry_, *databaseManager_,
       [this](const std::string &path, const ColumnRegistry &) {
         ++parseCount_;
         return fakeParse(path);
-      });
+      },
+      monitor_);
   monitored_->load();
   collection_ =
       new PlaylistCollection(*library_, *databaseManager_, *monitored_);
@@ -147,6 +158,8 @@ void TestMonitoredLibrary::cleanup() {
   collection_ = nullptr;
   delete monitored_;
   monitored_ = nullptr;
+  delete monitor_;
+  monitor_ = nullptr;
   delete library_;
   library_ = nullptr;
   delete databaseManager_;
@@ -160,6 +173,14 @@ void TestMonitoredLibrary::cleanup() {
 
 QString TestMonitoredLibrary::root() const {
   return QFileInfo(dir_->path()).canonicalFilePath();
+}
+
+bool TestMonitoredLibrary::offlinePollActive() const {
+  const QList<QTimer *> timers = monitored_->findChildren<QTimer *>();
+  return std::any_of(timers.begin(), timers.end(), [](const QTimer *timer) {
+    return timer->isActive() &&
+           timer->interval() == MonitoredLibrary::kOfflinePollMs;
+  });
 }
 
 void TestMonitoredLibrary::waitIdle() {
@@ -457,6 +478,7 @@ void TestMonitoredLibrary::
   QCOMPARE(leftSpy.count(), 0);
   QVERIFY(monitored_->holds(pk));
   QVERIFY(!monitored_->folders().front().online);
+  QVERIFY(monitor_->watchedPaths.isEmpty());
 
   QSignalSpy removedSpy(collection_,
                         &PlaylistCollection::songsRemovedFromLibrary);
@@ -465,6 +487,7 @@ void TestMonitoredLibrary::
   QCOMPARE(spyPks(removedSpy), std::vector<int>{pk});
   QVERIFY(monitored_->songPks().empty());
   QVERIFY(monitored_->folders().front().online);
+  QCOMPARE(monitor_->watchedPaths, QStringList{root() + "/w"});
 
   // Still empty, but with no files in the library: online.
   rescanAndWait();
@@ -556,6 +579,18 @@ void TestMonitoredLibrary::requestsDuringScan_mergeIntoOneFollowUp() {
   QCOMPARE(parseCount_.load(), 1);
 }
 
+void TestMonitoredLibrary::rescanOfSeveralFolders_isOneScan() {
+  QVERIFY(writeFile(root() + "/x/a.mp3", "A"));
+  QVERIFY(writeFile(root() + "/y/b.mp3", "B"));
+  QVERIFY(monitored_->addFolder(root() + "/x").folderId > 0);
+  QVERIFY(monitored_->addFolder(root() + "/y").folderId > 0);
+  waitIdle();
+
+  QSignalSpy finishedSpy(monitored_, &MonitoredLibrary::scanFinished);
+  rescanAndWait();
+  QCOMPARE(finishedSpy.count(), 1);
+}
+
 void TestMonitoredLibrary::removeFolderDuringScan_dropsItsResults() {
   QVERIFY(writeFile(root() + "/a.mp3", "A"));
   const int folderId = monitored_->addFolder(root()).folderId;
@@ -636,13 +671,16 @@ void TestMonitoredLibrary::load_restoresFoldersAndFiles() {
   waitIdle();
   const std::vector<int> pks = monitored_->songPks();
 
+  DummyFileSystemMonitor reloadedMonitor;
   MonitoredLibrary reloaded(
       *library_, *registry_, *databaseManager_,
       [this](const std::string &path, const ColumnRegistry &) {
         ++parseCount_;
         return fakeParse(path);
-      });
+      },
+      &reloadedMonitor);
   reloaded.load();
+  QCOMPARE(reloadedMonitor.watchedPaths, QStringList{root()});
   QCOMPARE(reloaded.songPks(), pks);
   QCOMPARE(reloaded.folders().size(), size_t{1});
   QCOMPARE(reloaded.folders().front().id, folderId);
@@ -684,6 +722,105 @@ void TestMonitoredLibrary::scanLibrary_pathScopeLimitsGoneAndClearedFailed() {
   QCOMPARE(result.entries[1].kind, ScanEntry::Kind::Gone);
   QCOMPARE(result.entries[1].pk, 7);
   QCOMPARE(result.clearedFailed, QStringList{w + "/x/deleted.mp3"});
+}
+
+void TestMonitoredLibrary::watcherEvents_areDebouncedIntoOnePathScan() {
+  const int folderId = monitored_->addFolder(root()).folderId;
+  QVERIFY(folderId > 0);
+  waitIdle();
+  QCOMPARE(monitor_->watchedPaths, QStringList{root()});
+
+  // c.mp3 gets no event, so the path scan doesn't find it.
+  for (const QString name : {"a", "b", "c"}) {
+    QVERIFY(writeFile(root() + "/" + name + ".mp3", name.toUtf8()));
+  }
+  QSignalSpy finishedSpy(monitored_, &MonitoredLibrary::scanFinished);
+  emit monitor_->pathsChanged({root() + "/a.mp3"});
+  emit monitor_->pathsChanged({root() + "/b.mp3", "/elsewhere/d.mp3"});
+  QVERIFY(!monitored_->isScanning());
+  QTRY_COMPARE(monitored_->songPks().size(), size_t{2});
+  QCOMPARE(finishedSpy.count(), 1);
+
+  // A path that no longer exists is scanned as gone.
+  QVERIFY(QFile::remove(root() + "/a.mp3"));
+  emit monitor_->pathsChanged({root() + "/a.mp3"});
+  QTRY_COMPARE(monitored_->songPks().size(), size_t{1});
+
+  QVERIFY(monitored_->removeFolder(folderId));
+  QVERIFY(monitor_->watchedPaths.isEmpty());
+}
+
+void TestMonitoredLibrary::watcherMissedEvents_rescanTheFolder() {
+  QVERIFY(monitored_->addFolder(root()).folderId > 0);
+  waitIdle();
+  QVERIFY(writeFile(root() + "/a.mp3", "A"));
+  QVERIFY(writeFile(root() + "/sub/b.mp3", "B"));
+
+  emit monitor_->folderNeedsRescan(root() + "/sub");
+  QVERIFY(monitored_->isScanning());
+  waitIdle();
+  QCOMPARE(monitored_->songPks().size(), size_t{2});
+}
+
+void TestMonitoredLibrary::offlineFolder_isUnwatchedUntilPollFindsItBack() {
+  const QString folder = root() + "/music";
+  const QString away = root() + "/away";
+  QVERIFY(writeFile(folder + "/a.mp3", "A"));
+  const int folderId = monitored_->addFolder(folder).folderId;
+  QVERIFY(folderId > 0);
+  waitIdle();
+
+  QSignalSpy availabilitySpy(monitored_,
+                             &MonitoredLibrary::folderAvailabilityChanged);
+  QVERIFY(QDir().rename(folder, away));
+  rescanAndWait();
+  QCOMPARE(availabilitySpy.count(), 1);
+  QCOMPARE(availabilitySpy.takeFirst(), QVariantList({folderId, false}));
+  QVERIFY(offlinePollActive());
+
+  // Still missing, then an empty mount point (case 2).
+  monitored_->checkOfflineFolders();
+  QVERIFY(QDir().mkpath(folder));
+  monitored_->checkOfflineFolders();
+  QCOMPARE(availabilitySpy.count(), 0);
+  QVERIFY(!monitored_->isScanning());
+
+  QVERIFY(QDir(folder).removeRecursively());
+  QVERIFY(QDir().rename(away, folder));
+  monitored_->checkOfflineFolders();
+  QCOMPARE(availabilitySpy.count(), 1);
+  QCOMPARE(availabilitySpy.takeFirst(), QVariantList({folderId, true}));
+  QCOMPARE(monitor_->watchedPaths, QStringList{folder});
+  QVERIFY(!offlinePollActive());
+  QVERIFY(monitored_->isScanning());
+  waitIdle();
+  QCOMPARE(monitored_->songPks().size(), size_t{1});
+  QCOMPARE(availabilitySpy.count(), 0);
+}
+
+void TestMonitoredLibrary::failedWatch_marksLiveUpdatesUnavailable() {
+  const QString folder = root() + "/music";
+  QVERIFY(writeFile(folder + "/a.mp3", "A"));
+  monitor_->refusedPaths = {folder};
+  QVERIFY(monitored_->addFolder(folder).folderId > 0);
+  QVERIFY(monitored_->folders().front().liveUpdatesUnavailable);
+  // Scans still work.
+  waitIdle();
+  QCOMPARE(monitored_->songPks().size(), size_t{1});
+  QVERIFY(monitor_->watchedPaths.isEmpty());
+
+  // A watch that fails because the root is missing is not marked.
+  QVERIFY(QDir().rename(folder, root() + "/away"));
+  DummyFileSystemMonitor reloadedMonitor;
+  reloadedMonitor.refusedPaths = {folder};
+  MonitoredLibrary reloaded(
+      *library_, *registry_, *databaseManager_,
+      [](const std::string &path, const ColumnRegistry &) {
+        return fakeParse(path);
+      },
+      &reloadedMonitor);
+  reloaded.load();
+  QVERIFY(!reloaded.folders().front().liveUpdatesUnavailable);
 }
 
 QTEST_GUILESS_MAIN(TestMonitoredLibrary)

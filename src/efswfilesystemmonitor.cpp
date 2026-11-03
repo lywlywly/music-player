@@ -1,44 +1,88 @@
 #include "efswfilesystemmonitor.h"
 
-#include <iostream>
-EFSWFileSystemMonitor::EFSWFileSystemMonitor(QObject *parent)
-    : QObject{parent} {}
+#include <QDebug>
+#include <QDir>
+#include <QMetaObject>
+#include <efsw/efsw.hpp>
 
-void EFSWFileSystemMonitor::handleFileAction(efsw::WatchID watchid,
-                                             const std::string &dir,
-                                             const std::string &filename,
-                                             efsw::Action action,
-                                             const std::string &oldFilename) {
-  switch (action) {
-  case efsw::Actions::Add:
-    std::cout << "DIR (" << dir << ") FILE (" << filename << ") has event Added"
-              << std::endl;
-    emit fileChanged(QString::fromStdString(filename));
-    break;
-  case efsw::Actions::Delete:
-    std::cout << "DIR (" << dir << ") FILE (" << filename
-              << ") has event Delete" << std::endl;
-    emit fileChanged(QString::fromStdString(filename));
-    break;
-  case efsw::Actions::Modified:
-    std::cout << "DIR (" << dir << ") FILE (" << filename
-              << ") has event Modified" << std::endl;
-    emit fileChanged(QString::fromStdString(filename));
-    break;
-  case efsw::Actions::Moved:
-    std::cout << "DIR (" << dir << ") FILE (" << filename
-              << ") has event Moved from (" << oldFilename << ")" << std::endl;
-    emit fileChanged(QString::fromStdString(filename));
-    break;
-  default:
-    std::cout << "Should never happen!" << std::endl;
+namespace {
+// name is relative to dir, or absolute (efsw reports the old path of some
+// moves in full).
+QString joinPath(const std::string &dir, const std::string &name) {
+  const QString path = QDir::fromNativeSeparators(QString::fromStdString(name));
+  return QDir::cleanPath(
+      QDir::isAbsolutePath(path)
+          ? path
+          : QDir::fromNativeSeparators(QString::fromStdString(dir)) +
+                QLatin1Char('/') + path);
+}
+} // namespace
+
+// Runs on the efsw thread; only queues signals to the monitor's thread.
+class EfswFileSystemMonitor::Listener : public efsw::FileWatchListener {
+public:
+  explicit Listener(EfswFileSystemMonitor *monitor) : monitor_(monitor) {}
+
+  void handleFileAction(efsw::WatchID, const std::string &dir,
+                        const std::string &filename, efsw::Action action,
+                        const std::string &oldFilename) override {
+    QStringList paths{joinPath(dir, filename)};
+    if (action == efsw::Actions::Moved && !oldFilename.empty()) {
+      paths.push_back(joinPath(dir, oldFilename));
+    }
+    QMetaObject::invokeMethod(
+        monitor_,
+        [monitor = monitor_, paths]() { emit monitor->pathsChanged(paths); },
+        Qt::QueuedConnection);
   }
+
+  void handleMissedFileActions(efsw::WatchID, const std::string &dir) override {
+    const QString path = joinPath(dir, {});
+    QMetaObject::invokeMethod(
+        monitor_,
+        [monitor = monitor_, path]() { emit monitor->folderNeedsRescan(path); },
+        Qt::QueuedConnection);
+  }
+
+private:
+  // Queued calls to it are dropped once it is destroyed; the efsw thread has
+  // stopped by then (see the member order).
+  EfswFileSystemMonitor *monitor_;
+};
+
+EfswFileSystemMonitor::EfswFileSystemMonitor(QObject *parent)
+    : IFileSystemMonitor(parent), listener_(std::make_unique<Listener>(this)),
+      watcher_(std::make_unique<efsw::FileWatcher>()) {}
+
+// watcher_ is destroyed first (reverse member order), which stops its thread
+// before listener_ goes.
+EfswFileSystemMonitor::~EfswFileSystemMonitor() = default;
+
+bool EfswFileSystemMonitor::addPath(const QString &path) {
+  if (watchIds_.contains(path)) {
+    return true;
+  }
+  const efsw::WatchID id = watcher_->addWatch(
+      QDir::toNativeSeparators(path).toStdString(), listener_.get(), true);
+  if (id < 0) {
+    qWarning() << "EfswFileSystemMonitor: cannot watch" << path << ":"
+               << QString::fromStdString(efsw::Errors::Log::getLastErrorLog());
+    return false;
+  }
+  watchIds_.insert(path, id);
+  if (!started_) {
+    watcher_->watch();
+    started_ = true;
+  }
+  return true;
 }
 
-// TODO: allow multiple watchers
-void EFSWFileSystemMonitor::addWatchingPath(const QString &path) {
-  efsw::FileWatcher *fileWatcher = new efsw::FileWatcher();
-  efsw::WatchID watchID =
-      fileWatcher->addWatch("/home/luyao/Documents/test/", this, true);
-  fileWatcher->watch();
+bool EfswFileSystemMonitor::removePath(const QString &path) {
+  const auto it = watchIds_.constFind(path);
+  if (it == watchIds_.cend()) {
+    return false;
+  }
+  watcher_->removeWatch(it.value());
+  watchIds_.erase(it);
+  return true;
 }

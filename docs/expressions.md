@@ -1,10 +1,10 @@
 # Expressions
 
-One expression language (`libraryexpression_*`) is used for library search,
-computed fields, and the display expressions that build the status bar text
-and window title. This file covers the language, how it is parsed and
-evaluated, and the display expressions. See [architecture.md](architecture.md)
-for the rest of the app.
+One expression language (`libraryexpression_*`) is used for Library Search,
+autoplaylists, Playlist Search, computed fields, and the display expressions
+that build the status bar text and window title. This file covers the
+language, how it is parsed and evaluated, and the display expressions. See
+[architecture.md](architecture.md) for the rest of the app.
 
 ## Language and modules
 
@@ -27,6 +27,13 @@ for the rest of the app.
 * `LibraryExprEvalContext`
   * Evaluation boundary for field lookup.
   * Provides `FieldValue` instances to the expression runtime.
+* `parseSongFilter` (songlibrary.h)
+  * Song filters must be conditions: it parses with
+    `SongLibrary::parseLibraryExpression` and rejects an expression whose
+    static type is not boolean ("Expression must be a condition"). A bare
+    word like `davis` parses as a text literal, so it is rejected.
+  * Used by Library Search, autoplaylists (`PlaylistCollection`,
+    `AutoPlaylistDialog`) and `SongMatcher`.
 * `LibrarySearchDialog` + `LibrarySearchResultsModel`
   * Parse the query with `parseSongFilter` (conditions only), evaluate it over
     the monitored library (`SongLibrary::search(expr, candidatePks)`), then
@@ -75,7 +82,7 @@ for the rest of the app.
 
 ## Evaluation contexts
 
-* Library search:
+* Song filters (Library Search, autoplaylists, Playlist Search):
   * Resolver source: `ColumnRegistry::expressionSymbols()`
   * Eval context: song-only (`SongLibraryExprEvalContext`)
   * Eval lookup maps canonical IDs to song map keys:
@@ -167,7 +174,7 @@ for the rest of the app.
   (`status:isplaying`, `status:ispaused`, `status:playback_time`,
   `status:duration`, `status:bitrate`) and also as unqualified aliases.
 * Runtime symbols are only available in display-expression parsing/evaluation
-  contexts; library-search parsing uses registry symbols only.
+  contexts; song filter parsing uses registry symbols only.
 
 ### Bitrate display behavior
 

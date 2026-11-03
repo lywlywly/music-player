@@ -7,10 +7,13 @@
 #include <QString>
 #include <map>
 #include <optional>
+#include <set>
 #include <vector>
 
 class ColumnRegistry;
 class DatabaseManager;
+class IFileSystemMonitor;
+class QTimer;
 class SongLibrary;
 template <typename T> class QFutureWatcher;
 
@@ -25,6 +28,10 @@ template <typename T> class QFutureWatcher;
 // One scan runs at a time, on a worker thread. Requests made meanwhile are
 // merged into one follow-up scan. Results are applied on the main thread in
 // batches, one transaction each.
+//
+// With a file system monitor, online folders are watched. Watcher events only
+// mark paths for a scan, debounced so that a burst becomes one scan. Offline
+// folders are not watched; their roots are checked every minute instead.
 class MonitoredLibrary : public QObject {
   Q_OBJECT
 public:
@@ -35,6 +42,9 @@ public:
     // Offline: the root is missing or unreadable, or is empty while the
     // library has files for it. In memory only; re-evaluated by every scan.
     bool online = true;
+    // Online, but its watch could not be added: changes are found by scans
+    // only.
+    bool liveUpdatesUnavailable = false;
   };
 
   struct AddFolderResult {
@@ -43,15 +53,17 @@ public:
     QString error;
   };
 
-  // parse defaults to SongParser::parse; tests inject one.
+  // parse defaults to SongParser::parse; tests inject one. monitor may be
+  // null (no live updates); it must outlive this object.
   MonitoredLibrary(SongLibrary &library, const ColumnRegistry &registry,
                    DatabaseManager &databaseManager, ScanParseFn parse = {},
+                   IFileSystemMonitor *monitor = nullptr,
                    QObject *parent = nullptr);
   ~MonitoredLibrary() override;
 
-  // Reads `library_folders` and `monitored_files`. Call once, after the song
-  // library is loaded and before PlaylistCollection::loadAll. Emits no
-  // signals.
+  // Reads `library_folders` and `monitored_files`, and watches the folders.
+  // Call once, after the song library is loaded and before
+  // PlaylistCollection::loadAll. Emits no signals.
   void load();
 
   // Canonicalises path and adds it as a watched folder, then requests a scan
@@ -84,9 +96,16 @@ public:
   // monitored, stores the file's new stats, so the next scan does not
   // re-parse it.
   void noteSongWritten(int songPk);
+  // Marks offline folders whose root is available again as online, watches
+  // them and requests a scan of them. Runs every kOfflinePollMs while a folder
+  // is offline.
+  void checkOfflineFolders();
 
   // Rows applied per event-loop turn.
   static constexpr int kApplyBatchSize = 200;
+  // Quiet time after the last watcher event before its paths are scanned.
+  static constexpr int kWatchDebounceMs = 1000;
+  static constexpr int kOfflinePollMs = 60000;
 
 signals:
   // Songs that joined the monitored library (new rows, or existing rows,
@@ -114,12 +133,22 @@ private:
     QStringList paths;
   };
 
+  // Record a request only; startNextScan starts it, merged with the others.
   void requestFull(int folderId, bool skipAvailabilityCheck = false);
   void requestPath(int folderId, const QString &path);
   void startNextScan();
   void onScanFinished();
   void applyNextBatch();
   void finishApply();
+  void onPathsChanged(const QStringList &paths);
+  void onFolderNeedsRescan(const QString &path);
+  // Sets the folder's availability, updates its watch and the offline poll,
+  // and emits folderAvailabilityChanged.
+  void setOnline(Folder &folder, bool online);
+  // Watches the folder while it is online, and not while it is offline.
+  void updateWatch(Folder &folder);
+  void updateOfflinePoll();
+  bool hasFiles(int folderId) const;
   const Folder *findFolder(int folderId) const;
   Folder *findFolder(int folderId);
 
@@ -127,11 +156,18 @@ private:
   const ColumnRegistry &registry_;
   DatabaseManager &databaseManager_;
   ScanParseFn parse_;
+  IFileSystemMonitor *monitor_ = nullptr;
 
   std::vector<Folder> folders_;
   std::map<int, Entry> entries_;
   QHash<QString, int> pkByPath_;
   QHash<QString, FileStats> failed_;
+  // Folder ids with a watch.
+  std::set<int> watched_;
+  // Paths from watcher events, scanned when watchDebounceTimer_ fires.
+  QStringList changedPaths_;
+  QTimer *watchDebounceTimer_ = nullptr;
+  QTimer *offlinePollTimer_ = nullptr;
 
   std::map<int, Request> pending_;
   QFutureWatcher<LibraryScanResult> *scanWatcher_ = nullptr;

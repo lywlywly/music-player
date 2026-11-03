@@ -85,7 +85,8 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
       databaseManager_(columnRegistry_, std::move(databaseName),
                        std::move(connectionName)),
       songLibrary(columnRegistry_, databaseManager_),
-      monitoredLibrary_(songLibrary, columnRegistry_, databaseManager_),
+      monitoredLibrary_(songLibrary, columnRegistry_, databaseManager_, {},
+                        &fileSystemMonitor_),
       cloudPlayStatsSyncCoordinator_(songLibrary, this) {
   prewarmSelectedPlaybackBackend();
   Q_INIT_RESOURCE(resources);

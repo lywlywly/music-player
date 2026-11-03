@@ -7,7 +7,16 @@ A cross-platform desktop music player focused on local-library playback, lyrics,
 ## Features
 
 * Multi-playlist local playback with persistent tab order
-* Expression-based library search/filter
+* Monitored library: watched folders (Settings > Library) kept in sync with
+  the disk, live while the app runs; unmounted drives are shown as offline
+  instead of emptying the library
+* Autoplaylists: playlists defined by an expression over the monitored
+  library, updated as songs change (File > New Autoplaylist, or Save as
+  Autoplaylist from Library Search)
+* Library Search over the monitored library (Library > Search), with
+  expression queries
+* Playlist Search over the shown playlist (Edit > Search Playlist, `Ctrl+F` /
+  `Cmd+F`), with plain words or an expression
 * Song Properties dialog for viewing and editing tags
 * ReplayGain (GStreamer backend)
 * Lyrics display (embedded tag lyrics on play, with `.lrc` fallback)
@@ -87,7 +96,13 @@ Set `GST_PLUGIN_PATH` as:
 
 ## Library Search Query Syntax
 
-The library search dialog supports a compact query language for filtering songs.
+Library Search, autoplaylists and Playlist Search use a compact query language
+for filtering songs. A query must be a condition: `davis` alone is rejected
+("Expression must be a condition"). Playlist Search instead searches text that
+is not a condition as plain words, each matched against the visible columns,
+unless it contains an expression symbol (`=`, `<`, `>`, `(`, `)`, `[`, `]` or
+a backtick); then it shows the parse error. A query in double quotes, with no
+quotes inside, is always searched as text.
 
 Boolean operators:
 
@@ -159,6 +174,9 @@ Implementation details and architecture live in:
 
 * `docs/architecture.md`: design principles, classes, startup, playback,
   threading
-* `docs/expressions.md`: the expression language, library search, and the
-  status bar / window title expressions
+* `docs/expressions.md`: the expression language, song filters (Library
+  Search, autoplaylists, Playlist Search), and the status bar / window title
+  expressions
+* `docs/monitored-library.md`: watched folders, scans, the file system
+  watcher, autoplaylists and Playlist Search
 * `docs/cloud-sync.md`: play-count sync design, DynamoDB model, Lambda API

@@ -5,6 +5,7 @@
 #include "columnregistry.h"
 #include "coverartpresenter.h"
 #include "databasemanager.h"
+#include "efswfilesystemmonitor.h"
 #include "globalcolumnlayoutmanager.h"
 #include "lyricspresenter.h"
 #include "monitoredlibrary.h"
@@ -80,6 +81,7 @@ private:
   GlobalColumnLayoutManager columnLayoutManager_;
   DatabaseManager databaseManager_;
   SongLibrary songLibrary;
+  EfswFileSystemMonitor fileSystemMonitor_;
   MonitoredLibrary monitoredLibrary_;
   // Child QObject created after ui->setupUi, so UI widgets (tabs, views,
   // models) are destroyed before the playlists they show.

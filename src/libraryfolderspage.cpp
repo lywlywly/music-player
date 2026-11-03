@@ -102,8 +102,12 @@ void LibraryFoldersPage::refreshFolders() {
   foldersList_->clear();
   for (const MonitoredLibrary::Folder &folder : monitoredLibrary_.folders()) {
     const QString path = QDir::toNativeSeparators(folder.path);
-    auto *item = new QListWidgetItem(
-        folder.online ? path : tr("%1 (Offline)").arg(path), foldersList_);
+    auto *item =
+        new QListWidgetItem(!folder.online ? tr("%1 (Offline)").arg(path)
+                            : folder.liveUpdatesUnavailable
+                                ? tr("%1 (Live updates unavailable)").arg(path)
+                                : path,
+                            foldersList_);
     item->setData(kFolderIdRole, folder.id);
     item->setData(kPathRole, folder.path);
     item->setData(kOfflineRole, !folder.online);

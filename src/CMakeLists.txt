@@ -66,12 +66,10 @@ myplayer_add_efsw()
 pkg_check_modules(GST IMPORTED_TARGET REQUIRED gstreamer-1.0)
 
 if(WIN32)
-  find_package(OpenSSL REQUIRED)
   find_package(FFmpeg REQUIRED COMPONENTS avcodec avformat avutil)
 else()
   pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET libavcodec libavformat
     libavutil)
-  pkg_check_modules(OPENSSL REQUIRED IMPORTED_TARGET openssl)
 endif()
 
 set(PROJECT_SOURCES
@@ -88,8 +86,6 @@ set(PROJECT_SOURCES
   audiofileformats.h
   autoplaylistdialog.h
   autoplaylistdialog.cpp
-  checksumcalculator.h
-  checksumcalculator.cpp
   cloudplaystatssyncservice.h
   cloudplaystatssyncservice.cpp
   cloudplaystatssynccoordinator.h
@@ -117,8 +113,6 @@ set(PROJECT_SOURCES
   fieldeditdialog.ui
   fieldeditdialog.h
   fieldeditdialog.cpp
-  filesystemcomparer.h
-  filesystemcomparer.cpp
   efswfilesystemmonitor.h
   efswfilesystemmonitor.cpp
   gstaudioplayer.h
@@ -196,8 +190,6 @@ set(PROJECT_SOURCES
   playlistsearch.cpp
   playlistsearchdialog.h
   playlistsearchdialog.cpp
-  qfilesystemmonitor.h
-  qfilesystemmonitor.cpp
   qtaudioplayer.h
   qtaudioplayer.cpp
   settingsdialog.ui
@@ -225,6 +217,7 @@ if(BUILD_TESTING)
   list(APPEND PROJECT_SOURCES
     dummyaudioplayer.h
     dummyaudioplayer.cpp
+    dummyfilesystemmonitor.h
     dummysystemmediainterface.h
   )
 endif()
@@ -269,8 +262,6 @@ target_link_libraries(
 if(WIN32)
   target_link_libraries(
     MYLib
-    OpenSSL::SSL
-    OpenSSL::Crypto
     FFmpeg::avcodec
     FFmpeg::avformat
     FFmpeg::avutil
@@ -280,7 +271,6 @@ else()
   target_link_libraries(
     MYLib
     PkgConfig::FFMPEG
-    PkgConfig::OPENSSL
   )
 endif()
 

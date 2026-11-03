@@ -107,24 +107,9 @@ void walkScope(const QString &root, const QString &scope,
   }
 }
 
-// See "Offline folders" in docs/monitored-library.md.
 bool isFolderOnline(const ScanFolderInput &folder) {
-  if (folder.skipAvailabilityCheck) {
-    return true;
-  }
-  const fs::path root = toFsPath(folder.path);
-  std::error_code ec;
-  if (!fs::is_directory(fs::status(root, ec)) || ec) {
-    return false;
-  }
-  fs::directory_iterator it(root, ec);
-  if (ec) {
-    return false;
-  }
-  if (folder.hasFiles && it == fs::directory_iterator()) {
-    return false;
-  }
-  return true;
+  return folder.skipAvailabilityCheck ||
+         isFolderRootAvailable(folder.path, folder.hasFiles);
 }
 
 struct ParseJob {
@@ -157,6 +142,20 @@ std::optional<FileStats> readFileStats(const QString &path) {
                            mtime.time_since_epoch())
                            .count()),
                    .size = static_cast<qint64>(size)};
+}
+
+// See "Offline folders" in docs/monitored-library.md.
+bool isFolderRootAvailable(const QString &root, bool hasFiles) {
+  const fs::path rootPath = toFsPath(root);
+  std::error_code ec;
+  if (!fs::is_directory(fs::status(rootPath, ec)) || ec) {
+    return false;
+  }
+  fs::directory_iterator it(rootPath, ec);
+  if (ec) {
+    return false;
+  }
+  return !hasFiles || it != fs::directory_iterator();
 }
 
 bool isSameOrUnderPath(const QString &path, const QString &root) {

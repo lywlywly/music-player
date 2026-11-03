@@ -22,6 +22,7 @@
 
 #include "../columnregistry.h"
 #include "../databasemanager.h"
+#include "../dummyfilesystemmonitor.h"
 #include "../libraryfolderspage.h"
 #include "../monitoredlibrary.h"
 #include "../playbackbackendmanager.h"
@@ -45,6 +46,7 @@ private slots:
   void playbackBackend_restoresPersistsAndEmitsSignal();
   void libraryPage_addsRescansAndRemovesFolders();
   void libraryPage_marksOfflineFoldersAndRemovesMissingSongs();
+  void libraryPage_marksFoldersWithoutLiveUpdates();
   void libraryPage_showsScanProgress();
 
 private:
@@ -483,6 +485,24 @@ void TestSettingsDialogUi::
   QCOMPARE(list->item(0)->text(), QDir::toNativeSeparators(empty));
   QVERIFY(list->item(0)->isSelected());
   QVERIFY(!removeMissingButton->isEnabled());
+}
+
+void TestSettingsDialogUi::libraryPage_marksFoldersWithoutLiveUpdates() {
+  const QString root = QFileInfo(dir_->path()).canonicalFilePath();
+  DummyFileSystemMonitor monitor;
+  monitor.refusedPaths = {root};
+  MonitoredLibrary monitored(*library_, *registry_, *databaseManager_, {},
+                             &monitor);
+  SettingsDialog dialog(*registry_, *databaseManager_, monitored);
+  auto *page = dialog.findChild<LibraryFoldersPage *>();
+  auto *list = dialog.findChild<QListWidget *>("library_folders_list");
+  QVERIFY(page != nullptr);
+  QVERIFY(list != nullptr);
+
+  page->addFolder(root);
+  QCOMPARE(list->item(0)->text(),
+           QDir::toNativeSeparators(root) + " (Live updates unavailable)");
+  QTRY_VERIFY(!monitored.isScanning());
 }
 
 void TestSettingsDialogUi::libraryPage_showsScanProgress() {

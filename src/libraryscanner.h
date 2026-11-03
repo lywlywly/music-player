@@ -34,6 +34,10 @@ std::optional<FileStats> readFileStats(const QString &path);
 // case-insensitively on macOS and Windows.
 bool isSameOrUnderPath(const QString &path, const QString &root);
 
+// Whether a watched folder's root is available: a readable directory, not
+// empty when the library has files for it. Otherwise the folder is offline.
+bool isFolderRootAvailable(const QString &root, bool hasFiles);
+
 // Parses one file with a ColumnRegistry; returns nullopt when the file cannot
 // be read. Defaults to SongParser::parse.
 using ScanParseFn = std::function<std::optional<MSong>(const std::string &,
