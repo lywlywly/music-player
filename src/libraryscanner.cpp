@@ -14,8 +14,15 @@ fs::path toFsPath(const QString &path) {
   return fs::path(path.toStdU16String());
 }
 
+// On macOS, names come as stored, which can be decomposed (NFD); SongLibrary
+// stores Qt's composed (NFC) paths. See "Scan" in docs/monitored-library.md.
 QString fromFsPath(const fs::path &path) {
-  return QString::fromStdU16String(path.generic_u16string());
+  const QString qpath = QString::fromStdU16String(path.generic_u16string());
+#ifdef Q_OS_MACOS
+  return qpath.normalized(QString::NormalizationForm_C);
+#else
+  return qpath;
+#endif
 }
 
 constexpr Qt::CaseSensitivity kPathCase =

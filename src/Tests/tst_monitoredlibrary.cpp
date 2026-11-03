@@ -102,6 +102,7 @@ private slots:
   void watcherMissedEvents_rescanTheFolder();
   void offlineFolder_isUnwatchedUntilPollFindsItBack();
   void failedWatch_marksLiveUpdatesUnavailable();
+  void decomposedFileName_staysAcrossScans();
 
 private:
   // A full scan of every folder, then waits until no scan is pending.
@@ -821,6 +822,23 @@ void TestMonitoredLibrary::failedWatch_marksLiveUpdatesUnavailable() {
       &reloadedMonitor);
   reloaded.load();
   QVERIFY(!reloaded.folders().front().liveUpdatesUnavailable);
+}
+
+// See "Scan" in docs/monitored-library.md (composed paths).
+void TestMonitoredLibrary::decomposedFileName_staysAcrossScans() {
+  // "が" decomposed (NFD): か + combining dakuten, as macOS can store names.
+  const std::filesystem::path file =
+      std::filesystem::path(root().toStdString()) /
+      "\xE3\x81\x8B\xE3\x82\x99.mp3";
+  QVERIFY(writeFile(QString::fromStdString(file.string()), "Song"));
+  QVERIFY(monitored_->addFolder(root()).folderId > 0);
+  waitIdle();
+  QCOMPARE(monitored_->songPks().size(), size_t{1});
+  const int pk = monitored_->songPks().front();
+
+  // The NFD path on disk matches the stored NFC path.
+  rescanAndWait();
+  QCOMPARE(monitored_->songPks(), std::vector<int>{pk});
 }
 
 QTEST_GUILESS_MAIN(TestMonitoredLibrary)

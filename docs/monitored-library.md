@@ -241,6 +241,14 @@ can count as gone.
      gone -> delete the `monitored_files` row, `songsLeft` (then
      `PlaylistCollection` releases, see invariant 5).
 
+**Composed paths (macOS):** the walk converts the paths it lists to
+composed Unicode (NFC). macOS can store a name decomposed (NFD; `ガ` as
+`カ` + combining `゛`), and `std::filesystem` returns it as stored, while
+`SongLibrary` keeps the NFC path Qt gives (`canonicalFilePath`); both open
+the same file. Otherwise the stored path never matches the one on disk, and
+each full scan drops such songs and the next adds them back. The watcher
+needs no conversion: efsw's FSEvents paths are already NFC.
+
 **Stored stats:** `mtime` is `std::filesystem::last_write_time` converted to
 nanoseconds since its epoch, compared for exact equality, so coarse
 timestamps (FAT, network drives) still work. `size` is in bytes.
