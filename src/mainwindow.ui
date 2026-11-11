@@ -207,7 +207,7 @@
                <property name="handleWidth">
                 <number>2</number>
                </property>
-               <widget class="LyricsPanel" name="lyricsPanel" native="true">
+               <widget class="QTabWidget" name="infoTabs">
                 <property name="sizePolicy">
                  <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
                   <horstretch>0</horstretch>
@@ -220,6 +220,56 @@
                   <height>240</height>
                  </size>
                 </property>
+                <property name="currentIndex">
+                 <number>0</number>
+                </property>
+                <property name="documentMode">
+                 <bool>true</bool>
+                </property>
+                <widget class="QWidget" name="lyricsTab">
+                 <attribute name="title">
+                  <string>Lyrics</string>
+                 </attribute>
+                 <layout class="QVBoxLayout" name="lyricsTabLayout">
+                  <property name="leftMargin">
+                   <number>0</number>
+                  </property>
+                  <property name="topMargin">
+                   <number>0</number>
+                  </property>
+                  <property name="rightMargin">
+                   <number>0</number>
+                  </property>
+                  <property name="bottomMargin">
+                   <number>0</number>
+                  </property>
+                  <item>
+                   <widget class="LyricsPanel" name="lyricsPanel" native="true"/>
+                  </item>
+                 </layout>
+                </widget>
+                <widget class="QWidget" name="propertiesTab">
+                 <attribute name="title">
+                  <string>Properties</string>
+                 </attribute>
+                 <layout class="QVBoxLayout" name="propertiesTabLayout">
+                  <property name="leftMargin">
+                   <number>0</number>
+                  </property>
+                  <property name="topMargin">
+                   <number>0</number>
+                  </property>
+                  <property name="rightMargin">
+                   <number>0</number>
+                  </property>
+                  <property name="bottomMargin">
+                   <number>0</number>
+                  </property>
+                  <item>
+                   <widget class="SongInfoPanel" name="songInfoPanel" native="true"/>
+                  </item>
+                 </layout>
+                </widget>
                </widget>
                <widget class="QLabel" name="label">
                 <property name="sizePolicy">
@@ -444,6 +494,12 @@
    <class>LyricsPanel</class>
    <extends>QWidget</extends>
    <header>lyricspanel.h</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>SongInfoPanel</class>
+   <extends>QWidget</extends>
+   <header>songinfopanel.h</header>
    <container>1</container>
   </customwidget>
   <customwidget>

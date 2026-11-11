@@ -20,6 +20,8 @@ A cross-platform desktop music player focused on local-library playback, lyrics,
 * Song Properties dialog for viewing and editing tags
 * ReplayGain (GStreamer backend)
 * Lyrics display (embedded tag lyrics on play, with `.lrc` fallback)
+* Properties tab next to Lyrics: the selected song's file name, folder, path,
+  size, modified/created times, audio properties, tags and play stats
 * Customizable lyrics panel style
 * Customizable display expressions (status bar + window title)
 * Display theme mode: system default / light / dark

@@ -1,8 +1,11 @@
 #include "lyricspanel.h"
 #include "ui_lyricspanel.h"
 #include <QAbstractTextDocumentLayout>
+#include <QResizeEvent>
 #include <QScrollBar>
+#include <QShowEvent>
 #include <QTextBlock>
+#include <algorithm>
 
 LyricsPanel::LyricsPanel(QWidget *parent)
     : QWidget(parent), ui(new Ui::LyricsPanel) {
@@ -21,6 +24,7 @@ void LyricsPanel::setLyricsPanel(const std::map<int, std::string> &map) {
     anim_->stop();
   }
   currentSelection_ = {};
+  currentLine_ = -1;
   ui->textEdit->setExtraSelections({});
   ui->textEdit->clear();
   ui->textEdit->setAlignment(Qt::AlignHCenter);
@@ -57,19 +61,51 @@ void LyricsPanel::smoothScrollTo(int targetY, int durationMs) {
   anim_->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
-void LyricsPanel::scrollToIndexCenter(int index) {
+int LyricsPanel::centerScrollValue(int index) const {
   QTextBlock block = ui->textEdit->document()->findBlockByNumber(index);
-  if (!block.isValid())
-    return;
-
+  if (!block.isValid()) {
+    return -1;
+  }
   QRectF rect =
       ui->textEdit->document()->documentLayout()->blockBoundingRect(block);
   int centerY = static_cast<int>(rect.center().y() -
                                  ui->textEdit->viewport()->height() / 2);
   QScrollBar *vbar = ui->textEdit->verticalScrollBar();
-  int target = std::clamp(centerY, vbar->minimum(), vbar->maximum());
+  return std::clamp(centerY, vbar->minimum(), vbar->maximum());
+}
+
+void LyricsPanel::scrollToIndexCenter(int index) {
+  const int target = centerScrollValue(index);
+  if (target < 0) {
+    return;
+  }
+  currentLine_ = index;
   smoothScrollTo(target);
-  colorLineText(block);
+  colorLineText(ui->textEdit->document()->findBlockByNumber(index));
+}
+
+void LyricsPanel::recenterCurrentLine() {
+  if (currentLine_ < 0) {
+    return;
+  }
+  const int target = centerScrollValue(currentLine_);
+  if (target < 0) {
+    return;
+  }
+  if (anim_) {
+    anim_->stop();
+  }
+  ui->textEdit->verticalScrollBar()->setValue(target);
+}
+
+void LyricsPanel::showEvent(QShowEvent *event) {
+  QWidget::showEvent(event);
+  recenterCurrentLine();
+}
+
+void LyricsPanel::resizeEvent(QResizeEvent *event) {
+  QWidget::resizeEvent(event);
+  recenterCurrentLine();
 }
 
 void LyricsPanel::colorLineText(const QTextBlock &block) {

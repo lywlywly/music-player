@@ -46,6 +46,8 @@ set(TEST_NAMES
     playlistsearch
     playlistsearchdialog_ui
     efswfilesystemmonitor
+    songinfo
+    lyricspanel
 )
 
 SETUP_TESTS(${TEST_NAMES})
@@ -75,5 +77,13 @@ set_tests_properties(playlisttabs PROPERTIES
 )
 
 set_tests_properties(playlisttableview PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
+
+set_tests_properties(songinfo PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
+
+set_tests_properties(lyricspanel PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
 )

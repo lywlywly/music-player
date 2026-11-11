@@ -33,6 +33,11 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
 - ✅ Lyrics
   - ✅ Embedded tag lyrics on play, with `.lrc` fallback
   - 🟡 Lyrics panel polish
+- ✅ Info panel: Lyrics and Properties tabs (top left)
+  - ✅ Lyrics panel moved into a tab
+  - ✅ Properties tab for the selected song: file name, folder, path, size,
+    modified/created times, audio properties, main tags, play stats
+  - See `docs/info-panel.md`
 - ✅ Playback statistics
   - ✅ `play_count` with completion/listen gating
   - ✅ `last_played_timestamp`
@@ -75,6 +80,10 @@ See `docs/architecture.md` (Design Principles).
 - `QMediaPlayer` seek accuracy on macOS:
   <https://forum.qt.io/topic/107671/qmediaplayer-unable-to-seek-accurately-on-macos>
 - Custom slider allows movement when no value is set
+- Deleting a visible `MainWindow` crashes: its members (`ColumnRegistry`,
+  `GlobalColumnLayoutManager`) are destroyed before the `QWidget` destructor
+  hides the playlist tables, whose headers still read them. The app closes
+  its window before that (Qt 6 closes windows on quit)
 - `.lrc` fallback misses files with non-ASCII artist/title on Windows
   (UTF-8 file name decoded with the ANSI code page); see
   `docs/architecture.md` (`LyricsLoader` / `LyricsManager`)

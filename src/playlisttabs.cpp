@@ -111,6 +111,43 @@ int PlaylistTabs::firstSelectedRow() const {
                                      : currentTableView->firstSelectedRow();
 }
 
+int PlaylistTabs::selectedSongPk() const {
+  const int row = firstSelectedRow();
+  return currentPlaylist_ != nullptr && row >= 0
+             ? currentPlaylist_->getPkByIndex(row)
+             : -1;
+}
+
+void PlaylistTabs::watchCurrentSelection() {
+  for (const QMetaObject::Connection &connection : selectionConnections_) {
+    disconnect(connection);
+  }
+  selectionConnections_.clear();
+  if (currentTableView == nullptr) {
+    return;
+  }
+  // The view's selection model connected to the model in setModel, before
+  // these, so the selection is already updated when they run.
+  QAbstractItemModel *model = currentTableView->model();
+  const auto update = [this]() { updateSelectedSong(); };
+  selectionConnections_ = {
+      connect(currentTableView->selectionModel(),
+              &QItemSelectionModel::selectionChanged, this, update),
+      connect(model, &QAbstractItemModel::modelReset, this, update),
+      connect(model, &QAbstractItemModel::layoutChanged, this, update),
+  };
+}
+
+void PlaylistTabs::updateSelectedSong() {
+  const int songPk = selectedSongPk();
+  if (currentPlaylist_ == selectedSongPlaylist_ && songPk == selectedSongPk_) {
+    return;
+  }
+  selectedSongPlaylist_ = currentPlaylist_;
+  selectedSongPk_ = songPk;
+  emit selectedSongChanged(currentPlaylist_, songPk);
+}
+
 Playlist *PlaylistTabs::currentPlaylist() const { return currentPlaylist_; }
 
 void PlaylistTabs::clearCurrentPlaylist() {
@@ -261,17 +298,21 @@ void PlaylistTabs::onTabChanged(int index) {
   if (index < 0) {
     currentPlaylist_ = nullptr;
     currentTableView = nullptr;
+    watchCurrentSelection();
     emit currentPlaylistChanged(nullptr);
+    updateSelectedSong();
     return;
   }
   currentPlaylist_ = playlistForTabIndex(index);
   QWidget *tab = ui->tabWidget->widget(index);
   currentTableView = tab->findChild<PlaylistTableView *>();
+  watchCurrentSelection();
 
   setUpCurrentPlaylist();
   QSettings settings;
   settings.setValue("playlist/last_opened_id", playlistIdForTabIndex(index));
   emit currentPlaylistChanged(currentPlaylist_);
+  updateSelectedSong();
 }
 
 void PlaylistTabs::setUpCurrentPlaylist() {

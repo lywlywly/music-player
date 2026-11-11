@@ -16,6 +16,7 @@
 #include <QSqlDatabase>
 #include <QStandardPaths>
 #include <QStatusBar>
+#include <QTabWidget>
 #include <QTableView>
 #include <QTemporaryDir>
 #include <QTest>
@@ -31,6 +32,7 @@
 #include "../dummysystemmediainterface.h"
 #include "../librarysearchdialog.h"
 #include "../lyricsmanager.h"
+#include "../lyricspanel.h"
 #include "../mainwindow.h"
 #include "../monitoredlibrary.h"
 #include "../playbackbackendmanager.h"
@@ -39,7 +41,9 @@
 #include "../playlisttablemodel.h"
 #include "../playlisttabs.h"
 #include "../settingsdialog.h"
+#include "../songinfopanel.h"
 #include "../songparser.h"
+#include "../songpropertiesdialog.h"
 #include "../utils.h"
 #include "scopedhomedir.h"
 #include "testaudiofiles.h"
@@ -145,6 +149,7 @@ private slots:
 
   void play_allFilesMissing_stopsAndReportsError();
   void lyrics_followPositionAfterBackendSwitch();
+  void infoTabs_restoreAndShowSelectedSong();
 
 private:
   void recreateWindow();
@@ -1353,6 +1358,52 @@ void TestMainWindow::lyrics_followPositionAfterBackendSwitch() {
   backend->player()->setPosition(2500);
   QTRY_COMPARE(spy.size(), 1);
   QCOMPARE(spy.at(0).at(0).toInt(), 1);
+}
+
+void TestMainWindow::infoTabs_restoreAndShowSelectedSong() {
+  auto *infoTabs = window_->findChild<QTabWidget *>("infoTabs");
+  QVERIFY(infoTabs != nullptr);
+  QCOMPARE(infoTabs->count(), 2);
+  QCOMPARE(infoTabs->tabText(0), QString("Lyrics"));
+  QCOMPARE(infoTabs->tabText(1), QString("Properties"));
+  QCOMPARE(infoTabs->currentWidget()->findChild<LyricsPanel *>("lyricsPanel"),
+           window_->findChild<LyricsPanel *>("lyricsPanel"));
+
+  infoTabs->setCurrentIndex(1);
+  recreateWindow();
+  infoTabs = window_->findChild<QTabWidget *>("infoTabs");
+  QCOMPARE(infoTabs->currentIndex(), 1);
+
+  auto *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  auto *panel = window_->findChild<SongInfoPanel *>("songInfoPanel");
+  QVERIFY(panel != nullptr);
+  QVERIFY(panel->info().isEmpty());
+
+  QTemporaryDir songDir;
+  const QString path = QFileInfo(songDir.path()).canonicalFilePath() + "/s.wav";
+  QVERIFY(writeSilentWav(path));
+  Playlist *pl = tabs->currentPlaylist();
+  QCOMPARE(pl->addFiles({path.toStdString()}).size(), size_t{1});
+  tabs->navigateIndex(0, pl);
+  QTRY_COMPARE(panel->info().songPk, pl->getPkByIndex(0));
+
+  // Edit Properties... opens Song Properties for the shown song.
+  QPushButton *edit = nullptr;
+  for (QPushButton *button : panel->findChildren<QPushButton *>()) {
+    if (button->text() == "Edit Properties...") {
+      edit = button;
+    }
+  }
+  QVERIFY(edit != nullptr);
+  QCOMPARE(window_->findChild<SongPropertiesDialog *>(), nullptr);
+  edit->click();
+  auto *dialog = window_->findChild<SongPropertiesDialog *>();
+  QVERIFY(dialog != nullptr);
+  delete dialog;
+
+  infoTabs->setCurrentIndex(0);
+  recreateWindow();
+  QCOMPARE(window_->findChild<QTabWidget *>("infoTabs")->currentIndex(), 0);
 }
 
 QTEST_MAIN(TestMainWindow)

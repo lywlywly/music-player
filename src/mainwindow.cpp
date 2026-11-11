@@ -11,6 +11,9 @@
 #include "playlistdialogs.h"
 #include "playlistsearchdialog.h"
 #include "settingsdialog.h"
+#include "songdialogs.h"
+#include "songinfopanel.h"
+#include "songinfopresenter.h"
 #include "systemmediainterfacefactory.h"
 #include <QActionGroup>
 #include <QApplication>
@@ -33,6 +36,9 @@ constexpr const char *kPlaybackFollowsCursorSettingsKey =
     "playback/playback_follows_cursor";
 constexpr const char *kCursorFollowsPlaybackSettingsKey =
     "playback/cursor_follows_playback";
+constexpr const char *kInfoTabSettingsKey = "infopanel/current_tab";
+constexpr const char *kInfoTabLyrics = "lyrics";
+constexpr const char *kInfoTabProperties = "properties";
 
 int clampVolumePercent(int volumePercent) {
   return std::clamp(volumePercent, kMinVolumePercent, kMaxVolumePercent);
@@ -96,6 +102,8 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
   playback_ = new PlaybackController(songLibrary, *playlists_, this);
   coverArt_ = new CoverArtPresenter(ui->label, this);
   lyrics_ = new LyricsPresenter(ui->lyricsPanel, this);
+  songInfo_ = new SongInfoPresenter(ui->songInfoPanel, songLibrary,
+                                    monitoredLibrary_, columnRegistry_, this);
   systemMedia_ = new SystemMediaPresenter(*createSystemMediaInterface(this),
                                           *playback_, this);
   connect(coverArt_, &CoverArtPresenter::artworkChanged, systemMedia_,
@@ -107,6 +115,7 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
   applyDisplayThemeMode(loadDisplayThemeModeSetting());
   setUpPlaybackButtonIcons(ui);
   setUpMenuBar();
+  setUpInfoTabs();
   initCloudSync();
   setUpPlaylist();
   setUpLibraryScanStatus();
@@ -174,6 +183,31 @@ void MainWindow::setUpMenuBar() {
           &MainWindow::triggerManualCloudRebase);
 }
 
+void MainWindow::setUpInfoTabs() {
+  QSettings settings;
+  const QString savedTab =
+      settings.value(kInfoTabSettingsKey, kInfoTabLyrics).toString();
+  ui->infoTabs->setCurrentWidget(savedTab == QLatin1String(kInfoTabProperties)
+                                     ? ui->propertiesTab
+                                     : ui->lyricsTab);
+  connect(ui->infoTabs, &QTabWidget::currentChanged, this, [this]() {
+    QSettings settings;
+    settings.setValue(kInfoTabSettingsKey,
+                      ui->infoTabs->currentWidget() == ui->propertiesTab
+                          ? kInfoTabProperties
+                          : kInfoTabLyrics);
+  });
+  connect(ui->songInfoPanel, &SongInfoPanel::revealRequested, this,
+          [this](int songPk) {
+            revealSongFile(this, songLibrary.getSongByPK(songPk));
+          });
+  connect(ui->songInfoPanel, &SongInfoPanel::editPropertiesRequested, this,
+          [this](int songPk) {
+            openSongProperties(this, songPk, songLibrary, columnRegistry_,
+                               *playlists_);
+          });
+}
+
 void MainWindow::setUpPlaylist() {
   playlistTabs = ui->playlistTabs;
   setPlaylistDependentActionsEnabled(false);
@@ -194,6 +228,8 @@ void MainWindow::finishSetUpPlaylist() {
                      &columnLayoutManager_, playlists_);
   connect(playlistTabs, &PlaylistTabs::doubleClicked, playback_,
           [this](QModelIndex i) { playback_->playRow(i.row()); });
+  connect(playlistTabs, &PlaylistTabs::selectedSongChanged, songInfo_,
+          &SongInfoPresenter::showSong);
   // playlist operations
   connect(ui->actionOpen, &QAction::triggered, this, [this]() {
     addFilesFromDialog(this, *playlistTabs->currentPlaylist());

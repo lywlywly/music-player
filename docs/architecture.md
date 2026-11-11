@@ -3,7 +3,7 @@
 This file contains implementation-level details that are intentionally kept out
 of `README.md`.
 
-Three topics have their own files:
+These topics have their own files:
 
 * [expressions.md](expressions.md): the expression language used by Library
   Search, autoplaylists, Playlist Search, computed fields, and the status bar
@@ -12,6 +12,8 @@ Three topics have their own files:
   file system watcher, autoplaylists, and Playlist Search.
 * [cloud-sync.md](cloud-sync.md): optional play-count sync through AWS Lambda
   and DynamoDB.
+* [info-panel.md](info-panel.md): the info panel's Lyrics and Properties
+  tabs; Properties shows the selected song's file and metadata.
 
 ## Overview
 
@@ -49,7 +51,8 @@ The backend must not depend on how (or whether) it is displayed.
   `LibraryScanner`, `IFileSystemMonitor` implementations, `SongMatcher`.
 * Frontend (Qt view adapters and widgets): `PlaylistTableModel`,
   `PlaylistTableView`, `PlaylistTabs`, `LibrarySearchResultsModel`, dialogs,
-  `MainWindow`.
+  presenters (`LyricsPresenter`, `SongInfoPresenter`, ...), `SongInfoPanel`,
+  `buildSongInfo`, `MainWindow`.
 
 | Backend classes may use | Backend classes must not use |
 |---|---|
@@ -134,6 +137,12 @@ The top-level window and what it owns.
     `PlaylistTabs::newAutoPlaylist`.
   * A permanent status bar label shows `MonitoredLibrary` scan progress, then
     the number of offline watched folders, if any.
+  * The info panel at the top left (`infoTabs`) has a Lyrics and a Properties
+    tab; the current one is restored from `infopanel/current_tab` (`lyrics` or
+    `properties`). `MainWindow` connects
+    `PlaylistTabs::selectedSongChanged` to `SongInfoPresenter::showSong`, and
+    the Properties tab's buttons to `revealSongFile` and `openSongProperties`.
+    See [info-panel.md](info-panel.md).
   * Edit > Search Playlist (`QKeySequence::Find`) shows the one
     `PlaylistSearchDialog`, kept on the shown playlist through
     `currentPlaylistChanged`. Its row requests go to `PlaybackController::playRow`,
@@ -196,6 +205,8 @@ The in-memory song store and reading/writing audio file tags.
     (`EfswFileSystemMonitor` in the app). Watcher events only mark paths,
     which are scanned 1 s after the last event; offline folders are polled
     every 60 s instead.
+  * `folderOf(songPk)` returns the watched folder holding a song (with its
+    `online` flag), or none; the Properties tab uses it.
 * `EfswFileSystemMonitor` (backend, owned by `MainWindow`)
   * Recursive efsw watches. Events arrive on efsw's thread and are forwarded
     to the main thread as queued `pathsChanged` / `folderNeedsRescan`
@@ -238,6 +249,13 @@ are the Qt frontend.
   * Clear Playlist (row context menu, and the `MainWindow` menu action) calls `clearCurrentPlaylist`.
   * Autoplaylist tabs show an icon, or a warning icon with `autoPlaylistError` as tooltip, updated on `autoPlaylistExpressionChanged`. Their row context menu hides Remove from Playlist and Clear Playlist; their tab context menu adds Edit Autoplaylist (`editAutoPlaylist`). `newAutoPlaylist` and `editAutoPlaylist` open an `AutoPlaylistDialog` (name and expression, checked with `parseSongFilter` as you type, with the number of matching monitored songs).
   * Emits `currentPlaylistChanged` when the shown playlist changes.
+  * Emits `selectedSongChanged(playlist, songPk)` when the song of the current
+    tab's first selected row changes (`-1` with none). Besides
+    `selectionChanged`, it re-checks on the view model's
+    `modelReset` and `layoutChanged`, which clear or move the selection
+    without `selectionChanged`. These are the model's signals, not the
+    `Playlist`'s, so the selection model (connected first, in `setModel`) has
+    already updated the selection.
   * Refresh (tab context menu) re-reads the playlist's tags with `refreshMetadataWithProgress`.
   * The Properties context-menu action carries `PlaylistTableView::propertiesShortcuts()`
     only so the menu can display the platform binding (`Command+I` on macOS,
@@ -417,9 +435,25 @@ OS media controls and now-playing metadata.
     called before `CoverArtPresenter::showSong(...)`, whose `artworkChanged`
     `MainWindow` connects to `setArtwork(...)`.
 
-### Lyrics and cover art
+### Info panel, lyrics and cover art
 
-Where lyrics and cover images come from, and the lyrics panel settings.
+The info panel's tabs (Lyrics, Properties), where lyrics and cover images come
+from, and the lyrics panel settings.
+
+* `SongInfoPresenter` (frontend), `SongInfoPanel` (frontend, the Properties
+  tab), `buildSongInfo` (frontend, songinfo.h)
+  * Show the selected song's file (name, folder, path, size, modified and
+    created times), audio properties, main tags, play stats and watched
+    folder. See [info-panel.md](info-panel.md).
+  * `buildSongInfo` reads the stored `MSong` and one `QFileInfo`, skipped when
+    the song's watched folder is offline. It never re-parses the file.
+  * The presenter rebuilds on `showSong`, on the shown playlist's
+    `songDataChanged` for the song's row and on `folderAvailabilityChanged`,
+    debounced (100 ms).
+* `LyricsPanel` (frontend)
+  * Keeps the index of its current line and re-centers on it, without
+    animation, in `showEvent` and `resizeEvent`. A `QTabWidget` sizes only its
+    current page, so the Lyrics tab can be resized while hidden.
 
 * `LyricsPresenter` (frontend)
   * Shows the playing song's lyrics in `LyricsPanel`, owns the

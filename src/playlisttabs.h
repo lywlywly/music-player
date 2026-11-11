@@ -69,6 +69,10 @@ signals:
   void doubleClicked(const QModelIndex &index);
   // The playlist shown changed; nullptr when there is no tab.
   void currentPlaylistChanged(Playlist *playlist);
+  // The song of the current tab's first selected row changed: songPk is -1
+  // with no selected row, and playlist is nullptr with no tab. Sent only when
+  // the pair changes.
+  void selectedSongChanged(Playlist *playlist, int songPk);
 
 private:
   void addPlaylistTab(const QString &playlistName, int playlistId);
@@ -85,6 +89,13 @@ private:
   // tabData and passing it to PlaylistCollection::setPlaylistOrder.
   void persistPlaylistTabOrder();
   void onTabChanged(int index);
+  // Follows the current view's selection, and the model changes that clear or
+  // move it without selectionChanged (reset, layout change). Removing selected
+  // rows sends selectionChanged (before the playlist changes).
+  void watchCurrentSelection();
+  // The song of firstSelectedRow(), or -1.
+  int selectedSongPk() const;
+  void updateSelectedSong();
   void setUpCurrentPlaylist();
   void setUpPlaybackManager();
   void initializePlaylists();
@@ -114,6 +125,9 @@ private:
   GlobalColumnLayoutManager *columnLayoutManager_ = nullptr;
   QLineEdit *tabRenameEditor_ = nullptr;
   int renamingTabIndex_ = -1;
+  std::vector<QMetaObject::Connection> selectionConnections_;
+  Playlist *selectedSongPlaylist_ = nullptr;
+  int selectedSongPk_ = -1;
 };
 
 #endif // PLAYLISTTABS_H

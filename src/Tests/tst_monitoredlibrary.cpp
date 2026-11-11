@@ -104,6 +104,7 @@ private slots:
   void offlineFolder_isUnwatchedUntilPollFindsItBack();
   void failedWatch_marksLiveUpdatesUnavailable();
   void decomposedFileName_staysAcrossScans();
+  void folderOf_returnsTheHoldingFolder();
 
 private:
   // A full scan of every folder, then waits until no scan is pending.
@@ -844,6 +845,39 @@ void TestMonitoredLibrary::decomposedFileName_staysAcrossScans() {
   // The NFD path on disk matches the stored NFC path.
   rescanAndWait();
   QCOMPARE(monitored_->songPks(), std::vector<int>{pk});
+}
+
+void TestMonitoredLibrary::folderOf_returnsTheHoldingFolder() {
+  QVERIFY(writeFile(root() + "/w1/a.mp3", "A"));
+  QVERIFY(writeFile(root() + "/w2/b.mp3", "B"));
+  const int w1 = monitored_->addFolder(root() + "/w1").folderId;
+  const int w2 = monitored_->addFolder(root() + "/w2").folderId;
+  QVERIFY(w1 > 0 && w2 > 0);
+  waitIdle();
+  int a = -1;
+  int b = -1;
+  for (int pk : monitored_->songPks()) {
+    (library_->getSongByPK(pk).at("title").text == "A" ? a : b) = pk;
+  }
+  QVERIFY(a >= 0 && b >= 0);
+
+  QCOMPARE(monitored_->folderOf(a)->id, w1);
+  QCOMPARE(monitored_->folderOf(a)->path, root() + "/w1");
+  QVERIFY(monitored_->folderOf(a)->online);
+  QCOMPARE(monitored_->folderOf(b)->id, w2);
+  QVERIFY(!monitored_->folderOf(-1).has_value());
+
+  // Offline folders are still returned, marked offline.
+  QVERIFY(QDir().rename(root() + "/w1", root() + "/unmounted"));
+  rescanAndWait();
+  QVERIFY(!monitored_->folderOf(a)->online);
+  QVERIFY(monitored_->folderOf(b)->online);
+
+  // A manual song whose folder was removed is held by no folder.
+  QVERIFY(collection_->playlist(collection_->playlistIdsInOrder().front())
+              ->addSongByPk(b));
+  QVERIFY(monitored_->removeFolder(w2));
+  QVERIFY(!monitored_->folderOf(b).has_value());
 }
 
 QTEST_GUILESS_MAIN(TestMonitoredLibrary)

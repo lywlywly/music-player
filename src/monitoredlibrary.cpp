@@ -206,6 +206,22 @@ bool MonitoredLibrary::holds(int songPk) const {
   return entries_.contains(songPk);
 }
 
+std::optional<MonitoredLibrary::Folder>
+MonitoredLibrary::folderOf(int songPk) const {
+  const auto entry = entries_.find(songPk);
+  if (entry == entries_.end()) {
+    return std::nullopt;
+  }
+  const auto folder =
+      std::find_if(folders_.begin(), folders_.end(), [&](const Folder &f) {
+        return f.id == entry->second.folderId;
+      });
+  if (folder == folders_.end()) {
+    return std::nullopt;
+  }
+  return *folder;
+}
+
 std::vector<int> MonitoredLibrary::songPks() const {
   std::vector<int> pks;
   pks.reserve(entries_.size());

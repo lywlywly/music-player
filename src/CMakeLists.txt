@@ -204,6 +204,12 @@ set(PROJECT_SOURCES
   songpropertiesdialog.cpp
   songparser.h
   songparser.cpp
+  songinfo.h
+  songinfo.cpp
+  songinfopanel.h
+  songinfopanel.cpp
+  songinfopresenter.h
+  songinfopresenter.cpp
   statusruntimesymboltable.h
   statusruntimesymboltable.cpp
   systemmediainterfacefactory.h

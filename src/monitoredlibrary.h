@@ -90,6 +90,8 @@ public:
   bool isScanning() const;
 
   bool holds(int songPk) const;
+  // The watched folder holding the song, or none for a song it does not hold.
+  std::optional<Folder> folderOf(int songPk) const;
   // Monitored song pks, ascending.
   std::vector<int> songPks() const;
   // After the app wrote the file's tags (Song Properties): if songPk is

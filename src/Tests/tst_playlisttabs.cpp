@@ -161,6 +161,9 @@ private slots:
   void autoPlaylistMenus_leaveOutWritesAndOfferEdit();
   void newAutoPlaylist_dialogChecksExpressionAndCreates();
   void editAutoPlaylist_renamesAndSetsExpression();
+  void selectedSongChanged_followsSelectionAndTabs();
+  void selectedSongChanged_followsRemovalAndSort();
+  void selectedSongChanged_followsAutoPlaylistReset();
 
 private:
   void recreateTabs();
@@ -1236,6 +1239,98 @@ void TestPlaylistTabs::renameTab_updatesTabTextAndDb() {
                      .arg(playlistId)));
   QVERIFY(q.next());
   QCOMPARE(q.value(0).toString(), QString("Renamed"));
+}
+
+namespace {
+// The last (playlist, songPk) the spy recorded.
+std::pair<Playlist *, int> lastSelected(const QSignalSpy &spy) {
+  const QList<QVariant> &args = spy.last();
+  return {args.at(0).value<Playlist *>(), args.at(1).toInt()};
+}
+
+void selectRows(QTableView *table, const QList<int> &rows) {
+  QItemSelection selection;
+  for (int row : rows) {
+    const QModelIndex index = table->model()->index(row, 0);
+    selection.select(index, index);
+  }
+  table->selectionModel()->select(selection,
+                                  QItemSelectionModel::ClearAndSelect |
+                                      QItemSelectionModel::Rows);
+}
+} // namespace
+
+void TestPlaylistTabs::selectedSongChanged_followsSelectionAndTabs() {
+  Playlist *pl = tabs_->currentPlaylist();
+  QVERIFY(pl->addSong(makeSong("A", "Artist", "/tmp/pt-sel-a.mp3")));
+  QVERIFY(pl->addSong(makeSong("B", "Artist", "/tmp/pt-sel-b.mp3")));
+  auto *table = tabs_->tabWidget()->currentWidget()->findChild<QTableView *>();
+  QSignalSpy spy(tabs_, &PlaylistTabs::selectedSongChanged);
+
+  selectRows(table, {1});
+  QCOMPARE(spy.count(), 1);
+  QCOMPARE(lastSelected(spy), std::make_pair(pl, pl->getPkByIndex(1)));
+
+  // The smallest selected row wins.
+  selectRows(table, {1, 0});
+  QCOMPARE(lastSelected(spy), std::make_pair(pl, pl->getPkByIndex(0)));
+
+  table->clearSelection();
+  QCOMPARE(lastSelected(spy), std::make_pair(pl, -1));
+
+  // Switching tabs reports the new tab's selection, and back.
+  selectRows(table, {1});
+  const int other = collection_->createPlaylist("Other");
+  tabs_->tabWidget()->setCurrentIndex(1);
+  QCOMPARE(lastSelected(spy), std::make_pair(collection_->playlist(other), -1));
+  tabs_->tabWidget()->setCurrentIndex(0);
+  QCOMPARE(lastSelected(spy), std::make_pair(pl, pl->getPkByIndex(1)));
+}
+
+void TestPlaylistTabs::selectedSongChanged_followsRemovalAndSort() {
+  Playlist *pl = tabs_->currentPlaylist();
+  QVERIFY(pl->addSong(makeSong("A", "Artist", "/tmp/pt-sel-a.mp3")));
+  QVERIFY(pl->addSong(makeSong("B", "Artist", "/tmp/pt-sel-b.mp3")));
+  QVERIFY(pl->addSong(makeSong("C", "Artist", "/tmp/pt-sel-c.mp3")));
+  const int a = pl->getPkByIndex(0);
+  const int c = pl->getPkByIndex(2);
+  auto *table = tabs_->tabWidget()->currentWidget()->findChild<QTableView *>();
+  selectRows(table, {0, 2});
+  QSignalSpy spy(tabs_, &PlaylistTabs::selectedSongChanged);
+
+  // A sort that keeps A first sends nothing.
+  pl->sortByField("title", 0);
+  QCOMPARE(spy.count(), 0);
+  // Descending, C comes first; the selection moves with its songs, without
+  // selectionChanged.
+  pl->sortByField("title", 1);
+  QCOMPARE(spy.count(), 1);
+  QCOMPARE(lastSelected(spy), std::make_pair(pl, c));
+
+  // Removing an unselected row renumbers the selection but keeps its songs.
+  pl->removeSongs({1});
+  QCOMPARE(spy.count(), 1);
+  // Removing the first selected row makes the next one first.
+  pl->removeSongs({pl->getIndexByPk(c)});
+  QCOMPARE(lastSelected(spy), std::make_pair(pl, a));
+  pl->removeSongs({pl->getIndexByPk(a)});
+  QCOMPARE(lastSelected(spy), std::make_pair(pl, -1));
+}
+
+void TestPlaylistTabs::selectedSongChanged_followsAutoPlaylistReset() {
+  watchSongs({"a.mp3", "b.mp3"});
+  const int id = collection_->createAutoPlaylist("Auto", "true");
+  tabs_->tabWidget()->setCurrentIndex(1);
+  Playlist *autoPlaylist = collection_->playlist(id);
+  QCOMPARE(tabs_->currentPlaylist(), autoPlaylist);
+  auto *table = tabs_->tabWidget()->currentWidget()->findChild<QTableView *>();
+  selectRows(table, {0});
+  QSignalSpy spy(tabs_, &PlaylistTabs::selectedSongChanged);
+
+  // A reset clears the selection without selectionChanged.
+  QVERIFY(collection_->setAutoPlaylistExpression(id, "false"));
+  QCOMPARE(spy.count(), 1);
+  QCOMPARE(lastSelected(spy), std::make_pair(autoPlaylist, -1));
 }
 
 void TestPlaylistTabs::watchSongs(const QStringList &fileNames) {
