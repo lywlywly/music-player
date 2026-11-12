@@ -515,7 +515,7 @@
   <customwidget>
    <class>LyricsPanel</class>
    <extends>QWidget</extends>
-   <header>lyricspanel.h</header>
+   <header>plugins/lyrics/lyricspanel.h</header>
    <container>1</container>
   </customwidget>
   <customwidget>

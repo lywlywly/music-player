@@ -1,5 +1,6 @@
 #include "lyricspresenter.h"
 
+#include "iplayerhost.h"
 #include "lyricsloader.h"
 #include "lyricspanel.h"
 #include <QApplication>
@@ -7,25 +8,27 @@
 #include <QSettings>
 #include <QStringList>
 
-LyricsPresenter::LyricsPresenter(LyricsPanel *lyricsPanel, QObject *parent)
-    : QObject(parent), lyricsPanel_(lyricsPanel), lyricsManager_(this) {
+LyricsPresenter::LyricsPresenter(LyricsPanel *lyricsPanel, IPlayerHost &player)
+    : QObject(lyricsPanel), lyricsPanel_(lyricsPanel), player_(player),
+      lyricsManager_(this) {
   connect(&lyricsManager_, &LyricsManager::newLyricsLineIndex, lyricsPanel_,
           &LyricsPanel::updateLyricsPanel);
+  player_.addListener(this);
 }
 
-void LyricsPresenter::showSong(
-    const MSong &song,
-    const std::unordered_map<std::string, std::string> &remainingFields) {
-  lyricsManager_.setLyrics(LyricsLoader::resolveLyrics(song, remainingFields));
+LyricsPresenter::~LyricsPresenter() { player_.removeListener(this); }
+
+void LyricsPresenter::trackStarted(const TrackInfo &track) {
+  lyricsManager_.setLyrics(LyricsLoader::resolveLyrics(track));
   lyricsPanel_->setLyricsPanel(lyricsManager_.getCurrentLyricsMap());
 }
 
-void LyricsPresenter::clear() {
+void LyricsPresenter::stopped() {
   lyricsManager_.setLyrics({});
   lyricsPanel_->setLyricsPanel(lyricsManager_.getCurrentLyricsMap());
 }
 
-void LyricsPresenter::setPositionMs(qint64 positionMs) {
+void LyricsPresenter::positionChanged(qint64 positionMs) {
   lyricsManager_.onPlayerProgressChange(positionMs);
 }
 

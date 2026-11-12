@@ -8,7 +8,7 @@
 #include <map>
 #include <string>
 
-#include "../lyricspanel.h"
+#include "../plugins/lyrics/lyricspanel.h"
 
 namespace {
 std::map<int, std::string> manyLines(int count) {

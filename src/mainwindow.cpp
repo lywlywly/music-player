@@ -10,6 +10,8 @@
 #include "playbackbuttonstyle.h"
 #include "playlistdialogs.h"
 #include "playlistsearchdialog.h"
+#include "pluginplayerhost.h"
+#include "plugins/lyrics/lyricspresenter.h"
 #include "settingsdialog.h"
 #include "songdialogs.h"
 #include "songinfopanel.h"
@@ -103,7 +105,10 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
                                       monitoredLibrary_, this);
   playback_ = new PlaybackController(songLibrary, *playlists_, this);
   coverArt_ = new CoverArtPresenter(ui->label, this);
-  lyrics_ = new LyricsPresenter(ui->lyricsPanel, this);
+  // A child created after ui->setupUi, so the lyrics panel and its presenter
+  // (a listener) are destroyed before it.
+  pluginPlayerHost_ = new PluginPlayerHost(*playback_, this);
+  lyrics_ = new LyricsPresenter(ui->lyricsPanel, *pluginPlayerHost_);
   songInfo_ = new SongInfoPresenter(ui->songInfoPanel, songLibrary,
                                     monitoredLibrary_, columnRegistry_, this);
   spectrum_ = new SpectrumPresenter(ui->spectrumWidget, this);
@@ -385,18 +390,14 @@ void MainWindow::setUpPlayback() {
                ? playlistTabs->firstSelectedRow()
                : -1;
   });
-  connect(
-      playback_, &PlaybackController::songStarted, this,
-      [this](
-          const MSong &song,
-          const std::unordered_map<std::string, std::string> &remainingFields) {
-        systemMedia_->showSong(song);
-        lyrics_->showSong(song, remainingFields);
-        // After systemMedia_->showSong, which clears the system artwork.
-        coverArt_->showSong(song);
-        // Starting a song sends songStarted, not playbackStateChanged.
-        spectrum_->setState(SpectrumPresenter::State::Playing);
-      });
+  connect(playback_, &PlaybackController::songStarted, this,
+          [this](const MSong &song) {
+            systemMedia_->showSong(song);
+            // After systemMedia_->showSong, which clears the system artwork.
+            coverArt_->showSong(song);
+            // Starting a song sends songStarted, not playbackStateChanged.
+            spectrum_->setState(SpectrumPresenter::State::Playing);
+          });
   connect(spectrum_, &SpectrumPresenter::tapChanged, playback_,
           &PlaybackController::setPcmTap);
   connect(playback_, &PlaybackController::playbackStateChanged, this,
@@ -471,7 +472,6 @@ void MainWindow::initVolumeControl() {
 
 void MainWindow::playbackStateChanged(PlaybackQueue::PlaybackStatus status) {
   if (status == PlaybackQueue::PlaybackStatus::None) {
-    lyrics_->clear();
     coverArt_->clear();
   }
   switch (status) {
@@ -513,7 +513,6 @@ void MainWindow::durationChanged(qint64 newDuration) {
 void MainWindow::positionChanged(qint64 progress) {
   if (!ui->horizontalSlider->isSliderDown())
     ui->horizontalSlider->setValue(progress);
-  lyrics_->setPositionMs(progress);
   spectrum_->setPosition(progress);
 }
 

@@ -7,7 +7,6 @@
 #include "databasemanager.h"
 #include "efswfilesystemmonitor.h"
 #include "globalcolumnlayoutmanager.h"
-#include "lyricspresenter.h"
 #include "monitoredlibrary.h"
 #include "playbackcontroller.h"
 #include "playlist.h"
@@ -19,8 +18,10 @@
 #include <QPointer>
 #include <QString>
 
+class LyricsPresenter;
 class NowPlayingPresenter;
 class PlaylistSearchDialog;
+class PluginPlayerHost;
 class SettingsDialog;
 class SongInfoPresenter;
 class SpectrumPresenter;
@@ -50,7 +51,7 @@ private:
   // Gives an open Settings dialog (nullptr: none) the current song and
   // runtime symbols for its display expression preview.
   void updateSettingsDisplayPreviewContext(SettingsDialog *dialog);
-  // On stop, clears the lyrics and cover.
+  // On stop, clears the cover.
   void playbackStateChanged(PlaybackQueue::PlaybackStatus status);
   // Selects and scrolls to the row that started playing, if Cursor follows
   // playback is on.
@@ -94,6 +95,8 @@ private:
   PlaybackController *playback_ = nullptr;
   PlaylistTabs *playlistTabs;
   CoverArtPresenter *coverArt_ = nullptr;
+  PluginPlayerHost *pluginPlayerHost_ = nullptr;
+  // A child of the lyrics panel.
   LyricsPresenter *lyrics_ = nullptr;
   SongInfoPresenter *songInfo_ = nullptr;
   SpectrumPresenter *spectrum_ = nullptr;

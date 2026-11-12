@@ -185,7 +185,7 @@ have, is left out, and so is a section with no rows.
 
 ### `SongInfoPresenter` (frontend, `songinfopresenter.{h,cpp}`)
 
-* Owned by `MainWindow`, like `LyricsPresenter`. Holds the shown playlist (a
+* A child of `MainWindow`. Holds the shown playlist (a
   `QPointer<Playlist>`), the song pk to show, and the panel (a
   `QPointer<SongInfoPanel>`: the UI widgets are destroyed before the window's
   later children).

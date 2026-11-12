@@ -16,6 +16,8 @@ These topics have their own files:
   tabs; Properties shows the selected song's file and metadata.
 * [spectrum.md](spectrum.md): the Spectrum tab and the `src/spectrum/`
   module (FFT, bands, `PcmTap`, widget, presenter).
+* [plugins.md](plugins.md): plan for plugins; the plugin API and its
+  boundary.
 
 ## Overview
 
@@ -58,6 +60,9 @@ The backend must not depend on how (or whether) it is displayed.
 * The spectrum module (`src/spectrum/`, library `myspectrum`) depends on Qt
   only, never on app classes. Its analysis classes (`fft`, `SpectrumBands`,
   `SpectrumAnalyzer`, `SpectrumSmoother`, `PcmTap`) use no Qt.
+* The lyrics code (`src/plugins/lyrics/`, library `mylyrics`) depends on Qt
+  and the plugin API (`src/pluginapi/`) only; the app reaches it through
+  `PluginPlayerHost`. See [plugins.md](plugins.md).
 
 | Backend classes may use | Backend classes must not use |
 |---|---|
@@ -474,14 +479,11 @@ images come from, and the lyrics panel settings.
     animation, in `showEvent` and `resizeEvent`. A `QTabWidget` sizes only its
     current page, so the Lyrics tab can be resized while hidden.
 
-* `LyricsPresenter` (frontend)
+* `LyricsPresenter` (frontend, `src/plugins/lyrics/`)
   * Shows the playing song's lyrics in `LyricsPanel`, owns the
     `LyricsManager`, and applies the lyrics panel style settings.
-  * `MainWindow` calls `showSong(...)` on `PlaybackController::songStarted`,
-    `clear()` on stop, and `setPositionMs(...)` on
-    `PlaybackController::positionChanged`. The position comes from the
-    controller, not the player, because a backend switch replaces the player;
-    a direct connection would stay on the old one.
+  * An `IPlayerListener` of `PluginPlayerHost` ([plugins.md](plugins.md)).
+  * A child of its panel, so it is destroyed with the UI, before the host.
 * `CoverArtPresenter` (frontend)
   * Shows the playing song's embedded cover in the cover label, scaled to the
     label on resize and splitter moves.

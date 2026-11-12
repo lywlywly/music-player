@@ -1,11 +1,12 @@
 #include "lyricsloader.h"
-#include "utils.h"
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <initializer_list>
 #include <iostream>
 #include <regex>
 #include <sstream>
@@ -72,13 +73,37 @@ std::map<int, std::string> parseLyricsStream(std::istream &stream) {
   return lyricsMap;
 }
 
+// From the environment (USERPROFILE on Windows, HOME elsewhere), which tests
+// point at a temporary folder. QDir::homePath() reads the profile folder from
+// the user's token on Windows instead.
+std::filesystem::path homePath() {
+#ifdef _WIN32
+  const char *home = std::getenv("USERPROFILE");
+#else
+  const char *home = std::getenv("HOME");
+#endif
+  return home ? std::filesystem::path(home) : std::filesystem::path{};
+}
+
 // Known issue: on Windows, path(std::string) decodes with the ANSI code page,
 // so a non-ASCII (UTF-8) artist or title yields the wrong file name. See
 // docs/architecture.md (LyricsLoader / LyricsManager).
 std::filesystem::path findFileByTitleAndArtist(std::string_view title,
                                                std::string_view artist) {
   std::string filename = std::format("{} - {}.lrc", artist, title);
-  return util::getHomePath() / "Music" / filename;
+  return homePath() / "Music" / filename;
+}
+
+// The first non-empty value of keys in fields, or an empty string.
+QString firstNonEmpty(const QHash<QString, QString> &fields,
+                      std::initializer_list<const char *> keys) {
+  for (const char *key : keys) {
+    const QString value = fields.value(QLatin1String(key));
+    if (!value.isEmpty()) {
+      return value;
+    }
+  }
+  return {};
 }
 } // namespace
 
@@ -98,32 +123,20 @@ LyricsLoader::parseLyricsText(std::string_view rawText) {
   return parseLyricsStream(stream);
 }
 
-std::map<int, std::string> LyricsLoader::resolveLyrics(
-    const std::unordered_map<std::string, FieldValue> &song,
-    const std::unordered_map<std::string, std::string> &remainingFields) {
-  std::string lyricsText;
-  for (const char *key : {"attr:unsynced_lyrics", "attr:lyrics"}) {
-    auto it = song.find(key);
-    if (it != song.end() && !it->second.text.empty()) {
-      lyricsText = it->second.text;
-      break;
-    }
-  }
-  if (lyricsText.empty()) {
-    for (const char *key : {"unsynced_lyrics", "lyrics"}) {
-      auto it = remainingFields.find(key);
-      if (it != remainingFields.end() && !it->second.empty()) {
-        lyricsText = it->second;
-        break;
-      }
-    }
+std::map<int, std::string> LyricsLoader::resolveLyrics(const TrackInfo &track) {
+  QString lyricsText =
+      firstNonEmpty(track.fields, {"attr:unsynced_lyrics", "attr:lyrics"});
+  if (lyricsText.isEmpty()) {
+    lyricsText = firstNonEmpty(track.tagFields, {"unsynced_lyrics", "lyrics"});
   }
   std::map<int, std::string> lyrics;
-  if (!lyricsText.empty()) {
-    lyrics = parseLyricsText(lyricsText);
+  if (!lyricsText.isEmpty()) {
+    lyrics = parseLyricsText(lyricsText.toStdString());
   }
   if (lyrics.empty()) {
-    lyrics = getLyrics(song.at("title").text, song.at("artist").text);
+    lyrics =
+        getLyrics(track.fields.value(QStringLiteral("title")).toStdString(),
+                  track.fields.value(QStringLiteral("artist")).toStdString());
   }
   return lyrics;
 }

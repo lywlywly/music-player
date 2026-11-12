@@ -12,6 +12,7 @@ macOS, Windows and Linux.
 | [docs/monitored-library.md](docs/monitored-library.md) | Watched folders, scans, the file system watcher, autoplaylists, Playlist Search | Before changing the library or its watcher |
 | [docs/info-panel.md](docs/info-panel.md) | The info panel's Lyrics and Properties tabs | Before changing the info panel |
 | [docs/spectrum.md](docs/spectrum.md) | The Spectrum tab, the `src/spectrum/` module, the players' audio taps | Before changing the spectrum or the players' audio path |
+| [docs/plugins.md](docs/plugins.md) | Plan: plugins (DLLs with capabilities, Lyrics first), the plugin API and its boundary | Before changing the plugin API or a plugin |
 | [docs/cloud-sync.md](docs/cloud-sync.md) | Play-count sync: DynamoDB model, Lambda API (`infra/aws/lambda`) | Before changing play stats or sync |
 | [README.md](README.md) | For users: features, build, query syntax, play stats | When a user-visible feature or the build changes |
 | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Third-party components and their licenses | Before adding or updating a dependency |

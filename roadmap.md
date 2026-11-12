@@ -56,6 +56,12 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
   - ✅ Live updates through efsw, debounced into path scans
   - ✅ Offline folders (unmounted drives) release nothing and are polled
   - See `docs/monitored-library.md`
+- 🟡 Plugins loaded from DLLs, with capabilities (info panel tab, Settings
+  page first); Lyrics is the first plugin
+  - ✅ Lyrics code behind the plugin API (`src/plugins/lyrics/`,
+    `src/pluginapi/`), fed by `PluginPlayerHost`
+  - ⬜ Loading (`PluginManager`, `lyricsplugin`) and capabilities
+  - See `docs/plugins.md`
 - ⬜ CLI tool and headless mode
 
 ## Architecture

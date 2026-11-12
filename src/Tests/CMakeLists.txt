@@ -48,6 +48,7 @@ set(TEST_NAMES
     efswfilesystemmonitor
     songinfo
     lyricspanel
+    plugins
     spectrum
     spectrumpresenter
     audiotaps

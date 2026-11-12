@@ -66,6 +66,8 @@ myplayer_add_efsw()
 pkg_check_modules(GST IMPORTED_TARGET REQUIRED gstreamer-1.0)
 
 add_subdirectory(spectrum)
+add_subdirectory(pluginapi)
+add_subdirectory(plugins/lyrics)
 
 if(WIN32)
   find_package(FFmpeg REQUIRED COMPONENTS avcodec avformat avutil)
@@ -144,15 +146,6 @@ set(PROJECT_SOURCES
   librarysearchdialog.cpp
   librarysearchresultsmodel.h
   librarysearchresultsmodel.cpp
-  lyricsloader.h
-  lyricsloader.cpp
-  lyricsmanager.h
-  lyricsmanager.cpp
-  lyricspresenter.h
-  lyricspresenter.cpp
-  lyricspanel.ui
-  lyricspanel.h
-  lyricspanel.cpp
   monitoredlibrary.h
   monitoredlibrary.cpp
   nowplayingdisplay.h
@@ -194,6 +187,8 @@ set(PROJECT_SOURCES
   playlistsearch.cpp
   playlistsearchdialog.h
   playlistsearchdialog.cpp
+  pluginplayerhost.h
+  pluginplayerhost.cpp
   qtaudioplayer.h
   qtaudioplayer.cpp
   settingsdialog.ui
@@ -270,6 +265,8 @@ target_link_libraries(
   PkgConfig::GST
   efsw
   myspectrum
+  pluginapi
+  mylyrics
 )
 
 if(WIN32)
