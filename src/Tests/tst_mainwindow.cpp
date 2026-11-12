@@ -2,7 +2,6 @@
 #include <QAction>
 #include <QApplication>
 #include <QDir>
-#include <QFile>
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
@@ -11,8 +10,9 @@
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
-#include <QSignalSpy>
 #include <QSlider>
+#include <QSpinBox>
+#include <QSplitter>
 #include <QSqlDatabase>
 #include <QStandardPaths>
 #include <QStatusBar>
@@ -20,6 +20,7 @@
 #include <QTableView>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTextEdit>
 #include <QUrl>
 #include <QUuid>
 
@@ -38,8 +39,6 @@
 #include "../playlistsearchdialog.h"
 #include "../playlisttablemodel.h"
 #include "../playlisttabs.h"
-#include "../plugins/lyrics/lyricsmanager.h"
-#include "../plugins/lyrics/lyricspanel.h"
 #include "../settingsdialog.h"
 #include "../songinfopanel.h"
 #include "../songparser.h"
@@ -48,6 +47,7 @@
 #include "../utils.h"
 #include "scopedhomedir.h"
 #include "testaudiofiles.h"
+#include <optional>
 
 namespace {
 MSong makeSong(const QString &title, const QString &artist,
@@ -149,9 +149,10 @@ private slots:
   void cloudSync_manualRebase_appliesCloudPlayCount_integration();
 
   void play_allFilesMissing_stopsAndReportsError();
-  void lyrics_followPositionAfterBackendSwitch();
   void infoTabs_restoreAndShowSelectedSong();
   void spectrum_tapGoesToThePlayerWhileShown();
+  void splitters_startAtAQuarterAndRestoreDraggedSizes();
+  void settings_pluginPageAppliesToItsPanelOnOk();
 
 private:
   void recreateWindow();
@@ -163,11 +164,18 @@ private:
   LibrarySearchDialog *searchLibrary(const QString &expression);
   MainWindow *window_ = nullptr;
   QTemporaryDir *workDir_ = nullptr;
+  // The home folder points at workDir_, so the lyrics plugin looks for .lrc
+  // files there, not in the developer's Music folder.
+  std::optional<ScopedHomeDir> home_;
   QString oldCwd_;
   QString connectionName_;
 };
 
 void TestMainWindow::recreateWindow() {
+  // Deleting a visible MainWindow crashes (roadmap.md, Known Issues).
+  if (window_ != nullptr) {
+    window_->close();
+  }
   delete window_;
   window_ = nullptr;
   connectionName_ =
@@ -187,6 +195,7 @@ void TestMainWindow::init() {
 
   workDir_ = new QTemporaryDir();
   QVERIFY(workDir_->isValid());
+  home_.emplace(workDir_->path());
   oldCwd_ = QDir::currentPath();
   QVERIFY(QDir::setCurrent(workDir_->path()));
 
@@ -194,10 +203,14 @@ void TestMainWindow::init() {
 }
 
 void TestMainWindow::cleanup() {
+  if (window_ != nullptr) {
+    window_->close();
+  }
   delete window_;
   window_ = nullptr;
   QTest::qWait(100);
   QDir::setCurrent(oldCwd_);
+  home_.reset();
   delete workDir_;
   workDir_ = nullptr;
   qunsetenv("MYPLAYER_USE_DUMMY_AUDIO_PLAYER");
@@ -1304,64 +1317,6 @@ void TestMainWindow::play_allFilesMissing_stopsAndReportsError() {
            ISystemMediaInterface::PlaybackState::Stopped);
 }
 
-void TestMainWindow::lyrics_followPositionAfterBackendSwitch() {
-  const ScopedHomeDir scopedHome(workDir_->path());
-
-  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
-  QVERIFY(tabs != nullptr);
-  Playlist *playlist = tabs->currentPlaylist();
-  QVERIFY(playlist != nullptr);
-  auto *media = window_->findChild<DummySystemMediaInterface *>();
-  QVERIFY(media != nullptr);
-  auto *lyrics = window_->findChild<LyricsManager *>();
-  QVERIFY(lyrics != nullptr);
-  PlaybackBackendManager *backend =
-      window_->findChild<PlaybackBackendManager *>();
-  QVERIFY(backend != nullptr);
-
-  const QString wav = workDir_->filePath("lyrics-song.wav");
-  QVERIFY(writeSilentWav(wav));
-  playlist->addSong(makeSong("Song", "Artist", wav));
-  playlist->setLastPlayed(playlist->getPkByIndex(0));
-  // playSong refreshes the song from the untagged file, so look up the title
-  // and artist it plays with. The .lrc file is written after this first play,
-  // so only the play on the new backend loads it.
-  media->requestPlayForTest();
-  const MSong &played = playlist->getSongByIndex(0);
-  QVERIFY(QDir(workDir_->path()).mkpath("Music"));
-  QFile lrc(
-      QDir(workDir_->path())
-          .filePath(QStringLiteral("Music/%1 - %2.lrc")
-                        .arg(QString::fromStdString(played.at("artist").text),
-                             QString::fromStdString(played.at("title").text))));
-  QVERIFY(lrc.open(QIODevice::WriteOnly));
-  lrc.write("[00:01.00]first\n[00:02.00]second\n");
-  lrc.close();
-
-  QAction *settingsAction = window_->findChild<QAction *>("actionPreferences");
-  QVERIFY(settingsAction != nullptr);
-  settingsAction->trigger();
-  SettingsDialog *dialog = window_->findChild<SettingsDialog *>();
-  QTRY_VERIFY(dialog != nullptr);
-  const auto otherBackend =
-      backend->currentBackend() == PlaybackBackendManager::Backend::GStreamer
-          ? PlaybackBackendManager::Backend::QMediaPlayer
-          : PlaybackBackendManager::Backend::GStreamer;
-  emit dialog->backendChanged(otherBackend);
-  QCOMPARE(backend->currentBackend(), otherBackend);
-  dialog->close();
-
-  // The backend switch stopped playback, so Play starts the song again on the
-  // new player.
-  media->requestPlayForTest();
-  QTRY_VERIFY(!lyrics->getCurrentLyricsMap().empty());
-
-  QSignalSpy spy(lyrics, &LyricsManager::newLyricsLineIndex);
-  backend->player()->setPosition(2500);
-  QTRY_COMPARE(spy.size(), 1);
-  QCOMPARE(spy.at(0).at(0).toInt(), 1);
-}
-
 void TestMainWindow::infoTabs_restoreAndShowSelectedSong() {
   auto *infoTabs = window_->findChild<QTabWidget *>("infoTabs");
   QVERIFY(infoTabs != nullptr);
@@ -1369,8 +1324,8 @@ void TestMainWindow::infoTabs_restoreAndShowSelectedSong() {
   QCOMPARE(infoTabs->tabText(0), QString("Lyrics"));
   QCOMPARE(infoTabs->tabText(1), QString("Properties"));
   QCOMPARE(infoTabs->tabText(2), QString("Spectrum"));
-  QCOMPARE(infoTabs->currentWidget()->findChild<LyricsPanel *>("lyricsPanel"),
-           window_->findChild<LyricsPanel *>("lyricsPanel"));
+  // The lyrics plugin's panel, loaded from Tests/plugins.
+  QCOMPARE(infoTabs->currentWidget()->objectName(), QString("lyricsPanel"));
 
   infoTabs->setCurrentIndex(1);
   recreateWindow();
@@ -1408,9 +1363,64 @@ void TestMainWindow::infoTabs_restoreAndShowSelectedSong() {
   recreateWindow();
   infoTabs = window_->findChild<QTabWidget *>("infoTabs");
   QCOMPARE(infoTabs->currentIndex(), 2);
+  // A plugin's tab is saved by the plugin's id.
   infoTabs->setCurrentIndex(0);
+  QCOMPARE(QSettings().value("infopanel/current_tab").toString(),
+           QString("lyrics"));
   recreateWindow();
   QCOMPARE(window_->findChild<QTabWidget *>("infoTabs")->currentIndex(), 0);
+}
+
+void TestMainWindow::settings_pluginPageAppliesToItsPanelOnOk() {
+  window_->findChild<QAction *>("actionPreferences")->trigger();
+  auto *dialog = window_->findChild<SettingsDialog *>();
+  QVERIFY(dialog != nullptr);
+  auto *pages = dialog->findChild<QTabWidget *>("settings_tab_widget");
+  QVERIFY(pages != nullptr);
+  // The lyrics plugin's page, before Display.
+  int lyricsIndex = -1;
+  for (int i = 0; i < pages->count(); ++i) {
+    if (pages->tabText(i) == "Lyrics") {
+      lyricsIndex = i;
+    }
+  }
+  QVERIFY(lyricsIndex >= 0);
+  QCOMPARE(pages->tabText(lyricsIndex + 1), QString("Display"));
+  auto *size = pages->widget(lyricsIndex)->findChild<QSpinBox *>();
+  QVERIFY(size != nullptr);
+  size->setValue(30);
+
+  dialog->accept();
+  auto *text =
+      window_->findChild<QWidget *>("lyricsPanel")->findChild<QTextEdit *>();
+  QVERIFY(text != nullptr);
+  QCOMPARE(text->font().pointSize(), 30);
+}
+
+void TestMainWindow::splitters_startAtAQuarterAndRestoreDraggedSizes() {
+  window_->show();
+  auto *splitter = window_->findChild<QSplitter *>("splitter");
+  QVERIFY(splitter != nullptr);
+  QTRY_VERIFY(splitter->sizes().at(0) > 0);
+  // With nothing saved, the info panel gets a quarter, not its size hint.
+  const int total = splitter->sizes().at(0) + splitter->sizes().at(1);
+  QVERIFY(qAbs(splitter->sizes().at(0) - total / 4) <= 2);
+
+  // Drags of both splitters are saved and restored with the next window.
+  auto *infoSplitter = window_->findChild<QSplitter *>("splitter_2");
+  QVERIFY(infoSplitter != nullptr);
+  const int infoTotal =
+      infoSplitter->sizes().at(0) + infoSplitter->sizes().at(1);
+  splitter->setSizes({500, total - 500});
+  emit splitter->splitterMoved(500, 1);
+  infoSplitter->setSizes({300, infoTotal - 300});
+  emit infoSplitter->splitterMoved(300, 1);
+  recreateWindow();
+  window_->show();
+  splitter = window_->findChild<QSplitter *>("splitter");
+  infoSplitter = window_->findChild<QSplitter *>("splitter_2");
+  QTRY_COMPARE(splitter->sizes().at(0), 500);
+  QTRY_COMPARE(infoSplitter->sizes().at(0), 300);
 }
 
 void TestMainWindow::spectrum_tapGoesToThePlayerWhileShown() {

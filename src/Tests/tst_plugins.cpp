@@ -1,8 +1,16 @@
+#include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QLibrary>
 #include <QObject>
+#include <QSettings>
 #include <QSqlDatabase>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTextEdit>
 #include <QUuid>
+#include <QWidget>
 
 #include "../columnregistry.h"
 #include "../databasemanager.h"
@@ -10,7 +18,11 @@
 #include "../monitoredlibrary.h"
 #include "../playbackcontroller.h"
 #include "../playlistcollection.h"
+#include "../pluginapi/ipanelprovider.h"
 #include "../pluginapi/iplayerlistener.h"
+#include "../pluginapi/iplugin.h"
+#include "../pluginapi/isettingspageprovider.h"
+#include "../pluginmanager.h"
 #include "../pluginplayerhost.h"
 #include "../songlibrary.h"
 #include "testaudiofiles.h"
@@ -53,9 +65,13 @@ private slots:
   void cleanup();
 
   void playerHost_forwardsStartPositionAndStop();
+  void manager_loadsLyricsPlugin();
+  void manager_skipsNonLibrariesAndDuplicateIds();
 
 private:
   DummyAudioPlayer *player() const;
+  // Adds a song to the playlist and makes it the one Play starts.
+  void addSong();
 
   QTemporaryDir *dir_ = nullptr;
   ColumnRegistry *registry_ = nullptr;
@@ -126,11 +142,15 @@ DummyAudioPlayer *TestPlugins::player() const {
       controller_->findChild<PlaybackBackendManager *>()->player());
 }
 
-void TestPlugins::playerHost_forwardsStartPositionAndStop() {
+void TestPlugins::addSong() {
   const QString path = dir_->filePath("song.wav");
   QVERIFY(writeSilentWav(path));
   playlist_->addSong(makeSong("Song", path.toStdString()));
   playlist_->setLastPlayed(playlist_->getPkByIndex(0));
+}
+
+void TestPlugins::playerHost_forwardsStartPositionAndStop() {
+  addSong();
   PluginPlayerHost host(*controller_);
   RecordingListener listener;
   host.addListener(&listener);
@@ -149,11 +169,84 @@ void TestPlugins::playerHost_forwardsStartPositionAndStop() {
   QVERIFY(!listener.events.contains("stopped"));
   controller_->stop();
   QVERIFY(listener.events.contains("stopped"));
+
+  // A backend switch replaces the player; its positions still arrive.
+  controller_->setBackend(PlaybackBackendManager::Backend::GStreamer);
+  listener.events.clear();
+  player()->setPosition(2500);
+  QCOMPARE(listener.events, QStringList{"position 2500"});
   listener.events.clear();
 
   host.removeListener(&listener);
   controller_->play();
   QVERIFY(listener.events.isEmpty());
+}
+
+void TestPlugins::manager_loadsLyricsPlugin() {
+  addSong();
+  PluginManager manager(*controller_,
+                        QCoreApplication::applicationDirPath() + "/plugins");
+  QCOMPARE(manager.plugins().size(), 1);
+  QObject *root = manager.plugins().front();
+  QCOMPARE(qobject_cast<IPlugin *>(root)->id(), QString("lyrics"));
+  auto *panels = qobject_cast<IPanelProvider *>(root);
+  auto *pages = qobject_cast<ISettingsPageProvider *>(root);
+  QVERIFY(panels != nullptr);
+  QVERIFY(pages != nullptr);
+
+  // Destroyed before the manager, as the info panel is.
+  QWidget parent;
+  QWidget *panel = panels->createPanel(&parent);
+  QCOMPARE(panel->parentWidget(), &parent);
+  auto *text = panel->findChild<QTextEdit *>();
+  QVERIFY(text != nullptr);
+
+  // The panel shows the tag lyrics of the song the host says started.
+  controller_->play();
+  QCOMPARE(text->toPlainText(), QString("tag"));
+  controller_->stop();
+  QVERIFY(text->toPlainText().isEmpty());
+
+  IPluginSettingsPage *page = pages->createSettingsPage(&parent);
+  QCOMPARE(page->widget()->parentWidget(), &parent);
+  QSettings().remove("lyrics");
+  page->apply();
+  QVERIFY(QSettings().contains("lyrics/font_size"));
+}
+
+void TestPlugins::manager_skipsNonLibrariesAndDuplicateIds() {
+  // Not a QTemporaryDir: the plugins loaded from it are never unloaded, and
+  // on Windows a loaded DLL cannot be deleted until the process exits. This
+  // folder is emptied on the next run instead.
+  QDir folder(QDir::temp().filePath("music-player-tests/plugin-copies"));
+  QVERIFY(folder.removeRecursively());
+  QVERIFY(folder.mkpath("."));
+  QFile notes(folder.filePath("notes.txt"));
+  QVERIFY(notes.open(QIODevice::WriteOnly));
+  notes.close();
+  {
+    PluginManager manager(*controller_, folder.path());
+    QVERIFY(manager.plugins().isEmpty());
+  }
+
+  // Two copies of the lyrics plugin under other names: the second has the
+  // id of the first. Copies, so their root objects are not the one
+  // manager_loadsLyricsPlugin initializes.
+  const QDir built(QCoreApplication::applicationDirPath() + "/plugins");
+  QString plugin;
+  for (const QString &name : built.entryList(QDir::Files)) {
+    if (QLibrary::isLibrary(name)) {
+      plugin = built.filePath(name);
+    }
+  }
+  QVERIFY(!plugin.isEmpty());
+  const QString suffix = QFileInfo(plugin).suffix();
+  QVERIFY(QFile::copy(plugin, folder.filePath("a." + suffix)));
+  QVERIFY(QFile::copy(plugin, folder.filePath("b." + suffix)));
+  PluginManager manager(*controller_, folder.path());
+  QCOMPARE(manager.plugins().size(), 1);
+  QCOMPARE(qobject_cast<IPlugin *>(manager.plugins().front())->id(),
+           QString("lyrics"));
 }
 
 QTEST_MAIN(TestPlugins)

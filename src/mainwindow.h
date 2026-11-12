@@ -18,10 +18,9 @@
 #include <QPointer>
 #include <QString>
 
-class LyricsPresenter;
 class NowPlayingPresenter;
 class PlaylistSearchDialog;
-class PluginPlayerHost;
+class PluginManager;
 class SettingsDialog;
 class SongInfoPresenter;
 class SpectrumPresenter;
@@ -56,6 +55,8 @@ private:
   // Selects and scrolls to the row that started playing, if Cursor follows
   // playback is on.
   void navigateIndex(int row, Playlist *);
+  // Restores the splitters' sizes and saves them when dragged; keeps the
+  // cover sized to its pane.
   void setUpSplitter();
   void initSettings();
   // Creates the audio backend and connects the playback controller's signals
@@ -73,8 +74,8 @@ private:
   void setUpLibraryScanStatus();
   void initCloudSync();
   void setUpMenuBar();
-  // Restores and saves the info panel's current tab (Lyrics, Properties or
-  // Spectrum), and handles the Properties tab's buttons.
+  // Adds the plugins' panels to the info panel, restores and saves its
+  // current tab, and handles the Properties tab's buttons.
   void setUpInfoTabs();
   void openLibrarySearchDialog();
   // Shows the Playlist Search dialog, creating it if none is open. It
@@ -95,9 +96,7 @@ private:
   PlaybackController *playback_ = nullptr;
   PlaylistTabs *playlistTabs;
   CoverArtPresenter *coverArt_ = nullptr;
-  PluginPlayerHost *pluginPlayerHost_ = nullptr;
-  // A child of the lyrics panel.
-  LyricsPresenter *lyrics_ = nullptr;
+  PluginManager *plugins_ = nullptr;
   SongInfoPresenter *songInfo_ = nullptr;
   SpectrumPresenter *spectrum_ = nullptr;
   SystemMediaPresenter *systemMedia_ = nullptr;

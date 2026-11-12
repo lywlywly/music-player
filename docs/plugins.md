@@ -1,6 +1,6 @@
 # Plan: Plugins
 
-Status: in progress; phase 1 (the boundary without loading) is done.
+Status: implemented.
 
 ## Summary
 
@@ -9,8 +9,8 @@ Status: in progress; phase 1 (the boundary without loading) is done.
   small API and never uses app classes.
 * A plugin can contribute several kinds of things, or none (a plugin with no
   UI that only follows playback). Each kind is a **capability**: an
-  interface the plugin implements and the host asks for. This plan adds two:
-  an **info panel tab** and a **Settings dialog page**. Later kinds (context
+  interface the plugin implements and the host asks for. There are two: an
+  **info panel tab** and a **Settings dialog page**. Later kinds (context
   menu actions, main menu commands) are added the same way, without changing
   the existing interfaces or plugins.
 * **Lyrics is the first and, for now, only plugin.** Properties and Spectrum
@@ -57,7 +57,7 @@ plugin, two metaobjects for one class.
 | `IPluginHost` | host | The host services: `player()` returns the `IPlayerHost` |
 | `IPlayerHost` | host | `addListener(IPlayerListener *)`, `removeListener(IPlayerListener *)` |
 | `IPlayerListener` | plugin | `trackStarted(const TrackInfo &)`, `stopped()`, `positionChanged(qint64 ms)` |
-| `TrackInfo` | (plain data) | `fields` (column fields by id, e.g. `title`, `attr:lyrics`, as text); `tagFields` (tag fields with no column, from the refresh on play: `remainingFields` today) |
+| `TrackInfo` | (plain data) | `fields` (column fields by id, e.g. `title`, `attr:lyrics`, as text); `tagFields` (tag fields with no column, from the refresh on play's `remainingFields`) |
 
 A plugin gets the host in `initialize`, not from a capability, so a plugin
 with no UI can follow playback too; it keeps the host for its capabilities
@@ -104,7 +104,7 @@ work as usual: its `QObject`s live in the DLL only.
   `parent`, so the tab widget and the Settings dialog own and delete them.
   The plugin keeps its open panels, so `apply()` can restyle them.
 * One panel per plugin, so the plugin's `id()` names its tab in
-  `infopanel/current_tab` (`lyrics` stays `lyrics`).
+  `infopanel/current_tab` (`lyrics` for the lyrics plugin).
 
 ### Extending the API
 
@@ -148,8 +148,7 @@ work as usual: its `QObject`s live in the DLL only.
   start.
 * A plugin stores its settings with `QSettings` under `<id>/` (the host sets
   the organization and application names, which the plugin's `QSettings`
-  shares through QtCore). Lyrics keeps its keys (`lyrics/font_family`, ...),
-  so existing settings carry over.
+  shares through QtCore), as the lyrics plugin's `lyrics/font_family`, ...
 
 ## Host
 
@@ -162,10 +161,17 @@ Frontend class. `MainWindow` creates it as a child `QObject` after
   folder: `../PlugIns` when the executable is in a macOS app bundle
   (`.app/Contents/MacOS`), else `plugins/` next to the executable (Windows,
   Linux, and the test executables on every platform).
+* Ignores files that are not libraries (a Debug build's `.pdb` and `.ilk`
+  sit next to the plugin). Skips, and logs, a library whose IID is not
+  `IPlugin`'s (read with `QPluginLoader::metaData()`, before the plugin's
+  code is loaded), one that fails to load, and a plugin whose `id()` is
+  already loaded: the id names its tab and its settings keys.
 * Calls `initialize` on each. `plugins()` returns their root objects
-  (`QObject *`), which the places using a capability `qobject_cast`. A
-  plugin whose `id()` is already loaded is skipped and logged: the id names
-  its tab and its settings keys.
+  (`QObject *`), which the places using a capability `qobject_cast`.
+* A library's root object is one per process (`QPluginLoader::instance()`
+  returns the same object for the same file), so one manager exists at a
+  time: the tests create a `MainWindow` after deleting the previous one, and
+  each `initialize` follows the previous `shutdown`.
 * Implements `IPluginHost`; owns the `PluginPlayerHost` (a member).
 * Its destructor calls `shutdown` on each plugin; the `PluginPlayerHost`
   member is destroyed after that, so a plugin's listeners are gone before
@@ -189,33 +195,36 @@ Frontend class. `MainWindow` creates it as a child `QObject` after
   `infopanel/current_tab`.
 * **Settings dialog**: `MainWindow` passes `plugins()` to `SettingsDialog`,
   which it creates each time Preferences opens. The dialog adds a tab per
-  `ISettingsPageProvider` and calls each page's `apply()` in
-  `applySettings` (on OK).
+  `ISettingsPageProvider`, before Display, and calls each page's `apply()`
+  in `applySettings` (on OK).
 
 ## Lyrics plugin: `src/plugins/lyrics/`
 
 * `mylyrics`, a static library depending on Qt and `src/pluginapi/` only:
   `LyricsPanel` (+ `.ui`), `LyricsManager`, `LyricsLoader`,
-  `LyricsPresenter`, and the settings page (the lyrics part of
-  `SettingsDialog` today).
-* `lyricsplugin`, a `MODULE` library linking `mylyrics`: the root object,
-  implementing `IPlugin`, `IPanelProvider` and `ISettingsPageProvider`. The
-  build puts it where the app looks (`plugins/` next to `EXEC`, the bundle's
-  `Contents/PlugIns`) and in `Tests/plugins`, next to the test executables.
-* Changes in the moved code:
-  * `LyricsLoader::resolveLyrics` reads `TrackInfo` (`fields`, then
-    `tagFields`) instead of the `FieldValue` map and `remainingFields`. Same
-    order and `.lrc` fallback.
-  * `LyricsPresenter` implements `IPlayerListener`, adds itself in its
-    constructor and removes itself in its destructor. It is a child of its
-    panel (today it is a child of `MainWindow`), so it is destroyed with the
-    panel, while the host still exists.
-  * The settings page writes the `lyrics/*` keys on `apply()` and restyles
-    the open lyrics panels; `SettingsDialog::lyricsFontChanged` /
-    `lyricsHighlightColorChanged` and their `MainWindow` connections go.
-* Leaves the app: the `LyricsPanel` promotion and the Lyrics tab in
-  `mainwindow.ui`, `lyrics_` in `MainWindow`, the Lyrics tab in
-  `SettingsDialog`.
+  `LyricsPresenter`, `LyricsSettingsPage`, and `loadLyricsSettings` /
+  `saveLyricsSettings` (the `lyrics/*` keys, for the presenter and the
+  page). Built position-independent, as it is linked into a shared library;
+  the tests link it directly.
+* `lyricsplugin`, a `MODULE` library linking `mylyrics`: the root object
+  `LyricsPlugin`, implementing `IPlugin`, `IPanelProvider` and
+  `ISettingsPageProvider`. The build puts it where the app looks (`plugins/`
+  next to `EXEC`, the bundle's `Contents/PlugIns`) and in `Tests/plugins`,
+  next to the test executables; `EXEC` and the tests that load it depend on
+  it, so building them builds it. The root object is not in `mylyrics`: its
+  `Q_PLUGIN_METADATA` would make each test executable linking `mylyrics` a
+  plugin too.
+* `LyricsLoader::resolveLyrics` reads `TrackInfo`: the first non-empty of
+  `fields` (`attr:unsynced_lyrics`, `attr:lyrics`), then of `tagFields`
+  (`unsynced_lyrics`, `lyrics`), then the `.lrc` fallback.
+* `createPanel` creates a `LyricsPanel` (object name `lyricsPanel`) and its
+  `LyricsPresenter`, a child of the panel. The presenter implements
+  `IPlayerListener`, adds itself in its constructor and removes itself in its
+  destructor, so it listens for the panel's lifetime, while the host exists.
+  The plugin keeps the presenters (`QPointer`s, as the panels are deleted by
+  the tab widget).
+* `LyricsSettingsPage` writes the `lyrics/*` keys on `apply()` and sends
+  `applied`, on which the plugin re-applies the settings to the open panels.
 
 ## Rejected
 
@@ -270,37 +279,35 @@ Frontend class. `MainWindow` creates it as a child `QObject` after
 
 * `tst_lyrics`, `tst_lyricspanel`: link `mylyrics`; `resolveLyrics` cases
   take `TrackInfo`.
-* New `tst_plugins`:
-  * `PluginPlayerHost` forwards song start, position and stop to a listener the test adds. This replaces
-    `tst_mainwindow::lyrics_followPositionAfterBackendSwitch`, which finds
-    the `LyricsManager` with `findChild`; across a DLL, the test's
-    `LyricsManager` metaobject is not the plugin's, so that lookup fails.
+* `tst_plugins`:
+  * `PluginPlayerHost` forwards song start (with its tag fields), position
+    (also from the player a backend switch creates) and stop, not pause, to
+    a listener the test adds, and nothing after it is removed.
   * `PluginManager` loads the built lyrics plugin from `Tests/plugins`: one
-    plugin, with a panel and a settings page; the panel follows the
-    playback events the host forwards. An empty folder gives no plugins.
-    (CMake builds `lyricsplugin` before the tests that load it.)
-* `tst_mainwindow::infoTabs_restoreAndShowSelectedSong` keeps checking
-  Lyrics, Properties, Spectrum and the restored tab (now through the plugin
-  in `Tests/plugins`), but finds the lyrics panel by object name instead of
-  `findChild<LyricsPanel *>`.
+    plugin, `lyrics`, with a panel and a settings page. The panel shows the
+    tag lyrics of the song that starts and clears on stop; the page's
+    `apply()` writes the `lyrics/*` keys.
+  * `PluginManager` ignores a file that is not a library, and of two copies
+    of the plugin loads one: the second has the same id.
+* `tst_mainwindow::infoTabs_restoreAndShowSelectedSong` checks the Lyrics
+  (through the plugin in `Tests/plugins`), Properties and Spectrum tabs and
+  the restored tab, and that the Lyrics tab is saved as `lyrics`.
+  `settings_pluginPageAppliesToItsPanelOnOk` finds the Lyrics page before
+  Display in Preferences, and checks that its size reaches the panel on OK. It finds the lyrics panel by object name: across a DLL,
+  the test's `LyricsPanel` metaobject is not the plugin's, so
+  `findChild<LyricsPanel *>` (or `<LyricsManager *>`) finds nothing, and the
+  panel's lines are checked in `tst_plugins` instead.
 * The plugin's `QSettings` uses the tests' QSettings folder: the folder is
   set in QtCore, which the plugin shares.
 
 ## Phases
 
 1. **Boundary without loading.** `TrackInfo`, `IPlayerListener`,
-   `IPlayerHost` and `PluginPlayerHost`; move the lyrics classes into
-   `mylyrics` (Qt and `src/pluginapi/` only). `MainWindow` creates
-   `PluginPlayerHost` (a child created after `setupUi`; in phase 2 it moves
-   into `PluginManager`) and still creates the presenter, now as a child of
-   the lyrics panel (destroyed with the UI, before the host); the Lyrics
-   settings tab stays in `SettingsDialog`. Proves the code no longer needs
-   the app.
+   `IPlayerHost` and `PluginPlayerHost`; the lyrics classes move into
+   `mylyrics` (Qt and `src/pluginapi/` only).
 2. **Loading.** `IPlugin`, `IPluginHost`, `IPanelProvider`,
    `ISettingsPageProvider`, `IPluginSettingsPage`, `PluginManager`,
    `lyricsplugin`; the info panel and `SettingsDialog` use the capabilities;
-   remove lyrics from `MainWindow`, `mainwindow.ui` and `SettingsDialog`.
-   Check on Windows (Debug and Release) and macOS (bundle `PlugIns`).
-3. **Docs.** architecture.md (classes, startup, the boundary rule),
-   info-panel.md, README.md (where plugins go when running from a build), and
-   this file marked implemented.
+   lyrics leaves `MainWindow`, `mainwindow.ui` and `SettingsDialog`.
+3. **Docs.** architecture.md, info-panel.md, README.md (where plugins go when
+   running from a build).

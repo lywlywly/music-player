@@ -3,9 +3,9 @@
 #include "iplayerhost.h"
 #include "lyricsloader.h"
 #include "lyricspanel.h"
+#include "lyricssettings.h"
 #include <QApplication>
 #include <QFont>
-#include <QSettings>
 #include <QStringList>
 
 LyricsPresenter::LyricsPresenter(LyricsPanel *lyricsPanel, IPlayerHost &player)
@@ -33,23 +33,10 @@ void LyricsPresenter::positionChanged(qint64 positionMs) {
 }
 
 void LyricsPresenter::applySettings() {
-  QSettings settings;
-  const QString fontFamily =
-      settings.value("lyrics/font_family", QString()).toString();
-  const bool useSystemDefaultFont =
-      settings.value("lyrics/use_system_default_font", fontFamily.isEmpty())
-          .toBool();
-  const int defaultLyricsFontSize = QApplication::font().pointSize();
-  const int fontSize =
-      settings.value("lyrics/font_size", defaultLyricsFontSize).toInt();
-  setFont(useSystemDefaultFont ? QString() : fontFamily, fontSize);
-
-  QColor color(
-      settings.value("lyrics/highlight_color", QString("#0064ff")).toString());
-  if (!color.isValid()) {
-    color = QColor(0, 100, 255);
-  }
-  setHighlightColor(color);
+  const LyricsSettings settings = loadLyricsSettings();
+  setFont(settings.useSystemDefaultFont ? QString() : settings.fontFamily,
+          settings.fontSize);
+  setHighlightColor(settings.highlightColor);
 }
 
 void LyricsPresenter::setFont(const QString &fontFamily, int pointSize) {

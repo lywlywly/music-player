@@ -12,7 +12,7 @@ macOS, Windows and Linux.
 | [docs/monitored-library.md](docs/monitored-library.md) | Watched folders, scans, the file system watcher, autoplaylists, Playlist Search | Before changing the library or its watcher |
 | [docs/info-panel.md](docs/info-panel.md) | The info panel's Lyrics and Properties tabs | Before changing the info panel |
 | [docs/spectrum.md](docs/spectrum.md) | The Spectrum tab, the `src/spectrum/` module, the players' audio taps | Before changing the spectrum or the players' audio path |
-| [docs/plugins.md](docs/plugins.md) | Plan: plugins (DLLs with capabilities, Lyrics first), the plugin API and its boundary | Before changing the plugin API or a plugin |
+| [docs/plugins.md](docs/plugins.md) | Plugins (DLLs with capabilities, Lyrics first), the plugin API and its boundary | Before changing the plugin API or a plugin |
 | [docs/cloud-sync.md](docs/cloud-sync.md) | Play-count sync: DynamoDB model, Lambda API (`infra/aws/lambda`) | Before changing play stats or sync |
 | [README.md](README.md) | For users: features, build, query syntax, play stats | When a user-visible feature or the build changes |
 | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Third-party components and their licenses | Before adding or updating a dependency |
@@ -59,7 +59,7 @@ From `src/`. After cloning: `git submodule update --init --recursive`.
 
 PowerShell. Configure, build, run and test as in README.md, "Windows (vcpkg)"; format with
 `scripts/format.ps1` (`-Check` to only report). Match `GST_PLUGIN_PATH` to the build folder's
-`CMAKE_BUILD_TYPE` (in its `CMakeCache.txt`).
+`CMAKE_BUILD_TYPE` (in its `CMakeCache.txt`), and set `GST_PLUGIN_SCANNER` for Release only (README.md).
 
 | Command | Does |
 | --- | --- |
@@ -78,7 +78,8 @@ Without Qt's `bin` on `PATH`, the app and tests exit with `0xc0000135`.
 ## Tests and user data
 
 - Tests never touch the developer's library, settings or cloud data. They use temporary directories, the
-  test QSettings folder (`src/Tests/test_qsettings_bootstrap.cpp`), `ScopedHomeDir` for files under the
+  test QSettings folder (`src/Tests/test_qsettings_bootstrap.cpp`), their own GStreamer registry
+  (`src/Tests/test_gstreamer_bootstrap.cpp`), `ScopedHomeDir` for files under the
   home folder, and `MYPLAYER_USE_DUMMY_AUDIO_PLAYER` for the playback backend. Cloud sync tests reach no
   network. `tst_gstaudioplayer` plays a generated file through the default audio output at volume 0, and
   skips without one.
@@ -118,7 +119,7 @@ Without Qt's `bin` on `PATH`, the app and tests exit with `0xc0000135`.
 
 - Play stats belong to a song's identity (normalized `title|artist|album`): songs with the same identity
   share them.
-- The main window's layout lives in `src/mainwindow.ui`; its custom widgets (`LyricsPanel`,
+- The main window's layout lives in `src/mainwindow.ui`; its custom widgets (`SongInfoPanel`,
   `SpectrumWidget`, ...) are promoted there (`<customwidget>`).
 - Settings are `QSettings` keys named `<area>/<name>` (e.g. `infopanel/current_tab`), documented in the
   feature's doc.

@@ -6,8 +6,9 @@ Status: implemented. The third tab, Spectrum, is described in
 
 ## Summary
 
-* The lyrics panel at the top left of the main window is a tab widget with
-  two tabs: **Lyrics** (the existing `LyricsPanel`) and **Properties**.
+* The info panel at the top left of the main window is a tab widget:
+  **Lyrics** (`LyricsPanel`, from the lyrics plugin; see
+  [plugins.md](plugins.md)), **Properties** and **Spectrum**.
 * **Properties** shows the song selected in the shown playlist: its file
   (name, folder, path, size, modified and created times), its audio
   properties, its main tags, its play stats and its watched folder. It
@@ -62,21 +63,23 @@ splitter (horizontal)
 ├── frame_2
 │   └── splitter_2 (vertical)
 │       ├── infoTabs     (QTabWidget, documentMode, verstretch 3, min 120 x 240)
-│       │   ├── "Lyrics"      lyricsTab     > lyricsPanel    (LyricsPanel)
+│       │   ├── "Lyrics"      lyricsPanel   (LyricsPanel, added by MainWindow)
 │       │   ├── "Properties"  propertiesTab > songInfoPanel  (SongInfoPanel)
 │       │   └── "Spectrum"    spectrumTab   > spectrumWidget (SpectrumWidget)
 │       └── label        (cover art, verstretch 5)
 └── playlistTabs
 ```
 
-* `lyricsPanel` keeps its object name and class, so `LyricsPresenter`
-  (`ui->lyricsPanel`), `CoverArtPresenter` (`ui->label`) and
-  `MainWindow::setUpSplitter` did not change. The size policy and minimum
-  size moved from `lyricsPanel` to `infoTabs`.
-* The current tab is stored in `QSettings` as `infopanel/current_tab`
-  (`lyrics`, `properties` or `spectrum`, default `lyrics`), written on
-  `QTabWidget::currentChanged` and restored in the `MainWindow` constructor
-  (`setUpInfoTabs`).
+* The size policy and minimum size are on `infoTabs`, so they hold for every
+  tab, including the plugins' panels.
+* `MainWindow::setUpInfoTabs` inserts a tab per plugin panel
+  (`IPanelProvider`) before Properties, in plugin load order. The lyrics
+  panel's object name is `lyricsPanel`.
+* The current tab is stored in `QSettings` as `infopanel/current_tab` (a
+  plugin's id, such as `lyrics`, or `properties` or `spectrum`; with none
+  saved, the first tab), written on `QTabWidget::currentChanged` and restored
+  in the `MainWindow` constructor (`setUpInfoTabs`), after the plugin tabs are
+  added.
 
 ### Lyrics while hidden
 
@@ -242,7 +245,8 @@ have, is left out, and so is a section with no rows.
 * Creates `SongInfoPresenter`, and in `finishSetUpPlaylist` connects
   `PlaylistTabs::selectedSongChanged` to `showSong`. Nothing is selected at
   startup, so the panel starts with "No song selected".
-* `setUpInfoTabs` restores and saves `infopanel/current_tab`, and connects
+* `setUpInfoTabs` adds the plugin tabs, restores and saves
+  `infopanel/current_tab`, and connects
   the panel's buttons to `revealSongFile(this, song)` and
   `openSongProperties(this, pk, songLibrary, columnRegistry_, *playlists_)`.
 
@@ -286,6 +290,7 @@ have, is left out, and so is a section with no rows.
   removing an unselected one, and on an autoplaylist reset.
 * `tst_lyricspanel`: the current line is centered after a line change and a
   resize while hidden, then show; new lyrics forget the current line.
-* `tst_mainwindow`: both tabs exist, the saved tab is restored, the
+* `tst_mainwindow`: the Lyrics (from the plugin in `Tests/plugins`),
+  Properties and Spectrum tabs exist, the saved tab is restored, the
   Properties tab shows the selected song in the real window, and Edit
   Properties... opens Song Properties.

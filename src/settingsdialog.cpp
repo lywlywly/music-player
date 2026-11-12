@@ -1,16 +1,13 @@
 #include "settingsdialog.h"
 #include "displayexpression.h"
 #include "displaytheme.h"
+#include "isettingspageprovider.h"
 #include "libraryfolderspage.h"
 #include "ui_settingsdialog.h"
 #include "utils.h"
-#include <QApplication>
-#include <QColorDialog>
-#include <QFormLayout>
 #include <QInputDialog>
 #include <QLabel>
 #include <QMessageBox>
-#include <QPainter>
 #include <QPlainTextEdit>
 #include <QSettings>
 #include <QUuid>
@@ -18,11 +15,12 @@
 #include <QWidget>
 #include <algorithm>
 #include <unordered_map>
+#include <utility>
 
 SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
                                DatabaseManager &databaseManager,
                                MonitoredLibrary &monitoredLibrary,
-                               QWidget *parent)
+                               const QList<QObject *> &plugins, QWidget *parent)
     : QDialog(parent), ui(new Ui::SettingsDialog),
       columnRegistry_(columnRegistry), databaseManager_(databaseManager) {
   ui->setupUi(this);
@@ -32,77 +30,22 @@ SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
   ui->backend_combo_box->setCurrentIndex(
       static_cast<int>(loadPlaybackBackendSetting()));
   QSettings settings;
-  const int defaultLyricsFontSize = QApplication::font().pointSize();
-  const QString initialLyricsFontFamily =
-      settings.value("lyrics/font_family", QString()).toString();
-  const bool useSystemDefaultFont =
-      settings
-          .value("lyrics/use_system_default_font",
-                 initialLyricsFontFamily.isEmpty())
-          .toBool();
-  const int initialLyricsFontSize =
-      settings.value("lyrics/font_size", defaultLyricsFontSize).toInt();
   const QString initialStatusExpression =
       loadDisplayExpressionSetting(DisplayExpressionKind::StatusBar);
   const QString initialWindowTitleExpression =
       loadDisplayExpressionSetting(DisplayExpressionKind::WindowTitle);
   const QString initialDisplayThemeMode = loadDisplayThemeModeSetting();
-  lyricsHighlightColor_ = QColor(
-      settings.value("lyrics/highlight_color", QString("#0064ff")).toString());
-  if (!lyricsHighlightColor_.isValid()) {
-    lyricsHighlightColor_ = QColor(0, 100, 255);
-  }
 
-  QWidget *lyricsTab = new QWidget(this);
-  QVBoxLayout *lyricsLayout = new QVBoxLayout(lyricsTab);
-  QLabel *lyricsNote =
-      new QLabel("Change lyrics panel font family and size.", lyricsTab);
-  lyricsNote->setWordWrap(true);
-  lyricsLayout->addWidget(lyricsNote);
-  QFormLayout *lyricsForm = new QFormLayout();
-  lyricsFontFamilyCombo_ = new QFontComboBox(lyricsTab);
-  lyricsFontSizeSpin_ = new QSpinBox(lyricsTab);
-  lyricsUseDefaultFontCheck_ =
-      new QCheckBox("Use system default font", lyricsTab);
-  lyricsHighlightColorButton_ = new QPushButton(lyricsTab);
-  lyricsFontSizeSpin_->setRange(8, 48);
-  lyricsFontSizeSpin_->setValue(initialLyricsFontSize);
-
-  const QString initialDisplayedFamily = initialLyricsFontFamily.trimmed();
-  if (!initialDisplayedFamily.isEmpty()) {
-    lyricsFontFamilyCombo_->setCurrentFont(QFont(initialDisplayedFamily));
-  }
-  if (lyricsFontFamilyCombo_->currentIndex() < 0 &&
-      lyricsFontFamilyCombo_->count() > 0) {
-    lyricsFontFamilyCombo_->setCurrentIndex(0);
-  }
-  lyricsUseDefaultFontCheck_->setChecked(useSystemDefaultFont);
-  lyricsFontFamilyCombo_->setEnabled(!useSystemDefaultFont);
-  connect(lyricsUseDefaultFontCheck_, &QCheckBox::toggled, this,
-          [this](bool checked) {
-            lyricsFontFamilyCombo_->setEnabled(!checked);
-            if (!checked && lyricsFontFamilyCombo_->currentIndex() < 0 &&
-                lyricsFontFamilyCombo_->count() > 0) {
-              lyricsFontFamilyCombo_->setCurrentIndex(0);
-            }
-          });
-  updateLyricsHighlightColorButton();
-  connect(lyricsHighlightColorButton_, &QPushButton::clicked, this, [this]() {
-    const QColor selected = QColorDialog::getColor(
-        lyricsHighlightColor_, this, "Select lyrics highlight color");
-    if (!selected.isValid()) {
-      return;
+  for (QObject *root : plugins) {
+    auto *provider = qobject_cast<ISettingsPageProvider *>(root);
+    if (provider == nullptr) {
+      continue;
     }
-    lyricsHighlightColor_ = selected;
-    updateLyricsHighlightColorButton();
-  });
-  lyricsForm->addRow("Font:", lyricsFontFamilyCombo_);
-  lyricsForm->addRow("", lyricsUseDefaultFontCheck_);
-  lyricsForm->addRow("Size:", lyricsFontSizeSpin_);
-  lyricsForm->addRow("Highlight color:", lyricsHighlightColorButton_);
-  lyricsLayout->addLayout(lyricsForm);
-  lyricsLayout->addStretch();
-  ui->settings_tab_widget->addTab(lyricsTab, "Lyrics");
+    IPluginSettingsPage *page = provider->createSettingsPage(this);
+    ui->settings_tab_widget->addTab(page->widget(),
+                                    provider->settingsPageTitle());
+    pluginPages_.append(page);
+  }
 
   QWidget *statusTab = new QWidget(this);
   QVBoxLayout *statusLayout = new QVBoxLayout(statusTab);
@@ -568,22 +511,6 @@ void SettingsDialog::updateCloudUuidStatus() {
   ui->disable_cloud_sync_button->setVisible(true);
 }
 
-void SettingsDialog::updateLyricsHighlightColorButton() {
-  const QString colorHex = lyricsHighlightColor_.name(QColor::HexRgb);
-  lyricsHighlightColorButton_->setText(colorHex);
-
-  QPixmap swatch(20, 12);
-  swatch.fill(Qt::transparent);
-  QPainter painter(&swatch);
-  painter.setPen(Qt::black);
-  painter.setBrush(lyricsHighlightColor_);
-  painter.drawRect(0, 0, swatch.width() - 1, swatch.height() - 1);
-  painter.end();
-
-  lyricsHighlightColorButton_->setIcon(QIcon(swatch));
-  lyricsHighlightColorButton_->setIconSize(swatch.size());
-}
-
 void SettingsDialog::setActiveDisplayExpressionEditor(QPlainTextEdit *editor) {
   activeDisplayExpressionEdit_ = editor;
   updateActiveDisplayExpressionPreview();
@@ -639,31 +566,15 @@ void SettingsDialog::applySettings() {
 
   QSettings settings;
 
-  const bool useSystemDefaultFont = lyricsUseDefaultFontCheck_->isChecked();
-  if (lyricsFontFamilyCombo_->currentIndex() < 0 &&
-      lyricsFontFamilyCombo_->count() > 0) {
-    lyricsFontFamilyCombo_->setCurrentIndex(0);
+  for (IPluginSettingsPage *page : std::as_const(pluginPages_)) {
+    page->apply();
   }
-  QString resolvedFamily = lyricsFontFamilyCombo_->currentText().trimmed();
-  if (resolvedFamily.isEmpty() && lyricsFontFamilyCombo_->count() > 0) {
-    lyricsFontFamilyCombo_->setCurrentIndex(0);
-    resolvedFamily = lyricsFontFamilyCombo_->currentText().trimmed();
-  }
-  settings.setValue("lyrics/use_system_default_font", useSystemDefaultFont);
-  settings.setValue("lyrics/font_family", resolvedFamily);
-  settings.setValue("lyrics/font_size", lyricsFontSizeSpin_->value());
-  settings.setValue("lyrics/highlight_color",
-                    lyricsHighlightColor_.name(QColor::HexRgb));
   const QString statusExpression = saveDisplayExpressionSetting(
       DisplayExpressionKind::StatusBar, statusExpressionEdit_->toPlainText());
   const QString windowTitleExpression =
       saveDisplayExpressionSetting(DisplayExpressionKind::WindowTitle,
                                    windowTitleExpressionEdit_->toPlainText());
   saveDisplayThemeModeSetting(displayThemeModeCombo_->currentData().toString());
-  const QString emittedFamily =
-      useSystemDefaultFont ? QString() : resolvedFamily;
-  emit lyricsFontChanged(emittedFamily, lyricsFontSizeSpin_->value());
-  emit lyricsHighlightColorChanged(lyricsHighlightColor_);
   emit statusBarExpressionChanged(statusExpression);
   emit windowTitleExpressionChanged(windowTitleExpression);
   emit displayThemeModeChanged(

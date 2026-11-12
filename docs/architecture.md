@@ -12,12 +12,12 @@ These topics have their own files:
   file system watcher, autoplaylists, and Playlist Search.
 * [cloud-sync.md](cloud-sync.md): optional play-count sync through AWS Lambda
   and DynamoDB.
-* [info-panel.md](info-panel.md): the info panel's Lyrics and Properties
-  tabs; Properties shows the selected song's file and metadata.
+* [info-panel.md](info-panel.md): the info panel's tabs; Properties shows the
+  selected song's file and metadata.
 * [spectrum.md](spectrum.md): the Spectrum tab and the `src/spectrum/`
   module (FFT, bands, `PcmTap`, widget, presenter).
-* [plugins.md](plugins.md): plan for plugins; the plugin API and its
-  boundary.
+* [plugins.md](plugins.md): plugins (DLLs loaded at startup), the plugin API
+  and its boundary, and the Lyrics plugin.
 
 ## Overview
 
@@ -55,14 +55,16 @@ The backend must not depend on how (or whether) it is displayed.
   `LibraryScanner`, `IFileSystemMonitor` implementations, `SongMatcher`.
 * Frontend (Qt view adapters and widgets): `PlaylistTableModel`,
   `PlaylistTableView`, `PlaylistTabs`, `LibrarySearchResultsModel`, dialogs,
-  presenters (`LyricsPresenter`, `SongInfoPresenter`, `SpectrumPresenter`,
-  ...), `SongInfoPanel`, `SpectrumWidget`, `buildSongInfo`, `MainWindow`.
+  presenters (`SongInfoPresenter`, `SpectrumPresenter`, ...),
+  `SongInfoPanel`, `SpectrumWidget`, `buildSongInfo`, `PluginManager`,
+  `PluginPlayerHost`, `MainWindow`.
 * The spectrum module (`src/spectrum/`, library `myspectrum`) depends on Qt
   only, never on app classes. Its analysis classes (`fft`, `SpectrumBands`,
   `SpectrumAnalyzer`, `SpectrumSmoother`, `PcmTap`) use no Qt.
-* The lyrics code (`src/plugins/lyrics/`, library `mylyrics`) depends on Qt
-  and the plugin API (`src/pluginapi/`) only; the app reaches it through
-  `PluginPlayerHost`. See [plugins.md](plugins.md).
+* A plugin (`src/plugins/<name>/`) depends on Qt and the plugin API
+  (`src/pluginapi/`) only. The app never links it: `PluginManager` loads it
+  at startup, and the plugin sees the app only through the API's host
+  interfaces. See [plugins.md](plugins.md).
 
 | Backend classes may use | Backend classes must not use |
 |---|---|
@@ -147,15 +149,31 @@ The top-level window and what it owns.
     `PlaylistTabs::newAutoPlaylist`.
   * A permanent status bar label shows `MonitoredLibrary` scan progress, then
     the number of offline watched folders, if any.
-  * The info panel at the top left (`infoTabs`) has a Lyrics, a Properties and
-    a Spectrum tab; the current one is restored from `infopanel/current_tab`
-    (`lyrics`, `properties` or `spectrum`). `MainWindow` connects
+  * Creates `PluginManager`, which loads the plugins, as a child after
+    `PlaybackController`, so the plugins' panels (in the UI) are destroyed
+    before it shuts the plugins down. It passes the plugins to the info panel
+    and to `SettingsDialog`. See [plugins.md](plugins.md).
+  * The info panel at the top left (`infoTabs`) has a tab per plugin panel
+    (Lyrics), then a Properties and a Spectrum tab; the current one is
+    restored from `infopanel/current_tab` (the plugin's id, `properties` or
+    `spectrum`). `MainWindow` connects
     `PlaylistTabs::selectedSongChanged` to `SongInfoPresenter::showSong`, and
     the Properties tab's buttons to `revealSongFile` and `openSongProperties`.
     See [info-panel.md](info-panel.md). It connects
     `SpectrumPresenter::tapChanged` to `PlaybackController::setPcmTap`, and
     the playback state and position to the presenter. See
     [spectrum.md](spectrum.md).
+  * The splitters between the info panel and the playlists and between the
+    info panel's tabs and the cover keep their sizes in `layout/main_splitter`
+    and `layout/info_splitter` (`QSplitter::saveState`), saved when dragged.
+    With none saved, the info panel starts at a quarter of the width, so its
+    width does not depend on the panels' size hints. Cost: that first width
+    ignores what the panels' content needs; the panes' minimum widths still
+    hold. Rejected: the splitter's
+    default sizing by size hint, which starts the panel too narrow, since it
+    uses a hint cached during `setupUi`, before the plugin tabs are added (Qt
+    does not pass a hidden widget's hint change up to that cache), and
+    clearing those caches by hand, which depends on Qt's internals.
   * Edit > Search Playlist (`QKeySequence::Find`) shows the one
     `PlaylistSearchDialog`, kept on the shown playlist through
     `currentPlaylistChanged`. Its row requests go to `PlaybackController::playRow`,
@@ -455,8 +473,10 @@ OS media controls and now-playing metadata.
 
 ### Info panel, lyrics and cover art
 
-The info panel's tabs (Lyrics, Properties, Spectrum), where lyrics and cover
-images come from, and the lyrics panel settings.
+The info panel's tabs (Lyrics, from the lyrics plugin; Properties,
+Spectrum), where lyrics and cover images come from, and the lyrics panel
+settings. The lyrics classes are in `src/plugins/lyrics/` (library
+`mylyrics`, loaded as `lyricsplugin`; [plugins.md](plugins.md)).
 
 * `SongInfoPresenter` (frontend), `SongInfoPanel` (frontend, the Properties
   tab), `buildSongInfo` (frontend, songinfo.h)
@@ -479,17 +499,19 @@ images come from, and the lyrics panel settings.
     animation, in `showEvent` and `resizeEvent`. A `QTabWidget` sizes only its
     current page, so the Lyrics tab can be resized while hidden.
 
-* `LyricsPresenter` (frontend, `src/plugins/lyrics/`)
+* `LyricsPresenter` (frontend)
   * Shows the playing song's lyrics in `LyricsPanel`, owns the
     `LyricsManager`, and applies the lyrics panel style settings.
-  * An `IPlayerListener` of `PluginPlayerHost` ([plugins.md](plugins.md)).
-  * A child of its panel, so it is destroyed with the UI, before the host.
+  * Created with its panel by `LyricsPlugin::createPanel`; how it follows
+    playback is in [plugins.md](plugins.md).
 * `CoverArtPresenter` (frontend)
   * Shows the playing song's embedded cover in the cover label, scaled to the
     label on resize and splitter moves.
   * `MainWindow` calls `showSong(...)` on `PlaybackController::songStarted`
     (after `SystemMediaPresenter::showSong`, which clears the system artwork)
     and `clear()` on stop.
+  * The cover comes from `SongParser::extractCoverImage`; a file it cannot
+    open (for example moved or deleted) logs a warning and shows no cover.
   * Emits `artworkChanged(imageData)` for a song with an embedded cover;
     `MainWindow` connects it to `SystemMediaPresenter::setArtwork`.
 * These two presenters, `SystemMediaPresenter` and `NowPlayingPresenter` do
@@ -513,20 +535,23 @@ images come from, and the lyrics panel settings.
     the system-wide UTF-8 code page enabled. Fix: build the path from UTF-8
     explicitly (`std::u8string` or a wide path), as `SongParser` does for
     TagLib with `MultiByteToWideChar`.
-  * Cover art comes from `SongParser::extractCoverImage`; a file it cannot
-    open (for example moved or deleted) logs a warning and shows no cover.
-* Lyrics panel style settings (`SettingsDialog` + `LyricsPresenter`)
+* Lyrics panel style settings (`LyricsSettingsPage`, the plugin's Settings
+  page, + `LyricsPresenter`)
   * Uses four settings keys: `lyrics/use_system_default_font`,
     `lyrics/font_family`, `lyrics/font_size`, and
-    `lyrics/highlight_color`.
+    `lyrics/highlight_color`, read and written in one place
+    (`loadLyricsSettings` / `saveLyricsSettings`, lyricssettings.h, with the
+    defaults: system font, application font size, highlight `#0064ff`).
   * `font_family` is always persisted, even when system default is enabled.
-  * On dialog load, it tries stored `font_family`; if not selectable, falls
-    back to combo index `0`.
+  * On page load, the font combo selects the stored `font_family`, or the
+    font Qt substitutes for it when it is not installed. The combo is
+    editable, and OK stores its text as typed: an unknown or empty family
+    leaves the application font's families in effect.
   * When system default is enabled, the combo is disabled but still shows the
     stored custom family.
   * `highlight_color` is selected via color picker and applied to highlighted
     lyric lines.
-  * Apply behavior:
+  * Apply behavior (on the Settings dialog's OK; [plugins.md](plugins.md)):
     * `use_system_default_font=true`: system UI family + stored size
     * `use_system_default_font=false`: stored family + stored size
   * The lyrics font starts from the application font, and a stored family is
@@ -679,6 +704,55 @@ is ready.
 * `:memory:` databases keep the synchronous path for tests because separate
   SQLite in-memory connections do not share state: `loadLibrary` loads on the
   calling thread and calls back before it returns.
+
+### GStreamer plugin registry and scanner
+
+How `gst_init` learns what the GStreamer plugins provide, and how a plugin
+that crashes while loading is kept out of the app. The setup is for Windows
+with vcpkg's GStreamer, whose install layout GStreamer's defaults do not
+match.
+
+* The registry is GStreamer's cache of what each plugin provides, one file
+  per user (on Windows,
+  `%LOCALAPPDATA%\Microsoft\Windows\INetCache\gstreamer-1.0\registry.*.bin`).
+  `gst_init` reads it, and when the plugin files no longer match it (a file
+  added or changed, another `GST_PLUGIN_PATH`) it rescans: it loads each
+  plugin and runs its `plugin_init`. The scan loads every installed plugin,
+  not only the few the app uses.
+* GStreamer is meant to scan in its helper process, `gst-plugin-scanner.exe`,
+  which it starts and reads the results from. A plugin that crashes while
+  loading then kills only the helper: GStreamer restarts it, retries the
+  plugin once, then records the plugin as blacklisted (skipped until its file
+  changes) and goes on. If it cannot start the helper, it scans in the app's
+  process, where such a crash kills the app.
+* It looks for the helper in `GST_PLUGIN_SCANNER`, then in
+  `libexec\gstreamer-1.0` relative to its own DLL. vcpkg installs it in
+  `tools\gstreamer`, so without the variable GStreamer silently scans
+  in-process (its warning is compiled out of vcpkg's Release build). The
+  README's run commands therefore set `GST_PLUGIN_SCANNER`, as they set
+  `GST_PLUGIN_PATH` for the same layout reason.
+* The crash this guards against: Intel's video plugin, `gstqsv`, probes the
+  GPU's codecs in `plugin_init`, and the Intel driver can corrupt the heap
+  there (roadmap.md, Known Issues).
+* The tests keep their own registry (`src/Tests/test_gstreamer_bootstrap.cpp`:
+  a file in the temporary folder, kept between runs as a cache), so they do
+  not write to the developer's profile. When the tests and the app have
+  different build types, they load different plugins (vcpkg's Debug and
+  Release ones), and with one shared registry each switch between running
+  them and running the app would make the next start rescan.
+* Cost: each Release run configuration (shell, Qt Creator) must set
+  `GST_PLUGIN_SCANNER`. vcpkg ships only a Release helper, which cannot load
+  the Debug plugins and would blacklist them all, so a Debug build (of the
+  app or the tests) leaves it unset and scans in-process, which happens only
+  when the plugins change.
+* Rejected:
+  * Setting `GST_PLUGIN_SCANNER` from the app: the helper is in the build
+    machine's vcpkg folder, which the app does not know at runtime and should
+    not have built in; the plugin folder is set the same way, by environment.
+  * Leaving `gstqsv` out: vcpkg has no option to drop one plugin from
+    `plugins-bad`, which the app needs for `wasapi2sink`, and an overlay port
+    or deleting the DLL after each install is upkeep for a plugin the helper
+    already makes harmless.
 
 ### Song ingest and metadata refresh
 

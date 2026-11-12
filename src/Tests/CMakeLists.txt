@@ -4,7 +4,7 @@ function(SETUP_TESTS)
     foreach(_testname ${ARGN})
         add_executable(${_testname} tst_${_testname}.cpp)
         target_sources(${_testname} PRIVATE test_qsettings_bootstrap.cpp
-            testaudiofiles.cpp)
+            test_gstreamer_bootstrap.cpp testaudiofiles.cpp)
         add_test(NAME ${_testname} COMMAND ${_testname})
         target_compile_definitions(${_testname} PRIVATE MYPLAYER_TESTING)
         target_link_libraries(${_testname} Qt6::Test MYLib)
@@ -57,6 +57,13 @@ set(TEST_NAMES
 
 SETUP_TESTS(${TEST_NAMES})
 
+# The lyrics code, tested directly (the app loads it as a plugin).
+target_link_libraries(lyrics mylyrics)
+target_link_libraries(lyricspanel mylyrics)
+# These load the lyrics plugin from Tests/plugins.
+add_dependencies(mainwindow lyricsplugin)
+add_dependencies(plugins lyricsplugin)
+
 set_tests_properties(mainwindow PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
 )
@@ -86,6 +93,10 @@ set_tests_properties(playlisttableview PROPERTIES
 )
 
 set_tests_properties(songinfo PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
+
+set_tests_properties(plugins PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
 )
 

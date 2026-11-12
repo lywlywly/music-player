@@ -19,7 +19,8 @@ A cross-platform desktop music player focused on local-library playback, lyrics,
   `Cmd+F`), with plain words or an expression
 * Song Properties dialog for viewing and editing tags
 * ReplayGain (GStreamer backend)
-* Lyrics display (embedded tag lyrics on play, with `.lrc` fallback)
+* Lyrics display, a plugin (embedded tag lyrics on play, with `.lrc`
+  fallback)
 * Properties tab next to Lyrics: the selected song's file name, folder, path,
   size, modified/created times, audio properties, tags and play stats
 * Spectrum tab: the playing song's spectrum, 20 bands with peak marks
@@ -47,6 +48,11 @@ cmake -S . -B build
 cmake --build build -j
 ./build/EXEC.app/Contents/MacOS/EXEC   # macOS
 ```
+
+Lyrics is a plugin, loaded at startup from `plugins/` next to the executable
+(`build/plugins/`), or from `Contents/PlugIns` in the macOS app bundle; the
+build puts it there. Without it the app runs with no Lyrics tab. On Windows
+the plugin must have the app's build type (Debug or Release).
 
 Build with tests:
 
@@ -92,8 +98,11 @@ Needs Visual Studio with C++ tools and Qt 6 for MSVC. Install GStreamer with
 vcpkg:
 
 ```powershell
-.\vcpkg install gstreamer[core,plugins-base,plugins-good,mpg123,flac,ogg,libav,vorbis]
+.\vcpkg install gstreamer[core,plugins-base,plugins-good,plugins-bad,mpg123,flac,ogg,libav,vorbis]
 ```
+
+`plugins-bad` provides the preferred audio output (`wasapi2sink`); without it
+the app plays through `directsoundsink`.
 
 Build from `src` in a Developer PowerShell for VS:
 
@@ -106,17 +115,25 @@ cmake --build build -j
 
 For the tests, configure `build-tests` the same way with `-DBUILD_TESTING=ON`.
 
-To run the app or the tests, put Qt on `PATH` and set `GST_PLUGIN_PATH`:
+To run the app or the tests, put Qt on `PATH` and set `GST_PLUGIN_PATH` (where
+the GStreamer plugins are) and `GST_PLUGIN_SCANNER` (GStreamer's helper that
+reads new or changed plugins in its own process, so a plugin that crashes
+while loading does not take the app down):
 
 ```powershell
 $env:PATH = "<Qt>\msvc2022_64\bin;$env:PATH"
 $env:GST_PLUGIN_PATH = "<vcpkg-root>\installed\x64-windows\plugins\gstreamer"
+$env:GST_PLUGIN_SCANNER = "<vcpkg-root>\installed\x64-windows\tools\gstreamer\gst-plugin-scanner.exe"
 .\build\EXEC.exe
 ctest --test-dir build-tests --output-on-failure
 ```
 
 For a Debug build, use `-DCMAKE_BUILD_TYPE=Debug` and
-`<vcpkg-root>\installed\x64-windows\debug\plugins\gstreamer`.
+`<vcpkg-root>\installed\x64-windows\debug\plugins\gstreamer`, and leave
+`GST_PLUGIN_SCANNER` unset: vcpkg's helper is a Release build, which cannot
+load the Debug plugins, so GStreamer would mark them all as broken. In Qt
+Creator, set these in Projects > Run > Environment. Why the helper matters:
+`docs/architecture.md`, "GStreamer plugin registry and scanner".
 
 ## Library Search Query Syntax
 

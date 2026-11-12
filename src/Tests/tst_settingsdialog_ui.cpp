@@ -119,7 +119,7 @@ void TestSettingsDialogUi::showsExistingCustomFields() {
        .writable = true}));
   QVERIFY(registry_->loadDynamicColumns(databaseManager_->db()));
 
-  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_);
+  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_, {});
   QListWidget *list = dialog.findChild<QListWidget *>("custom_fields_list");
   QVERIFY(list != nullptr);
   QCOMPARE(list->count(), 1);
@@ -128,7 +128,7 @@ void TestSettingsDialogUi::showsExistingCustomFields() {
 }
 
 void TestSettingsDialogUi::addCustomField_persistsDefinitionAndEmitsSignal() {
-  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_);
+  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_, {});
   QSignalSpy customFieldsSpy(&dialog, &SettingsDialog::customFieldsChanged);
 
   QLineEdit *displayName =
@@ -203,7 +203,7 @@ void TestSettingsDialogUi::removeCustomField_deletesDefinitionAndValues() {
       "INSERT INTO song_attributes(song_id, key, value_text, value_type) "
       "VALUES (1, 'musicbrainz_trackid', 'abc123', 'text')"));
 
-  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_);
+  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_, {});
   QSignalSpy customFieldsSpy(&dialog, &SettingsDialog::customFieldsChanged);
   QListWidget *list = dialog.findChild<QListWidget *>("custom_fields_list");
   QPushButton *removeButton =
@@ -233,7 +233,7 @@ void TestSettingsDialogUi::removeCustomField_deletesDefinitionAndValues() {
 }
 
 void TestSettingsDialogUi::addComputedField_persistsDefinitionAndEmitsSignal() {
-  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_);
+  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_, {});
   QSignalSpy customFieldsSpy(&dialog, &SettingsDialog::customFieldsChanged);
 
   QLineEdit *displayName =
@@ -287,7 +287,7 @@ void TestSettingsDialogUi::addComputedField_persistsDefinitionAndEmitsSignal() {
 }
 
 void TestSettingsDialogUi::displayExpressions_persistAndEmitSignals() {
-  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_);
+  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_, {});
   QSignalSpy statusExprSpy(&dialog,
                            &SettingsDialog::statusBarExpressionChanged);
   QSignalSpy titleExprSpy(&dialog,
@@ -318,7 +318,7 @@ void TestSettingsDialogUi::displayExpressions_persistAndEmitSignals() {
 }
 
 void TestSettingsDialogUi::displayExpressionPreview_tracksActiveEditor() {
-  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_);
+  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_, {});
   QPlainTextEdit *statusEdit =
       dialog.findChild<QPlainTextEdit *>("status_expression_edit");
   QPlainTextEdit *titleEdit =
@@ -343,7 +343,7 @@ void TestSettingsDialogUi::displayThemeMode_restoresPersistsAndEmitsSignal() {
     QSettings settings;
     settings.setValue("display/theme_mode", " Light ");
   }
-  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_);
+  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_, {});
   QSignalSpy themeSpy(&dialog, &SettingsDialog::displayThemeModeChanged);
 
   QComboBox *themeCombo =
@@ -370,7 +370,7 @@ void TestSettingsDialogUi::playbackBackend_restoresPersistsAndEmitsSignal() {
         "playback/backend",
         static_cast<int>(PlaybackBackendManager::Backend::GStreamer));
   }
-  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_);
+  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_, {});
   QSignalSpy backendSpy(&dialog, &SettingsDialog::backendChanged);
 
   QComboBox *backendCombo = dialog.findChild<QComboBox *>("backend_combo_box");
@@ -393,7 +393,7 @@ void TestSettingsDialogUi::playbackBackend_restoresPersistsAndEmitsSignal() {
 void TestSettingsDialogUi::libraryPage_addsRescansAndRemovesFolders() {
   const QString root = QFileInfo(dir_->path()).canonicalFilePath();
   QVERIFY(QDir().mkpath(root + "/music/inner"));
-  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_);
+  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_, {});
   auto *page = dialog.findChild<LibraryFoldersPage *>();
   auto *list = dialog.findChild<QListWidget *>("library_folders_list");
   auto *removeButton =
@@ -448,7 +448,7 @@ void TestSettingsDialogUi::
     QFile file(folder + "/a.mp3");
     QVERIFY(file.open(QIODevice::WriteOnly));
   }
-  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_);
+  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_, {});
   auto *page = dialog.findChild<LibraryFoldersPage *>();
   auto *list = dialog.findChild<QListWidget *>("library_folders_list");
   auto *removeMissingButton =
@@ -493,7 +493,7 @@ void TestSettingsDialogUi::libraryPage_marksFoldersWithoutLiveUpdates() {
   monitor.refusedPaths = {root};
   MonitoredLibrary monitored(*library_, *registry_, *databaseManager_, {},
                              &monitor);
-  SettingsDialog dialog(*registry_, *databaseManager_, monitored);
+  SettingsDialog dialog(*registry_, *databaseManager_, monitored, {});
   auto *page = dialog.findChild<LibraryFoldersPage *>();
   auto *list = dialog.findChild<QListWidget *>("library_folders_list");
   QVERIFY(page != nullptr);
@@ -506,7 +506,7 @@ void TestSettingsDialogUi::libraryPage_marksFoldersWithoutLiveUpdates() {
 }
 
 void TestSettingsDialogUi::libraryPage_showsScanProgress() {
-  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_);
+  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_, {});
   auto *label = dialog.findChild<QLabel *>("library_scan_status_label");
   QVERIFY(label != nullptr);
   QVERIFY(label->text().isEmpty());

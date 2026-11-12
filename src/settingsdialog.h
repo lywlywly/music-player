@@ -8,18 +8,16 @@
 #include "libraryexpression.h"
 #include "playbackbackendmanager.h"
 #include "statusruntimesymboltable.h"
-#include <QCheckBox>
-#include <QColor>
 #include <QComboBox>
 #include <QDialog>
-#include <QFontComboBox>
 #include <QLabel>
+#include <QList>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSet>
-#include <QSpinBox>
 #include <unordered_map>
 
+class IPluginSettingsPage;
 class MonitoredLibrary;
 
 namespace Ui {
@@ -33,6 +31,7 @@ public:
   explicit SettingsDialog(ColumnRegistry &columnRegistry,
                           DatabaseManager &databaseManager,
                           MonitoredLibrary &monitoredLibrary,
+                          const QList<QObject *> &plugins,
                           QWidget *parent = nullptr);
   ~SettingsDialog();
   void setDisplayExpressionPreviewContext(
@@ -43,8 +42,6 @@ signals:
   void backendChanged(PlaybackBackendManager::Backend backend);
   void customFieldsChanged();
   void cloudUuidChanged(const QString &uuid);
-  void lyricsFontChanged(const QString &fontFamily, int pointSize);
-  void lyricsHighlightColorChanged(const QColor &color);
   void statusBarExpressionChanged(const QString &expression);
   void windowTitleExpressionChanged(const QString &expression);
   void displayThemeModeChanged(const QString &mode);
@@ -57,7 +54,6 @@ private:
   void removeSelectedCustomField();
   void removeSelectedComputedField();
   void updateCloudUuidStatus();
-  void updateLyricsHighlightColorButton();
   void setActiveDisplayExpressionEditor(QPlainTextEdit *editor);
   void updateActiveDisplayExpressionPreview();
   QString evaluateDisplayExpressionPreview(const QString &expressionText,
@@ -82,17 +78,14 @@ private:
   bool initialCloudDisabledByUser_ = false;
   QString pendingCloudUuid_;
   bool pendingCloudDisabledByUser_ = false;
-  QFontComboBox *lyricsFontFamilyCombo_ = nullptr;
-  QSpinBox *lyricsFontSizeSpin_ = nullptr;
-  QCheckBox *lyricsUseDefaultFontCheck_ = nullptr;
-  QPushButton *lyricsHighlightColorButton_ = nullptr;
+  // The plugins' pages, one tab each.
+  QList<IPluginSettingsPage *> pluginPages_;
   QComboBox *displayThemeModeCombo_ = nullptr;
   QPlainTextEdit *statusExpressionEdit_ = nullptr;
   QPlainTextEdit *windowTitleExpressionEdit_ = nullptr;
   QLabel *activeDisplayExpressionPreviewLabel_ = nullptr;
   QPlainTextEdit *activeDisplayExpressionEdit_ = nullptr;
   QPushButton *resetDisplayExpressionsButton_ = nullptr;
-  QColor lyricsHighlightColor_ = QColor(0, 100, 255);
   std::unordered_map<std::string, FieldValue> previewSong_;
   StatusRuntimeSymbolTable previewRuntimeSymbols_;
 };

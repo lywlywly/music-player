@@ -67,7 +67,8 @@ pkg_check_modules(GST IMPORTED_TARGET REQUIRED gstreamer-1.0)
 
 add_subdirectory(spectrum)
 add_subdirectory(pluginapi)
-add_subdirectory(plugins/lyrics)
+# Its build files go outside plugins/, the folder the built plugins go in.
+add_subdirectory(plugins/lyrics lyrics-plugin-build)
 
 if(WIN32)
   find_package(FFmpeg REQUIRED COMPONENTS avcodec avformat avutil)
@@ -187,6 +188,8 @@ set(PROJECT_SOURCES
   playlistsearch.cpp
   playlistsearchdialog.h
   playlistsearchdialog.cpp
+  pluginmanager.h
+  pluginmanager.cpp
   pluginplayerhost.h
   pluginplayerhost.cpp
   qtaudioplayer.h
@@ -266,7 +269,6 @@ target_link_libraries(
   efsw
   myspectrum
   pluginapi
-  mylyrics
 )
 
 if(WIN32)
@@ -303,6 +305,8 @@ endif()
 
 add_executable(EXEC main.cpp)
 target_link_libraries(EXEC MYLib)
+# The app loads the plugins at runtime; building it builds them.
+add_dependencies(EXEC lyricsplugin)
 
 if(APPLE)
   set_target_properties(EXEC PROPERTIES

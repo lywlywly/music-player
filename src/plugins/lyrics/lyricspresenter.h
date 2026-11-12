@@ -27,13 +27,14 @@ public:
   // Highlights the lyrics line for the playback position.
   void positionChanged(qint64 positionMs) override;
 
-  // Reads the lyrics font and highlight color from QSettings.
+  // Applies the lyrics font and highlight color from QSettings
+  // (loadLyricsSettings).
   void applySettings();
+
+private:
   // An empty fontFamily uses the application font family.
   void setFont(const QString &fontFamily, int pointSize);
   void setHighlightColor(const QColor &color);
-
-private:
   LyricsPanel *lyricsPanel_;
   IPlayerHost &player_;
   LyricsManager lyricsManager_;

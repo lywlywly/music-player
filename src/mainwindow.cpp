@@ -4,14 +4,15 @@
 #include "databasemanager.h"
 #include "displaytheme.h"
 #include "gstaudioplayer.h"
+#include "ipanelprovider.h"
+#include "iplugin.h"
 #include "libraryloader.h"
 #include "librarysearchdialog.h"
 #include "nowplayingpresenter.h"
 #include "playbackbuttonstyle.h"
 #include "playlistdialogs.h"
 #include "playlistsearchdialog.h"
-#include "pluginplayerhost.h"
-#include "plugins/lyrics/lyricspresenter.h"
+#include "pluginmanager.h"
 #include "settingsdialog.h"
 #include "songdialogs.h"
 #include "songinfopanel.h"
@@ -29,6 +30,7 @@
 #include <QStatusBar>
 #include <algorithm>
 #include <utility>
+#include <vector>
 
 namespace {
 constexpr int kMinVolumePercent = 0;
@@ -40,7 +42,10 @@ constexpr const char *kPlaybackFollowsCursorSettingsKey =
 constexpr const char *kCursorFollowsPlaybackSettingsKey =
     "playback/cursor_follows_playback";
 constexpr const char *kInfoTabSettingsKey = "infopanel/current_tab";
-constexpr const char *kInfoTabLyrics = "lyrics";
+// QSplitter::saveState of the splitter between the info panel and the
+// playlists, and of the one between the info panel's tabs and the cover.
+constexpr const char *kMainSplitterSettingsKey = "layout/main_splitter";
+constexpr const char *kInfoSplitterSettingsKey = "layout/info_splitter";
 constexpr const char *kInfoTabProperties = "properties";
 constexpr const char *kInfoTabSpectrum = "spectrum";
 
@@ -59,6 +64,16 @@ void bindActionToBoolSetting(QAction *action, const char *key,
     QSettings settings;
     settings.setValue(key, checked);
   });
+}
+
+// The folder the plugins are loaded from: the bundle's PlugIns when the
+// executable is in a macOS app bundle, else plugins/ next to the executable.
+QString pluginFolder() {
+  const QDir exeDir(QCoreApplication::applicationDirPath());
+  if (exeDir.absolutePath().endsWith(".app/Contents/MacOS")) {
+    return exeDir.absoluteFilePath("../PlugIns");
+  }
+  return exeDir.absoluteFilePath("plugins");
 }
 
 void prewarmSelectedPlaybackBackend() {
@@ -105,10 +120,9 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
                                       monitoredLibrary_, this);
   playback_ = new PlaybackController(songLibrary, *playlists_, this);
   coverArt_ = new CoverArtPresenter(ui->label, this);
-  // A child created after ui->setupUi, so the lyrics panel and its presenter
-  // (a listener) are destroyed before it.
-  pluginPlayerHost_ = new PluginPlayerHost(*playback_, this);
-  lyrics_ = new LyricsPresenter(ui->lyricsPanel, *pluginPlayerHost_);
+  // A child created after ui->setupUi, so the plugin panels in the info panel
+  // are destroyed before it shuts the plugins down.
+  plugins_ = new PluginManager(*playback_, pluginFolder(), this);
   songInfo_ = new SongInfoPresenter(ui->songInfoPanel, songLibrary,
                                     monitoredLibrary_, columnRegistry_, this);
   spectrum_ = new SpectrumPresenter(ui->spectrumWidget, this);
@@ -136,7 +150,6 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
   setUpPlayback();
   initVolumeControl();
   setUpPlaybackActions();
-  lyrics_->applySettings();
   setUpSplitter();
 }
 
@@ -197,16 +210,27 @@ void MainWindow::setUpMenuBar() {
 }
 
 void MainWindow::setUpInfoTabs() {
-  QSettings settings;
-  const QString savedTab =
-      settings.value(kInfoTabSettingsKey, kInfoTabLyrics).toString();
-  const std::pair<QWidget *, const char *> tabs[] = {
-      {ui->lyricsTab, kInfoTabLyrics},
-      {ui->propertiesTab, kInfoTabProperties},
-      {ui->spectrumTab, kInfoTabSpectrum},
-  };
+  // The plugins' panels come first, in load order, each named by its
+  // plugin's id.
+  std::vector<std::pair<QWidget *, QString>> tabs;
+  for (QObject *root : plugins_->plugins()) {
+    auto *provider = qobject_cast<IPanelProvider *>(root);
+    if (provider == nullptr) {
+      continue;
+    }
+    QWidget *panel = provider->createPanel(ui->infoTabs);
+    ui->infoTabs->insertTab(static_cast<int>(tabs.size()), panel,
+                            provider->panelTitle());
+    tabs.emplace_back(panel, qobject_cast<IPlugin *>(root)->id());
+  }
+  tabs.emplace_back(ui->propertiesTab, kInfoTabProperties);
+  tabs.emplace_back(ui->spectrumTab, kInfoTabSpectrum);
+  // Inserting before the current tab keeps it current; start from the first
+  // tab unless another one is saved.
+  ui->infoTabs->setCurrentIndex(0);
+  const QString savedTab = QSettings().value(kInfoTabSettingsKey).toString();
   for (const auto &[tab, name] : tabs) {
-    if (savedTab == QLatin1String(name)) {
+    if (savedTab == name) {
       ui->infoTabs->setCurrentWidget(tab);
     }
   }
@@ -328,8 +352,9 @@ void MainWindow::setUpLibraryScanStatus() {
 
 void MainWindow::initSettings() {
   connect(ui->actionPreferences, &QAction::triggered, this, [this]() {
-    SettingsDialog *dialog = new SettingsDialog(
-        columnRegistry_, databaseManager_, monitoredLibrary_, this);
+    SettingsDialog *dialog =
+        new SettingsDialog(columnRegistry_, databaseManager_, monitoredLibrary_,
+                           plugins_->plugins(), this);
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     dialog->setModal(true);
     connect(dialog, &SettingsDialog::backendChanged, this,
@@ -353,12 +378,6 @@ void MainWindow::initSettings() {
                 cloudPlayStatsSyncCoordinator_.triggerManualRebase();
               }
             });
-    connect(dialog, &SettingsDialog::lyricsFontChanged, this,
-            [this](const QString &fontFamily, int pointSize) {
-              lyrics_->setFont(fontFamily, pointSize);
-            });
-    connect(dialog, &SettingsDialog::lyricsHighlightColorChanged, this,
-            [this](const QColor &color) { lyrics_->setHighlightColor(color); });
     connect(dialog, &SettingsDialog::statusBarExpressionChanged, this,
             [this](const QString &expression) {
               nowPlaying_->setExpression(DisplayExpressionKind::StatusBar,
@@ -449,10 +468,25 @@ void MainWindow::setUpPlaybackActions() {
 }
 
 void MainWindow::setUpSplitter() {
-  connect(ui->splitter, &QSplitter::splitterMoved, coverArt_,
-          &CoverArtPresenter::updateCoverSize);
-  connect(ui->splitter_2, &QSplitter::splitterMoved, coverArt_,
-          &CoverArtPresenter::updateCoverSize);
+  // With nothing saved, the info panel starts at a quarter of the window, so
+  // its width does not depend on its panels' size hints (docs/architecture.md).
+  // The splitter scales these to its width; both are above the panes' minimum
+  // widths, which would otherwise replace them.
+  ui->splitter->setSizes({320, 960});
+  QSettings settings;
+  const std::pair<QSplitter *, const char *> splitters[] = {
+      {ui->splitter, kMainSplitterSettingsKey},
+      {ui->splitter_2, kInfoSplitterSettingsKey},
+  };
+  for (const auto &[splitter, key] : splitters) {
+    splitter->restoreState(settings.value(key).toByteArray());
+    // Saved when the user drags it.
+    connect(splitter, &QSplitter::splitterMoved, this, [splitter, key]() {
+      QSettings().setValue(key, splitter->saveState());
+    });
+    connect(splitter, &QSplitter::splitterMoved, coverArt_,
+            &CoverArtPresenter::updateCoverSize);
+  }
 }
 
 void MainWindow::initVolumeControl() {
