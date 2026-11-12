@@ -55,6 +55,10 @@ private:
                              gpointer user_data);
   static GstPadProbeReturn onBitrateProbe(GstPad *, GstPadProbeInfo *info,
                                           gpointer user_data);
+  // On rgvolume's src pad: after ReplayGain, before the volume. Feeds the
+  // PcmTap, if any.
+  static GstPadProbeReturn onPcmProbe(GstPad *pad, GstPadProbeInfo *info,
+                                      gpointer user_data);
   static void onBusMessage(GstBus *, GstMessage *msg, gpointer user_data);
   GstElement *playbin_;
   GstElement *audioSink_ = nullptr;

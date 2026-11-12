@@ -14,6 +14,8 @@ These topics have their own files:
   and DynamoDB.
 * [info-panel.md](info-panel.md): the info panel's Lyrics and Properties
   tabs; Properties shows the selected song's file and metadata.
+* [spectrum.md](spectrum.md): the Spectrum tab and the `src/spectrum/`
+  module (FFT, bands, `PcmTap`, widget, presenter).
 
 ## Overview
 
@@ -51,8 +53,11 @@ The backend must not depend on how (or whether) it is displayed.
   `LibraryScanner`, `IFileSystemMonitor` implementations, `SongMatcher`.
 * Frontend (Qt view adapters and widgets): `PlaylistTableModel`,
   `PlaylistTableView`, `PlaylistTabs`, `LibrarySearchResultsModel`, dialogs,
-  presenters (`LyricsPresenter`, `SongInfoPresenter`, ...), `SongInfoPanel`,
-  `buildSongInfo`, `MainWindow`.
+  presenters (`LyricsPresenter`, `SongInfoPresenter`, `SpectrumPresenter`,
+  ...), `SongInfoPanel`, `SpectrumWidget`, `buildSongInfo`, `MainWindow`.
+* The spectrum module (`src/spectrum/`, library `myspectrum`) depends on Qt
+  only, never on app classes. Its analysis classes (`fft`, `SpectrumBands`,
+  `SpectrumAnalyzer`, `SpectrumSmoother`, `PcmTap`) use no Qt.
 
 | Backend classes may use | Backend classes must not use |
 |---|---|
@@ -137,12 +142,15 @@ The top-level window and what it owns.
     `PlaylistTabs::newAutoPlaylist`.
   * A permanent status bar label shows `MonitoredLibrary` scan progress, then
     the number of offline watched folders, if any.
-  * The info panel at the top left (`infoTabs`) has a Lyrics and a Properties
-    tab; the current one is restored from `infopanel/current_tab` (`lyrics` or
-    `properties`). `MainWindow` connects
+  * The info panel at the top left (`infoTabs`) has a Lyrics, a Properties and
+    a Spectrum tab; the current one is restored from `infopanel/current_tab`
+    (`lyrics`, `properties` or `spectrum`). `MainWindow` connects
     `PlaylistTabs::selectedSongChanged` to `SongInfoPresenter::showSong`, and
     the Properties tab's buttons to `revealSongFile` and `openSongProperties`.
-    See [info-panel.md](info-panel.md).
+    See [info-panel.md](info-panel.md). It connects
+    `SpectrumPresenter::tapChanged` to `PlaybackController::setPcmTap`, and
+    the playback state and position to the presenter. See
+    [spectrum.md](spectrum.md).
   * Edit > Search Playlist (`QKeySequence::Find`) shows the one
     `PlaylistSearchDialog`, kept on the shown playlist through
     `currentPlaylistChanged`. Its row requests go to `PlaybackController::playRow`,
@@ -409,7 +417,12 @@ unplayable songs are skipped, and the audio backends.
     CoreAudio directly.
 * `AudioPlayer` (+ concrete backends)
   * Transport and volume control consumed by `PlaybackController`, which
-    re-applies the volume after a backend switch.
+    re-applies the volume and the `PcmTap` after a backend switch.
+  * `setPcmTap(tap)`: decoded audio, before the volume, goes to the tap for
+    the spectrum. `GstAudioPlayer` probes `rgvolume`'s src pad;
+    `QtAudioPlayer` sets a `QAudioBufferOutput`, which only Qt's FFmpeg media
+    backend fills (not the `darwin` one of Homebrew's Qt). The conversion is
+    in `audiotaps.{h,cpp}`. See [spectrum.md](spectrum.md).
   * Exposes `bitrateChanged(bitsPerSecond)` for playback-time bitrate updates.
   * `AudioPlayer` stores clamped volume as an integer percentage (`0..100`);
     `QtAudioPlayer` maps it to `QAudioOutput::setVolume(...)`, and
@@ -437,8 +450,8 @@ OS media controls and now-playing metadata.
 
 ### Info panel, lyrics and cover art
 
-The info panel's tabs (Lyrics, Properties), where lyrics and cover images come
-from, and the lyrics panel settings.
+The info panel's tabs (Lyrics, Properties, Spectrum), where lyrics and cover
+images come from, and the lyrics panel settings.
 
 * `SongInfoPresenter` (frontend), `SongInfoPanel` (frontend, the Properties
   tab), `buildSongInfo` (frontend, songinfo.h)
@@ -450,6 +463,12 @@ from, and the lyrics panel settings.
   * The presenter rebuilds on `showSong`, on the shown playlist's
     `songDataChanged` for the song's row and on `folderAvailabilityChanged`,
     debounced (100 ms).
+* `SpectrumPresenter`, `SpectrumWidget` (frontend, `src/spectrum/`, the
+  Spectrum tab)
+  * 20 log-spaced bands from 50 Hz to 20 kHz, 0 to -60 dB, with peak marks,
+    from the `PcmTap` at the estimated play position, about 30 fps while the
+    tab is shown and playing. Without audio for 1.5 s while playing, the tab
+    points to the GStreamer backend setting. See [spectrum.md](spectrum.md).
 * `LyricsPanel` (frontend)
   * Keeps the index of its current line and re-centers on it, without
     animation, in `showEvent` and `resizeEvent`. A `QTabWidget` sizes only its

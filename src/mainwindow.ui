@@ -270,6 +270,28 @@
                   </item>
                  </layout>
                 </widget>
+                <widget class="QWidget" name="spectrumTab">
+                 <attribute name="title">
+                  <string>Spectrum</string>
+                 </attribute>
+                 <layout class="QVBoxLayout" name="spectrumTabLayout">
+                  <property name="leftMargin">
+                   <number>0</number>
+                  </property>
+                  <property name="topMargin">
+                   <number>0</number>
+                  </property>
+                  <property name="rightMargin">
+                   <number>0</number>
+                  </property>
+                  <property name="bottomMargin">
+                   <number>0</number>
+                  </property>
+                  <item>
+                   <widget class="SpectrumWidget" name="spectrumWidget" native="true"/>
+                  </item>
+                 </layout>
+                </widget>
                </widget>
                <widget class="QLabel" name="label">
                 <property name="sizePolicy">
@@ -501,6 +523,11 @@
    <extends>QWidget</extends>
    <header>songinfopanel.h</header>
    <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>SpectrumWidget</class>
+   <extends>QWidget</extends>
+   <header>spectrum/spectrumwidget.h</header>
   </customwidget>
   <customwidget>
    <class>PlaylistTabs</class>

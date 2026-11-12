@@ -48,6 +48,10 @@ set(TEST_NAMES
     efswfilesystemmonitor
     songinfo
     lyricspanel
+    spectrum
+    spectrumpresenter
+    audiotaps
+    gstaudioplayer
 )
 
 SETUP_TESTS(${TEST_NAMES})
@@ -85,5 +89,9 @@ set_tests_properties(songinfo PROPERTIES
 )
 
 set_tests_properties(lyricspanel PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
+
+set_tests_properties(spectrumpresenter PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
 )

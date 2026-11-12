@@ -1,4 +1,6 @@
 #include "gstaudioplayer.h"
+#include "audiotaps.h"
+#include "spectrum/pcmtap.h"
 #include <QAudioDevice>
 #include <QtGlobal>
 #include <cstring>
@@ -190,6 +192,7 @@ void GstAudioPlayer::stop() {
   playbackState_ = QMediaPlayer::StoppedState;
   clearBitrateState();
   gst_element_set_state(playbin_, GST_STATE_NULL);
+  clearPcmTap();
   emit positionChanged(0);
   g_object_set(playbin_, "uri", NULL, NULL);
 }
@@ -200,12 +203,14 @@ void GstAudioPlayer::setSource(const QUrl &source) {
   detachBitrateProbe();
   clearBitrateState();
   gst_element_set_state(playbin_, GST_STATE_READY);
+  clearPcmTap();
   applyTrackedSource();
 }
 
 void GstAudioPlayer::setPosition(qint64 milliseconds) {
   trackedPositionMs_ = milliseconds;
   clearBitrateState();
+  clearPcmTap();
   gint64 position_ns = static_cast<gint64>(milliseconds) * GST_MSECOND;
 
   gst_element_seek_simple(
@@ -282,6 +287,16 @@ GstPadProbeReturn GstAudioPlayer::onBitrateProbe(GstPad *,
   return GST_PAD_PROBE_OK;
 }
 
+GstPadProbeReturn GstAudioPlayer::onPcmProbe(GstPad *pad, GstPadProbeInfo *info,
+                                             gpointer user_data) {
+  auto *self = static_cast<GstAudioPlayer *>(user_data);
+  const std::shared_ptr<PcmTap> tap = self->pcmTap();
+  if (tap) {
+    pushGstBuffer(pad, gst_pad_probe_info_get_buffer(info), *tap);
+  }
+  return GST_PAD_PROBE_OK;
+}
+
 void GstAudioPlayer::onBusMessage(GstBus *, GstMessage *msg,
                                   gpointer user_data) {
   auto *self = static_cast<GstAudioPlayer *>(user_data);
@@ -329,6 +344,13 @@ void GstAudioPlayer::initializePipeline() {
   g_object_set(rgvolume_, "album-mode", FALSE, "pre-amp", 0.0, "fallback-gain",
                0.0, "headroom", 0.0, NULL);
   g_object_set(playbin_, "audio-filter", rgvolume_, NULL);
+  if (GstPad *pad = gst_element_get_static_pad(rgvolume_, "src")) {
+    // Not removed: teardownPipeline stops the streaming first, and the probe
+    // goes with rgvolume.
+    gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_BUFFER,
+                      &GstAudioPlayer::onPcmProbe, this, nullptr);
+    gst_object_unref(pad);
+  }
 
   audioSink_ =
       gst_element_factory_make(platformSinkFactoryName(), "audio_sink");

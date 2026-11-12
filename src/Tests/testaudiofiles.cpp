@@ -2,6 +2,8 @@
 
 #include <QDataStream>
 #include <QFile>
+#include <cmath>
+#include <numbers>
 
 namespace {
 // Big-endian 32-bit integer, as ID3v2.3 frame sizes are stored.
@@ -45,18 +47,16 @@ QByteArray id3v2CoverTag(const QByteArray &imageData,
   return tag;
 }
 
-// Writes the silent WAV, followed by extraChunk (a complete RIFF chunk) if
+// Writes a PCM WAV of pcm, followed by extraChunk (a complete RIFF chunk) if
 // it is not empty.
-bool writeWav(const QString &path, const QByteArray &extraChunk) {
+bool writeWav(const QString &path, quint32 sampleRate, quint16 channels,
+              quint16 bitsPerSample, const QByteArray &pcm,
+              const QByteArray &extraChunk = {}) {
   QFile file(path);
   if (!file.open(QIODevice::WriteOnly)) {
     return false;
   }
 
-  constexpr quint32 sampleRate = 8000;
-  constexpr quint16 channels = 1;
-  constexpr quint16 bitsPerSample = 8;
-  const QByteArray pcm(800, static_cast<char>(0x80));
   const quint32 dataSize = static_cast<quint32>(pcm.size());
   const quint32 byteRate = sampleRate * channels * (bitsPerSample / 8);
   const quint16 blockAlign = channels * (bitsPerSample / 8);
@@ -84,9 +84,32 @@ bool writeWav(const QString &path, const QByteArray &extraChunk) {
 
   return out.status() == QDataStream::Ok;
 }
+
+// 0.1 s of 8 kHz mono 8-bit silence.
+const QByteArray kSilence(800, static_cast<char>(0x80));
 } // namespace
 
-bool writeSilentWav(const QString &path) { return writeWav(path, {}); }
+bool writeSilentWav(const QString &path) {
+  return writeWav(path, 8000, 1, 8, kSilence);
+}
+
+bool writeToneWav(const QString &path, double hz, double seconds) {
+  constexpr int rate = 44100;
+  const int frames = static_cast<int>(seconds * rate);
+  QByteArray pcm;
+  pcm.reserve(frames * 2 * 3);
+  for (int i = 0; i < frames; ++i) {
+    const auto value = static_cast<qint32>(std::lround(
+        0.5 * 8388607.0 * std::sin(2.0 * std::numbers::pi * hz * i / rate)));
+    for (int channel = 0; channel < 2; ++channel) {
+      // Packed little-endian 24-bit.
+      pcm.append(static_cast<char>(value & 0xFF));
+      pcm.append(static_cast<char>((value >> 8) & 0xFF));
+      pcm.append(static_cast<char>((value >> 16) & 0xFF));
+    }
+  }
+  return writeWav(path, rate, 2, 24, pcm);
+}
 
 bool writeWavWithCover(const QString &path, const QByteArray &imageData,
                        const QByteArray &mimeType) {
@@ -99,5 +122,5 @@ bool writeWavWithCover(const QString &path, const QByteArray &imageData,
   if (tag.size() % 2 != 0) {
     chunk.append('\0'); // RIFF chunks are padded to an even size
   }
-  return writeWav(path, chunk);
+  return writeWav(path, 8000, 1, 8, kSilence, chunk);
 }

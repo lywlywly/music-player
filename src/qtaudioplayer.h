@@ -2,6 +2,7 @@
 #define QTAUDIOPLAYER_H
 
 #include "audioplayer.h"
+#include <QAudioBufferOutput>
 #include <QAudioDevice>
 #include <QAudioOutput>
 #include <QMediaDevices>
@@ -20,6 +21,8 @@ public:
   void setSource(const QUrl &) override;
   void setPosition(qint64 position) override;
   void setVolume(int volumePercent) override;
+  // Sets a QAudioBufferOutput on the player only while there is a tap.
+  void setPcmTap(std::shared_ptr<PcmTap> tap) override;
 
 private:
   void createPlaybackObjects();
@@ -27,6 +30,7 @@ private:
 
   std::unique_ptr<QMediaPlayer> player_;
   QAudioOutput *audioOutput_ = nullptr;
+  QAudioBufferOutput *bufferOutput_ = nullptr;
   QMediaDevices mediaDevices_;
 };
 

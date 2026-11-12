@@ -10,9 +10,11 @@
 #include <QString>
 #include <QTimer>
 #include <functional>
+#include <memory>
 #include <string>
 #include <unordered_map>
 
+class PcmTap;
 class PlaylistCollection;
 
 // Runs playback: the transport commands, starting a song on the audio
@@ -70,6 +72,8 @@ public:
   void setBackend(PlaybackBackendManager::Backend backend);
   // 0..100. Kept for the backend setBackend() creates or switches to.
   void setVolume(int volumePercent);
+  // The decoded audio goes to tap (nullptr: nowhere). Kept, like the volume.
+  void setPcmTap(std::shared_ptr<PcmTap> tap);
 
 signals:
   // A song is about to start, before its source is set (the backend may
@@ -127,6 +131,7 @@ private:
   std::function<int()> preferredNextRow_;
   bool ready_ = false;
   int volumePercent_ = 100;
+  std::shared_ptr<PcmTap> pcmTap_;
   // The song most recently passed to the backend by playSong, or -1.
   int currentSongPk_ = -1;
   int consecutiveFailures_ = 0;

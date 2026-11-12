@@ -14,6 +14,7 @@
 #include "../playlistcollection.h"
 #include "../songlibrary.h"
 #include "../songparser.h"
+#include "../spectrum/pcmtap.h"
 #include "../utils.h"
 #include "testaudiofiles.h"
 
@@ -61,7 +62,7 @@ private slots:
   void removingPlayingPlaylist_stops();
   void removingCurrentSongFromLibrary_stopsAndClearsIt();
 
-  void setBackend_stopsAndMovesSignalsAndVolumeToNewPlayer();
+  void setBackend_stopsAndMovesSignalsVolumeAndTapToNewPlayer();
 
 private:
   // Appends a song to playlist_; its WAV file is written only if exists.
@@ -449,11 +450,14 @@ void TestPlaybackController::removingCurrentSongFromLibrary_stopsAndClearsIt() {
 }
 
 void TestPlaybackController::
-    setBackend_stopsAndMovesSignalsAndVolumeToNewPlayer() {
+    setBackend_stopsAndMovesSignalsVolumeAndTapToNewPlayer() {
   addSong("Song");
   playlist_->setLastPlayed(playlist_->getPkByIndex(0));
   controller_->play();
   controller_->setVolume(40);
+  const auto tap = std::make_shared<PcmTap>();
+  controller_->setPcmTap(tap);
+  QCOMPARE(player()->pcmTap(), tap);
   QSignalSpy stateSpy(controller_, &PlaybackController::playbackStateChanged);
 
   controller_->setBackend(PlaybackBackendManager::Backend::GStreamer);
@@ -467,6 +471,7 @@ void TestPlaybackController::
   QVERIFY(newPlayer != nullptr);
 
   QCOMPARE(newPlayer->volumeForTest(), 40);
+  QCOMPARE(newPlayer->pcmTap(), tap);
   // Created after the switch: stopping the old player reports position 0.
   QSignalSpy positionSpy(controller_, &PlaybackController::positionChanged);
   newPlayer->setPosition(2500);

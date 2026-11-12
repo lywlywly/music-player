@@ -1,7 +1,7 @@
 # Plan: Info Panel (Lyrics and Properties tabs)
 
-Status: implemented. Where the code differs from the first plan, this file was
-updated to match it. The classes are also described in
+Status: implemented. The third tab, Spectrum, is described in
+[spectrum.md](spectrum.md). The classes are also described in
 [architecture.md](architecture.md) ("Info panel, lyrics and cover art").
 
 ## Summary
@@ -62,8 +62,9 @@ splitter (horizontal)
 ├── frame_2
 │   └── splitter_2 (vertical)
 │       ├── infoTabs     (QTabWidget, documentMode, verstretch 3, min 120 x 240)
-│       │   ├── "Lyrics"      lyricsTab     > lyricsPanel   (LyricsPanel)
-│       │   └── "Properties"  propertiesTab > songInfoPanel (SongInfoPanel)
+│       │   ├── "Lyrics"      lyricsTab     > lyricsPanel    (LyricsPanel)
+│       │   ├── "Properties"  propertiesTab > songInfoPanel  (SongInfoPanel)
+│       │   └── "Spectrum"    spectrumTab   > spectrumWidget (SpectrumWidget)
 │       └── label        (cover art, verstretch 5)
 └── playlistTabs
 ```
@@ -73,7 +74,7 @@ splitter (horizontal)
   `MainWindow::setUpSplitter` did not change. The size policy and minimum
   size moved from `lyricsPanel` to `infoTabs`.
 * The current tab is stored in `QSettings` as `infopanel/current_tab`
-  (`lyrics` or `properties`, default `lyrics`), written on
+  (`lyrics`, `properties` or `spectrum`, default `lyrics`), written on
   `QTabWidget::currentChanged` and restored in the `MainWindow` constructor
   (`setUpInfoTabs`).
 

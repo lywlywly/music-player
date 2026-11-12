@@ -23,6 +23,7 @@ class NowPlayingPresenter;
 class PlaylistSearchDialog;
 class SettingsDialog;
 class SongInfoPresenter;
+class SpectrumPresenter;
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -71,8 +72,8 @@ private:
   void setUpLibraryScanStatus();
   void initCloudSync();
   void setUpMenuBar();
-  // Restores and saves the info panel's current tab, and handles the
-  // Properties tab's buttons.
+  // Restores and saves the info panel's current tab (Lyrics, Properties or
+  // Spectrum), and handles the Properties tab's buttons.
   void setUpInfoTabs();
   void openLibrarySearchDialog();
   // Shows the Playlist Search dialog, creating it if none is open. It
@@ -95,6 +96,7 @@ private:
   CoverArtPresenter *coverArt_ = nullptr;
   LyricsPresenter *lyrics_ = nullptr;
   SongInfoPresenter *songInfo_ = nullptr;
+  SpectrumPresenter *spectrum_ = nullptr;
   SystemMediaPresenter *systemMedia_ = nullptr;
   NowPlayingPresenter *nowPlaying_ = nullptr;
   QActionGroup *playbackOrderMenuActionGroup;

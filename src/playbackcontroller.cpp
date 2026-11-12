@@ -195,12 +195,20 @@ void PlaybackController::setBackend(PlaybackBackendManager::Backend backend) {
   }
   connectPlayer();
   player()->setVolume(volumePercent_);
+  player()->setPcmTap(pcmTap_);
 }
 
 void PlaybackController::setVolume(int volumePercent) {
   volumePercent_ = volumePercent;
   if (backendManager_ != nullptr) {
     player()->setVolume(volumePercent_);
+  }
+}
+
+void PlaybackController::setPcmTap(std::shared_ptr<PcmTap> tap) {
+  pcmTap_ = std::move(tap);
+  if (backendManager_ != nullptr) {
+    player()->setPcmTap(pcmTap_);
   }
 }
 

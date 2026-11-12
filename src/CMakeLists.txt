@@ -65,6 +65,8 @@ myplayer_add_efsw()
 
 pkg_check_modules(GST IMPORTED_TARGET REQUIRED gstreamer-1.0)
 
+add_subdirectory(spectrum)
+
 if(WIN32)
   find_package(FFmpeg REQUIRED COMPONENTS avcodec avformat avutil)
 else()
@@ -82,6 +84,8 @@ set(PROJECT_SOURCES
   addfielddialog.cpp
   audioplayer.h
   audioplayer.cpp
+  audiotaps.h
+  audiotaps.cpp
   artworkutils.h
   audiofileformats.h
   autoplaylistdialog.h
@@ -265,6 +269,7 @@ target_link_libraries(
   ${MYPLAYER_TAGLIB_TARGET}
   PkgConfig::GST
   efsw
+  myspectrum
 )
 
 if(WIN32)

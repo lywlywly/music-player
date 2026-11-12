@@ -22,6 +22,9 @@ A cross-platform desktop music player focused on local-library playback, lyrics,
 * Lyrics display (embedded tag lyrics on play, with `.lrc` fallback)
 * Properties tab next to Lyrics: the selected song's file name, folder, path,
   size, modified/created times, audio properties, tags and play stats
+* Spectrum tab: the playing song's spectrum, 20 bands with peak marks
+  (GStreamer backend; the Qt backend only where Qt has its FFmpeg media
+  backend)
 * Customizable lyrics panel style
 * Customizable display expressions (status bar + window title)
 * Display theme mode: system default / light / dark

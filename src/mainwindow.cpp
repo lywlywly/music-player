@@ -14,6 +14,7 @@
 #include "songdialogs.h"
 #include "songinfopanel.h"
 #include "songinfopresenter.h"
+#include "spectrum/spectrumpresenter.h"
 #include "systemmediainterfacefactory.h"
 #include <QActionGroup>
 #include <QApplication>
@@ -39,6 +40,7 @@ constexpr const char *kCursorFollowsPlaybackSettingsKey =
 constexpr const char *kInfoTabSettingsKey = "infopanel/current_tab";
 constexpr const char *kInfoTabLyrics = "lyrics";
 constexpr const char *kInfoTabProperties = "properties";
+constexpr const char *kInfoTabSpectrum = "spectrum";
 
 int clampVolumePercent(int volumePercent) {
   return std::clamp(volumePercent, kMinVolumePercent, kMaxVolumePercent);
@@ -104,6 +106,12 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
   lyrics_ = new LyricsPresenter(ui->lyricsPanel, this);
   songInfo_ = new SongInfoPresenter(ui->songInfoPanel, songLibrary,
                                     monitoredLibrary_, columnRegistry_, this);
+  spectrum_ = new SpectrumPresenter(ui->spectrumWidget, this);
+  // Only the GStreamer backend feeds the spectrum everywhere; the Qt one
+  // does only where Qt has its FFmpeg media backend (docs/spectrum.md).
+  spectrum_->setNoAudioMessage(
+      tr("No audio for the spectrum from this playback backend. Choose "
+         "GStreamer in Settings > Playback > Playback backend."));
   systemMedia_ = new SystemMediaPresenter(*createSystemMediaInterface(this),
                                           *playback_, this);
   connect(coverArt_, &CoverArtPresenter::artworkChanged, systemMedia_,
@@ -187,15 +195,22 @@ void MainWindow::setUpInfoTabs() {
   QSettings settings;
   const QString savedTab =
       settings.value(kInfoTabSettingsKey, kInfoTabLyrics).toString();
-  ui->infoTabs->setCurrentWidget(savedTab == QLatin1String(kInfoTabProperties)
-                                     ? ui->propertiesTab
-                                     : ui->lyricsTab);
-  connect(ui->infoTabs, &QTabWidget::currentChanged, this, [this]() {
-    QSettings settings;
-    settings.setValue(kInfoTabSettingsKey,
-                      ui->infoTabs->currentWidget() == ui->propertiesTab
-                          ? kInfoTabProperties
-                          : kInfoTabLyrics);
+  const std::pair<QWidget *, const char *> tabs[] = {
+      {ui->lyricsTab, kInfoTabLyrics},
+      {ui->propertiesTab, kInfoTabProperties},
+      {ui->spectrumTab, kInfoTabSpectrum},
+  };
+  for (const auto &[tab, name] : tabs) {
+    if (savedTab == QLatin1String(name)) {
+      ui->infoTabs->setCurrentWidget(tab);
+    }
+  }
+  connect(ui->infoTabs, &QTabWidget::currentChanged, this, [this, tabs]() {
+    for (const auto &[tab, name] : tabs) {
+      if (ui->infoTabs->currentWidget() == tab) {
+        QSettings().setValue(kInfoTabSettingsKey, name);
+      }
+    }
   });
   connect(ui->songInfoPanel, &SongInfoPanel::revealRequested, this,
           [this](int songPk) {
@@ -379,7 +394,11 @@ void MainWindow::setUpPlayback() {
         lyrics_->showSong(song, remainingFields);
         // After systemMedia_->showSong, which clears the system artwork.
         coverArt_->showSong(song);
+        // Starting a song sends songStarted, not playbackStateChanged.
+        spectrum_->setState(SpectrumPresenter::State::Playing);
       });
+  connect(spectrum_, &SpectrumPresenter::tapChanged, playback_,
+          &PlaybackController::setPcmTap);
   connect(playback_, &PlaybackController::playbackStateChanged, this,
           &MainWindow::playbackStateChanged);
   connect(playback_, &PlaybackController::movedToRow, this,
@@ -455,6 +474,17 @@ void MainWindow::playbackStateChanged(PlaybackQueue::PlaybackStatus status) {
     lyrics_->clear();
     coverArt_->clear();
   }
+  switch (status) {
+  case PlaybackQueue::PlaybackStatus::Playing:
+    spectrum_->setState(SpectrumPresenter::State::Playing);
+    break;
+  case PlaybackQueue::PlaybackStatus::Paused:
+    spectrum_->setState(SpectrumPresenter::State::Paused);
+    break;
+  case PlaybackQueue::PlaybackStatus::None:
+    spectrum_->setState(SpectrumPresenter::State::Stopped);
+    break;
+  }
 }
 
 void MainWindow::navigateIndex(int row, Playlist *pl) {
@@ -484,6 +514,7 @@ void MainWindow::positionChanged(qint64 progress) {
   if (!ui->horizontalSlider->isSliderDown())
     ui->horizontalSlider->setValue(progress);
   lyrics_->setPositionMs(progress);
+  spectrum_->setPosition(progress);
 }
 
 void MainWindow::updateSettingsDisplayPreviewContext(SettingsDialog *dialog) {

@@ -44,6 +44,7 @@
 #include "../songinfopanel.h"
 #include "../songparser.h"
 #include "../songpropertiesdialog.h"
+#include "../spectrum/spectrumwidget.h"
 #include "../utils.h"
 #include "scopedhomedir.h"
 #include "testaudiofiles.h"
@@ -150,6 +151,7 @@ private slots:
   void play_allFilesMissing_stopsAndReportsError();
   void lyrics_followPositionAfterBackendSwitch();
   void infoTabs_restoreAndShowSelectedSong();
+  void spectrum_tapGoesToThePlayerWhileShown();
 
 private:
   void recreateWindow();
@@ -1363,9 +1365,10 @@ void TestMainWindow::lyrics_followPositionAfterBackendSwitch() {
 void TestMainWindow::infoTabs_restoreAndShowSelectedSong() {
   auto *infoTabs = window_->findChild<QTabWidget *>("infoTabs");
   QVERIFY(infoTabs != nullptr);
-  QCOMPARE(infoTabs->count(), 2);
+  QCOMPARE(infoTabs->count(), 3);
   QCOMPARE(infoTabs->tabText(0), QString("Lyrics"));
   QCOMPARE(infoTabs->tabText(1), QString("Properties"));
+  QCOMPARE(infoTabs->tabText(2), QString("Spectrum"));
   QCOMPARE(infoTabs->currentWidget()->findChild<LyricsPanel *>("lyricsPanel"),
            window_->findChild<LyricsPanel *>("lyricsPanel"));
 
@@ -1401,9 +1404,27 @@ void TestMainWindow::infoTabs_restoreAndShowSelectedSong() {
   QVERIFY(dialog != nullptr);
   delete dialog;
 
+  infoTabs->setCurrentIndex(2);
+  recreateWindow();
+  infoTabs = window_->findChild<QTabWidget *>("infoTabs");
+  QCOMPARE(infoTabs->currentIndex(), 2);
   infoTabs->setCurrentIndex(0);
   recreateWindow();
   QCOMPARE(window_->findChild<QTabWidget *>("infoTabs")->currentIndex(), 0);
+}
+
+void TestMainWindow::spectrum_tapGoesToThePlayerWhileShown() {
+  auto *widget = window_->findChild<SpectrumWidget *>("spectrumWidget");
+  QVERIFY(widget != nullptr);
+  PlaybackBackendManager *backend =
+      window_->findChild<PlaybackBackendManager *>();
+  QVERIFY(backend != nullptr);
+  // The test window is not shown; stand in for the tab's show and hide.
+  QCOMPARE(backend->player()->pcmTap(), nullptr);
+  emit widget->shownChanged(true);
+  QVERIFY(backend->player()->pcmTap() != nullptr);
+  emit widget->shownChanged(false);
+  QCOMPARE(backend->player()->pcmTap(), nullptr);
 }
 
 QTEST_MAIN(TestMainWindow)

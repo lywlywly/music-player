@@ -38,6 +38,10 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
   - ✅ Properties tab for the selected song: file name, folder, path, size,
     modified/created times, audio properties, main tags, play stats
   - See `docs/info-panel.md`
+- ✅ Spectrum tab (`src/spectrum/` module, library `myspectrum`)
+  - ✅ 20 log-spaced bands, 0 to -60 dB, peak hold, own FFT
+  - ✅ GStreamer backend; Qt backend only with Qt's FFmpeg media backend
+  - See `docs/spectrum.md`
 - ✅ Playback statistics
   - ✅ `play_count` with completion/listen gating
   - ✅ `last_played_timestamp`
