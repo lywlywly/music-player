@@ -88,16 +88,35 @@ If issues occur, open Qt Creator `Projects -> Run Settings -> Environment` and r
 
 ### Windows (vcpkg)
 
-If building on Windows with vcpkg, install GStreamer with:
+Needs Visual Studio with C++ tools and Qt 6 for MSVC. Install GStreamer with
+vcpkg:
 
 ```powershell
 .\vcpkg install gstreamer[core,plugins-base,plugins-good,mpg123,flac,ogg,libav,vorbis]
 ```
 
-Set `GST_PLUGIN_PATH` as:
+Build from `src` in a Developer PowerShell for VS:
 
-* Release: `<vcpkg-root>\installed\x64-windows\plugins\gstreamer`
-* Debug: `<vcpkg-root>\installed\x64-windows\debug\plugins\gstreamer`
+```powershell
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release `
+  -DCMAKE_TOOLCHAIN_FILE=<vcpkg-root>\scripts\buildsystems\vcpkg.cmake `
+  -DCMAKE_PREFIX_PATH=<Qt>\msvc2022_64
+cmake --build build -j
+```
+
+For the tests, configure `build-tests` the same way with `-DBUILD_TESTING=ON`.
+
+To run the app or the tests, put Qt on `PATH` and set `GST_PLUGIN_PATH`:
+
+```powershell
+$env:PATH = "<Qt>\msvc2022_64\bin;$env:PATH"
+$env:GST_PLUGIN_PATH = "<vcpkg-root>\installed\x64-windows\plugins\gstreamer"
+.\build\EXEC.exe
+ctest --test-dir build-tests --output-on-failure
+```
+
+For a Debug build, use `-DCMAKE_BUILD_TYPE=Debug` and
+`<vcpkg-root>\installed\x64-windows\debug\plugins\gstreamer`.
 
 ## Library Search Query Syntax
 

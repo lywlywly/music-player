@@ -56,9 +56,16 @@ From `src/`. After cloning: `git submodule update --init --recursive`.
 
 ## Commands (Windows)
 
-PowerShell. Install GStreamer with vcpkg and set `GST_PLUGIN_PATH` (README.md, "Windows (vcpkg)"). Build
-and test with the same CMake and `ctest` commands; format with `scripts/format.ps1` (`-Check` to only
-report).
+PowerShell. Configure, build, run and test as in README.md, "Windows (vcpkg)"; format with
+`scripts/format.ps1` (`-Check` to only report). Match `GST_PLUGIN_PATH` to the build folder's
+`CMAKE_BUILD_TYPE` (in its `CMakeCache.txt`).
+
+| Command | Does |
+| --- | --- |
+| `& "<Visual Studio>\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64 -SkipAutomaticLocation` | Load the MSVC environment into the current shell; without it linking fails with `cannot open file 'kernel32.lib'` |
+| `build-tests\Tests\<name>.exe -o <file>,txt` | Write one test's results to a file; the test executables print nothing to the console |
+
+Without Qt's `bin` on `PATH`, the app and tests exit with `0xc0000135`.
 
 ## Dependencies
 
