@@ -1,19 +1,20 @@
-# Plan: Info Panel (Lyrics and Properties tabs)
+# Plan: Info Panel (tabs and cover art)
 
-Status: implemented. The third tab, Spectrum, is described in
-[spectrum.md](spectrum.md). The classes are also described in
-[architecture.md](architecture.md) ("Info panel, lyrics and cover art").
+Status: implemented. The Spectrum tab is described in
+[spectrum.md](spectrum.md), and the Lyrics tab's classes in
+[plugins.md](plugins.md).
 
 ## Summary
 
 * The info panel at the top left of the main window is a tab widget:
-  **Lyrics** (`LyricsPanel`, from the lyrics plugin; see
-  [plugins.md](plugins.md)), **Properties** and **Spectrum**.
+  **Lyrics** (`LyricsPanel`, from the lyrics plugin), **Properties** and
+  **Spectrum**, with the playing song's cover art below it.
 * **Properties** shows the song selected in the shown playlist: its file
   (name, folder, path, size, modified and created times), its audio
   properties, its main tags, its play stats and its watched folder. It
   follows the selection; it does not show the playing song.
-* The cover art below the tabs is unchanged.
+* The **cover art** shows the playing song's embedded cover
+  (`CoverArtPresenter`).
 
 ## Key decisions
 
@@ -38,8 +39,7 @@ Status: implemented. The third tab, Spectrum, is described in
     was changed outside the app and is not in a watched folder. Opening Edit
     Properties... re-reads the file (`openSongProperties`), but only a save
     notifies the views (`songUpdated` -> `notifySongChanged`), so a cancelled
-    dialog leaves the panel and the table as they were. This is existing
-    behaviour, unchanged here.
+    dialog leaves the panel and the table as they were.
 * **File stats are read at display time** with `QFileInfo` on the song's
   `filepath`, on the main thread. They are not stored: `monitored_files`
   holds mtime and size only for monitored songs, and only as of the last
@@ -63,7 +63,7 @@ splitter (horizontal)
 ├── frame_2
 │   └── splitter_2 (vertical)
 │       ├── infoTabs     (QTabWidget, documentMode, verstretch 3, min 120 x 240)
-│       │   ├── "Lyrics"      lyricsPanel   (LyricsPanel, added by MainWindow)
+│       │   ├── "Lyrics"      lyricsPanel   (LyricsPanel, from the plugin)
 │       │   ├── "Properties"  propertiesTab > songInfoPanel  (SongInfoPanel)
 │       │   └── "Spectrum"    spectrumTab   > spectrumWidget (SpectrumWidget)
 │       └── label        (cover art, verstretch 5)
@@ -85,22 +85,17 @@ splitter (horizontal)
 
 `LyricsPresenter` is not told about the tab: the Lyrics tab keeps receiving
 positions while hidden, and `LyricsPanel` keeps scrolling to the current
-line. That was not enough to show the right line when the tab comes back:
-
-* A `QTabWidget` page lives in a `QStackedLayout`, which sizes only the
-  current page. A window or splitter resize while Properties is shown leaves
-  the hidden `LyricsPanel` at its old size, and
-  `LyricsPanel::scrollToIndexCenter` centers by the viewport height at the
-  time it runs.
-* `LyricsPanel` had no `resizeEvent` or `showEvent`, and did not keep the
-  current line index (only `currentSelection_`), so it could not re-center
-  later.
+line. That alone would show the wrong line when the tab comes back: a
+`QTabWidget` page lives in a `QStackedLayout`, which sizes only the current
+page, so a window or splitter resize while another tab is shown leaves the
+hidden panel at its old size, and `scrollToIndexCenter` centers by the
+viewport height at the time it runs.
 
 So `LyricsPanel` keeps the index of its current line (`currentLine_`, set by
 `scrollToIndexCenter`, reset by `setLyricsPanel`) and re-centers on it without
 animation in `showEvent` and `resizeEvent`, stopping a scroll animation
-started while hidden. That also fixes the line drifting off center when the
-panel is resized.
+started while hidden. This also keeps the line centered when the shown panel
+is resized.
 
 ### Properties tab contents
 
@@ -216,6 +211,19 @@ have, is left out, and so is a section with no rows.
   so the shown song cannot: it is in the shown playlist, and an autoplaylist
   removes its row (which changes the selection) first. A debounced rebuild
   that runs after a removal builds an empty `SongInfo` (see above).
+
+### `CoverArtPresenter` (frontend)
+
+* Shows the playing song's embedded cover in the cover label (`label`),
+  scaled to the label on resize and splitter moves.
+* `MainWindow` calls `showSong` on `PlaybackController::songStarted`, after
+  `SystemMediaPresenter::showSong` (which clears the system artwork), and
+  `clear()` on stop.
+* The cover comes from `SongParser::extractCoverImage`; a file it cannot open
+  (for example moved or deleted) logs a warning and shows no cover.
+* Emits `artworkChanged(imageData)` for a song with an embedded cover;
+  `MainWindow` connects it to `SystemMediaPresenter::setArtwork`
+  ([playback.md](playback.md)).
 
 ### `PlaylistTabs`
 

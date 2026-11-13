@@ -214,17 +214,63 @@ Frontend class. `MainWindow` creates it as a child `QObject` after
   it, so building them builds it. The root object is not in `mylyrics`: its
   `Q_PLUGIN_METADATA` would make each test executable linking `mylyrics` a
   plugin too.
-* `LyricsLoader::resolveLyrics` reads `TrackInfo`: the first non-empty of
-  `fields` (`attr:unsynced_lyrics`, `attr:lyrics`), then of `tagFields`
-  (`unsynced_lyrics`, `lyrics`), then the `.lrc` fallback.
 * `createPanel` creates a `LyricsPanel` (object name `lyricsPanel`) and its
   `LyricsPresenter`, a child of the panel. The presenter implements
   `IPlayerListener`, adds itself in its constructor and removes itself in its
   destructor, so it listens for the panel's lifetime, while the host exists.
   The plugin keeps the presenters (`QPointer`s, as the panels are deleted by
   the tab widget).
-* `LyricsSettingsPage` writes the `lyrics/*` keys on `apply()` and sends
-  `applied`, on which the plugin re-applies the settings to the open panels.
+* `LyricsPresenter` owns the `LyricsManager`, shows the playing song's lyrics
+  in its `LyricsPanel` and applies the style settings to it. `LyricsManager`
+  holds the lyrics and moves the current line with the play position.
+* `LyricsPanel` keeps the index of its current line and re-centers on it,
+  without animation, in `showEvent` and `resizeEvent`: the tab keeps getting
+  positions while hidden, but a `QTabWidget` sizes only its current page, so
+  the hidden panel can be resized later ([info-panel.md](info-panel.md)).
+
+### Where lyrics come from (`LyricsLoader`)
+
+* On play, `PlaybackController` refreshes the song's metadata from its file
+  once, so the `TrackInfo` has the file's current tags.
+* `LyricsLoader::resolveLyrics` picks the first non-empty of `fields`
+  (`attr:unsynced_lyrics`, `attr:lyrics`), then of `tagFields`
+  (`unsynced_lyrics`, `lyrics`). If none is set, or it has no timestamped
+  lines, the `.lrc` file is the fallback.
+* The `.lrc` fallback (`LyricsLoader::getLyrics`) opens
+  `<home>/Music/<artist> - <title>.lrc` only, where `<home>` is `USERPROFILE`
+  on Windows and `HOME` elsewhere; it does not look next to the audio file.
+* Known issue (Windows): the `.lrc` file name is built as a UTF-8
+  `std::string` and converted to `std::filesystem::path`, which on Windows
+  decodes narrow strings with the active ANSI code page, not UTF-8. A
+  non-ASCII artist or title (for example CJK) maps to a different file name,
+  so its `.lrc` is not found. macOS and Linux are unaffected, as is Windows
+  with the system-wide UTF-8 code page. Fix: build the path from UTF-8
+  explicitly (`std::u8string` or a wide path), as `SongParser` does for
+  TagLib with `MultiByteToWideChar`.
+
+### Settings (`LyricsSettingsPage`, `lyricssettings.h`)
+
+* Four keys, read and written only by `loadLyricsSettings` /
+  `saveLyricsSettings`: `lyrics/use_system_default_font`,
+  `lyrics/font_family`, `lyrics/font_size` and `lyrics/highlight_color`.
+  Defaults: the system font unless a family is stored, the application
+  font's size, and highlight `#0064ff` (also used for a stored color that is
+  not valid).
+* `font_family` is always stored, even while the system font is used. With
+  the system font on, the font combo is disabled but still shows the stored
+  family.
+* On page load, the combo selects the stored family, or the font Qt
+  substitutes for it when it is not installed. The combo is editable, and OK
+  stores its text as typed: an unknown or empty family leaves the
+  application font's families in effect.
+* `highlight_color` is picked with a color dialog and colors the current
+  line.
+* `apply()` (on the Settings dialog's OK) writes the keys and sends
+  `applied`, on which the plugin re-applies them to the open panels.
+* The lyrics font is the application font at the stored size. With the
+  system font off, the stored family is put first in its family list, so the
+  application font's CJK fallback families ([ui-styling.md](ui-styling.md))
+  still cover characters the chosen font lacks.
 
 ## Rejected
 

@@ -87,7 +87,7 @@ std::filesystem::path homePath() {
 
 // Known issue: on Windows, path(std::string) decodes with the ANSI code page,
 // so a non-ASCII (UTF-8) artist or title yields the wrong file name. See
-// docs/architecture.md (LyricsLoader / LyricsManager).
+// docs/plugins.md (Where lyrics come from).
 std::filesystem::path findFileByTitleAndArtist(std::string_view title,
                                                std::string_view artist) {
   std::string filename = std::format("{} - {}.lrc", artist, title);

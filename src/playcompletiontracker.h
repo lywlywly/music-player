@@ -6,9 +6,9 @@
 // Decides when a play of the current song counts as completed, from the
 // player's position and duration updates.
 //
-// A play counts once the song reached its last 10% (and at most 5 s before
-// its end) and at least two thirds of its duration were listened to while
-// playing. Seeking does not add listened time.
+// A play counts once the song reached 90% of its duration or 5 s before its
+// end, whichever comes first, and at least two thirds of its duration were
+// listened to while playing. Seeking does not add listened time.
 //
 // Only the listening session is kept here. The caller owns which song is
 // playing, counts the play (SongLibrary::incrementPlayCount) and then calls

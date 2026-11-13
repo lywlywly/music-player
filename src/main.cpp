@@ -18,7 +18,7 @@ int main(int argc, char *argv[]) {
 
 #ifdef Q_OS_WIN
   // Temporary: match the Windows font-link order for CJK fallback and the
-  // 10pt size native fallback uses (see docs/architecture.md).
+  // 10pt size native fallback uses (see docs/ui-styling.md).
   {
     QFont appFont = QApplication::font();
     appFont.setFamilies({appFont.family(), QStringLiteral("Meiryo UI"),

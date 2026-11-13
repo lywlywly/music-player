@@ -104,8 +104,8 @@ See `docs/architecture.md` (Design Principles).
     can crash
   - Debug build (the app or the tests): it scans in its own process, so a
     scan after the plugins change can crash it
-  - The fix is Intel's: a newer driver may have it. See `docs/architecture.md`
+  - The fix is Intel's: a newer driver may have it. See `docs/playback.md`
     (GStreamer plugin registry and scanner)
 - `.lrc` fallback misses files with non-ASCII artist/title on Windows
   (UTF-8 file name decoded with the ANSI code page); see
-  `docs/architecture.md` (`LyricsLoader` / `LyricsManager`)
+  `docs/plugins.md` (Where lyrics come from)

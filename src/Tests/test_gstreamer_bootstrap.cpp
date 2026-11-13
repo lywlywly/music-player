@@ -7,7 +7,7 @@ namespace {
 // write to the developer's profile. When the tests and the app have
 // different build types, they load different plugins (Debug and Release on
 // Windows), and with one shared registry each switch between them would
-// force a full plugin rescan on the next start (docs/architecture.md,
+// force a full plugin rescan on the next start (docs/playback.md,
 // "GStreamer plugin registry and scanner"). Kept between runs: it is a cache.
 class TestGStreamerBootstrap {
 public:

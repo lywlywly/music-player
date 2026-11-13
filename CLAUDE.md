@@ -7,13 +7,7 @@ macOS, Windows and Linux.
 | Document | Contents | Read |
 | --- | --- | --- |
 | [roadmap.md](roadmap.md) | Progress (✅ / 🟡 / ⬜) and known issues | Before starting a task |
-| [docs/architecture.md](docs/architecture.md) | Design principles, classes and responsibilities, startup, playback, threading | Before changing design or code structure |
-| [docs/expressions.md](docs/expressions.md) | The expression language: song filters, status bar and window title | Before changing search, autoplaylists or display expressions |
-| [docs/monitored-library.md](docs/monitored-library.md) | Watched folders, scans, the file system watcher, autoplaylists, Playlist Search | Before changing the library or its watcher |
-| [docs/info-panel.md](docs/info-panel.md) | The info panel's Lyrics and Properties tabs | Before changing the info panel |
-| [docs/spectrum.md](docs/spectrum.md) | The Spectrum tab, the `src/spectrum/` module, the players' audio taps | Before changing the spectrum or the players' audio path |
-| [docs/plugins.md](docs/plugins.md) | Plugins (DLLs with capabilities, Lyrics first), the plugin API and its boundary | Before changing the plugin API or a plugin |
-| [docs/cloud-sync.md](docs/cloud-sync.md) | Play-count sync: DynamoDB model, Lambda API (`infra/aws/lambda`) | Before changing play stats or sync |
+| [docs/README.md](docs/README.md) | The design docs: architecture.md and one doc per feature, each with when to read it | Before changing design or code; then the docs it points to |
 | [README.md](README.md) | For users: features, build, query syntax, play stats | When a user-visible feature or the build changes |
 | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Third-party components and their licenses | Before adding or updating a dependency |
 
@@ -31,8 +25,8 @@ macOS, Windows and Linux.
 ## Writing the docs
 
 - docs/architecture.md holds the design shared by the whole app; a topic doc holds one feature's design,
-  linked from architecture.md. Both describe only the approach in use; each important choice says why,
-  what was rejected and why, and its cost.
+  linked from architecture.md and listed in docs/README.md. Both describe only the approach in use; each
+  important choice says why, what was rejected and why, and its cost.
 - roadmap.md records progress and known issues. README.md is for users.
 - Concise but complete. No history, verification narratives or build statistics (those go in commit
   messages). When a decision changes, rewrite its section instead of appending notes.

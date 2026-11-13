@@ -6,7 +6,7 @@
 // Wraps the Qt "windows11" style (Qt 6.10+) to paint a selected row of a
 // row-selecting QTableView as one band. The base style draws its accent bar
 // in every cell (PE_PanelItemViewRow) and a separate rounded box per cell
-// (CE_ItemViewItem). See "Table row selection" in docs/architecture.md.
+// (CE_ItemViewItem). See "Table row selection" in docs/ui-styling.md.
 class TableSelectionStyle : public QProxyStyle {
 public:
   using QProxyStyle::QProxyStyle;

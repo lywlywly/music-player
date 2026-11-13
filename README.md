@@ -133,7 +133,7 @@ For a Debug build, use `-DCMAKE_BUILD_TYPE=Debug` and
 `GST_PLUGIN_SCANNER` unset: vcpkg's helper is a Release build, which cannot
 load the Debug plugins, so GStreamer would mark them all as broken. In Qt
 Creator, set these in Projects > Run > Environment. Why the helper matters:
-`docs/architecture.md`, "GStreamer plugin registry and scanner".
+`docs/playback.md`, "GStreamer plugin registry and scanner".
 
 ## Library Search Query Syntax
 
@@ -211,13 +211,5 @@ Cloud sync:
 
 ## Implementation Notes
 
-Implementation details and architecture live in:
-
-* `docs/architecture.md`: design principles, classes, startup, playback,
-  threading
-* `docs/expressions.md`: the expression language, song filters (Library
-  Search, autoplaylists, Playlist Search), and the status bar / window title
-  expressions
-* `docs/monitored-library.md`: watched folders, scans, the file system
-  watcher, autoplaylists and Playlist Search
-* `docs/cloud-sync.md`: play-count sync design, DynamoDB model, Lambda API
+The design docs are listed in [docs/README.md](docs/README.md), starting with
+`docs/architecture.md` (design principles, main classes, startup, threading).

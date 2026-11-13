@@ -1,23 +1,8 @@
 # Architecture and Implementation Notes
 
-This file contains implementation-level details that are intentionally kept out
-of `README.md`.
-
-These topics have their own files:
-
-* [expressions.md](expressions.md): the expression language used by Library
-  Search, autoplaylists, Playlist Search, computed fields, and the status bar
-  and window title.
-* [monitored-library.md](monitored-library.md): watched folders, scans and the
-  file system watcher, autoplaylists, and Playlist Search.
-* [cloud-sync.md](cloud-sync.md): optional play-count sync through AWS Lambda
-  and DynamoDB.
-* [info-panel.md](info-panel.md): the info panel's tabs; Properties shows the
-  selected song's file and metadata.
-* [spectrum.md](spectrum.md): the Spectrum tab and the `src/spectrum/`
-  module (FFT, bands, `PcmTap`, widget, presenter).
-* [plugins.md](plugins.md): plugins (DLLs loaded at startup), the plugin API
-  and its boundary, and the Lyrics plugin.
+The design shared by the whole app: its principles, main classes, startup,
+storage and threading. Each feature's design is in its own doc, listed in
+[README.md](README.md).
 
 ## Overview
 
@@ -40,7 +25,7 @@ GStreamer) plays it. Qt models, widgets and dialogs
   refresh").
 * Playback: pick the next song, play it, follow its position to update the
   status bar, lyrics and system media, and count the play once it is mostly
-  listened to ("Playback domain", "Play statistics").
+  listened to ([playback.md](playback.md)).
 
 ## Design Principles
 
@@ -340,330 +325,28 @@ The UI for one song: viewing and editing its tags, and revealing its file.
 * `AddFieldDialog`
   * Adds a new raw tag key/value pair (no `attr:` prefix input).
 
-### Playback domain
+### Playback, system media and info panel
 
-Who owns the current song and the queue, how Next/Prev pick a song, how
-unplayable songs are skipped, and the audio backends.
+Each has its own doc; the classes are listed here with where they sit.
 
-* `PlaybackQueue` (backend)
-  * Current song pointer + explicit queued songs + playback status.
-  * Owns per-song status: `statusOf(songPk, playlist)` returns Playing/Paused/None
-    for the current song (queue position not consulted), otherwise Queued with
-    its position for a song queued from the same playlist. `statusChanged(songPk,
-    playlist)` reports changes.
-  * Stores `Playlist` pointers but only compares them, never dereferences
-    them. `removePlaylist(playlist)` drops that playlist's current song and
-    queued entries; `PlaybackController` calls it on
-    `PlaylistCollection::playlistAboutToBeRemoved`, while the id still resolves
-    to the `Playlist`.
-* `PlaybackManager` (backend)
-  * Playback policy orchestration (`next/prev/play/pause/stop`) on top of `PlaybackQueue` + active `Playlist`.
-  * Requires `setView(Playlist&)` with a valid playlist before playback/policy operations.
-  * Songs removed from a playlist leave stale ids behind: `next()` skips queued
-    songs no longer in their playlist, and the policies treat a current song no
-    longer in the playlist as no current song (sequential Next starts at the
-    first row, Prev at the last).
-* `PlaybackController` (backend)
-  * Runs playback: the transport commands (play, pause, toggle, stop, next,
-    prev, random, play a row, seek), starting a song on the backend, skipping
-    unplayable songs and counting completed plays. Owns `PlaybackQueue`,
-    `PlaybackManager` and `PlaybackBackendManager`. The first `setBackend`
-    creates the backend; `MainWindow` calls it after starting the library
-    load, so creating the backend (about 250 ms for Qt Multimedia on a cold
-    start) overlaps the load on the worker thread.
-  * Knows nothing about widgets. `MainWindow` gives it the shown playlist and
-    the `Playback follows cursor` row as callbacks. `MainWindow` and the
-    presenters show what its signals report: `songAboutToStart` (before the source is set, since the backend
-    may report duration and position during `setSource`), `songStarted`,
-    `playbackStateChanged` (resume, pause, stop), `movedToRow` (Next, Prev,
-    Random), `playbackFailed`, `playCounted`, and the backend's position,
-    duration and bitrate. `SystemMediaPresenter` connects to the state,
-    seek, position and duration signals itself, and `NowPlayingPresenter`
-    (see [expressions.md](expressions.md)) to `songAboutToStart`,
-    `songStarted`, the state, position, duration and bitrate signals. The backend's signals reach
-    the window and presenters only through it, so a backend switch
-    (`setBackend`) needs no reconnecting. A backend switch stops playback
-    like `stop()`.
-  * Transport commands are ignored until `setReady(true)`, which
-    `MainWindow` calls once the library and playlists are loaded, and until
-    the backend exists.
-* Playback stop and failure handling (`PlaybackController`)
-  * Next with nothing to play (the shown playlist is empty) stops playback.
-  * Removing the playlist that is playing stops playback before
-    `PlaybackQueue::removePlaylist` drops its current song.
-  * Removing the current song from the library
-    (`PlaylistCollection::songsRemovedFromLibrary`) stops playback if it is
-    playing or paused, and resets `currentSongPk()` to -1.
-  * A song that cannot be played is skipped with `next()`: its file is
-    missing (checked in `playSong` before the play stats are updated), or the
-    backend reports `InvalidMedia` (`GstAudioPlayer` reports bus errors that
-    way too). The previous song's audio stops at once, so its position
-    updates cannot reset the failure count and its `EndOfMedia` cannot start
-    a second skip. The skip behaves like the user pressing Next: queued songs
-    first, then `Playback follows cursor`, then the playback order, and with
-    `Cursor follows playback` on the selection moves to the song that plays.
-    It runs from a zero-delay timer, not recursively, so the `next()` that hit
-    the failure finishes (including its `movedToRow`) before the skip
-    starts; `stop()` cancels a pending skip.
-  * After as many consecutive failures as the shown playlist has songs,
-    playback stops and `playbackFailed(path)` is emitted; `MainWindow` shows
-    `Cannot play file: <path>` in the status bar. The count resets when
-    playback position advances or on stop.
-* Playback policies (`PlaybackPolicySequential`, `PlaybackPolicyShuffle`)
-  * `PlaybackPolicyShuffle` sizes its history to half the playlist and follows
-    size changes through `Playlist` insert/remove/reset signals; it
-    disconnects when switched to another playlist or destroyed.
-  * Shuffle steps through history entries still in the playlist; otherwise it
-    picks a random row whose song is not in the history. Songs are unique per
-    playlist and the history holds at most half the rows, so a candidate
-    always exists.
-  * `Playback -> Playback follows cursor` passes the first selected row from
-    `MainWindow` (through `PlaybackController`) into
-    `PlaybackManager::next(...)`: queued songs still take
-    priority, then the selected row may be played once if it is not already
-    current.
-  * `Playback -> Cursor follows playback` gates whether `MainWindow` answers
-    `PlaybackController::movedToRow` by calling
-    `PlaylistTabs::navigateIndex(...)` to select and scroll to the new row.
-  * The toolbar random button is a one-shot random jump within the current
-    playlist: it picks a random row directly, calls `playIndex(...)`, and does
-    not use shuffle policy history or guarantee non-duplicate selections.
-* `PlaybackBackendManager`
-  * Runtime backend owner/switcher (`QMediaPlayer` or `GStreamer`).
-  * `loadPlaybackBackendSetting` / `savePlaybackBackendSetting` read and
-    write the saved backend (`playback/backend`), for `MainWindow` and
-    `SettingsDialog`.
-  * Manages GLib loop thread for GStreamer on macOS/Windows.
-  * `MainWindow` prewarms GStreamer startup when GStreamer is the saved backend:
-    `gst_init` on all platforms and default output device lookup on macOS. The
-    macOS output-device result is startup-only; later output refreshes query
-    CoreAudio directly.
-* `AudioPlayer` (+ concrete backends)
-  * Transport and volume control consumed by `PlaybackController`, which
-    re-applies the volume and the `PcmTap` after a backend switch.
-  * `setPcmTap(tap)`: decoded audio, before the volume, goes to the tap for
-    the spectrum. `GstAudioPlayer` probes `rgvolume`'s src pad;
-    `QtAudioPlayer` sets a `QAudioBufferOutput`, which only Qt's FFmpeg media
-    backend fills (not the `darwin` one of Homebrew's Qt). The conversion is
-    in `audiotaps.{h,cpp}`. See [spectrum.md](spectrum.md).
-  * Exposes `bitrateChanged(bitsPerSecond)` for playback-time bitrate updates.
-  * `AudioPlayer` stores clamped volume as an integer percentage (`0..100`);
-    `QtAudioPlayer` maps it to `QAudioOutput::setVolume(...)`, and
-    `GstAudioPlayer` maps it to the GStreamer `playbin` `volume` property.
-
-### System media
-
-OS media controls and now-playing metadata.
-
-* `ISystemMediaInterface` (+ platform impls)
-  * Bridge to OS media controls/metadata.
-  * The interface has no QtWidgets dependency. Platform selection lives in
-    `createSystemMediaInterface(window)` (`systemmediainterfacefactory.h`),
-    which takes the window because Windows needs its native handle; test
-    builds return `DummySystemMediaInterface` when
-    `MYPLAYER_USE_DUMMY_MEDIA_INTERFACE` is set.
-* `SystemMediaPresenter` (frontend)
-  * Sends the interface's play/pause/toggle/next/previous/seek requests to
-    `PlaybackController`, and publishes the controller's playback state,
-    duration, position and seeks to the interface.
-  * `MainWindow` calls `showSong(...)` on `PlaybackController::songStarted`
-    to publish the title and artist. That clears the system artwork, so it is
-    called before `CoverArtPresenter::showSong(...)`, whose `artworkChanged`
-    `MainWindow` connects to `setArtwork(...)`.
-
-### Info panel, lyrics and cover art
-
-The info panel's tabs (Lyrics, from the lyrics plugin; Properties,
-Spectrum), where lyrics and cover images come from, and the lyrics panel
-settings. The lyrics classes are in `src/plugins/lyrics/` (library
-`mylyrics`, loaded as `lyricsplugin`; [plugins.md](plugins.md)).
-
-* `SongInfoPresenter` (frontend), `SongInfoPanel` (frontend, the Properties
-  tab), `buildSongInfo` (frontend, songinfo.h)
-  * Show the selected song's file (name, folder, path, size, modified and
-    created times), audio properties, main tags, play stats and watched
-    folder. See [info-panel.md](info-panel.md).
-  * `buildSongInfo` reads the stored `MSong` and one `QFileInfo`, skipped when
-    the song's watched folder is offline. It never re-parses the file.
-  * The presenter rebuilds on `showSong`, on the shown playlist's
-    `songDataChanged` for the song's row and on `folderAvailabilityChanged`,
-    debounced (100 ms).
-* `SpectrumPresenter`, `SpectrumWidget` (frontend, `src/spectrum/`, the
-  Spectrum tab)
-  * 20 log-spaced bands from 50 Hz to 20 kHz, 0 to -60 dB, with peak marks,
-    from the `PcmTap` at the estimated play position, about 30 fps while the
-    tab is shown and playing. Without audio for 1.5 s while playing, the tab
-    points to the GStreamer backend setting. See [spectrum.md](spectrum.md).
-* `LyricsPanel` (frontend)
-  * Keeps the index of its current line and re-centers on it, without
-    animation, in `showEvent` and `resizeEvent`. A `QTabWidget` sizes only its
-    current page, so the Lyrics tab can be resized while hidden.
-
-* `LyricsPresenter` (frontend)
-  * Shows the playing song's lyrics in `LyricsPanel`, owns the
-    `LyricsManager`, and applies the lyrics panel style settings.
-  * Created with its panel by `LyricsPlugin::createPanel`; how it follows
-    playback is in [plugins.md](plugins.md).
-* `CoverArtPresenter` (frontend)
-  * Shows the playing song's embedded cover in the cover label, scaled to the
-    label on resize and splitter moves.
-  * `MainWindow` calls `showSong(...)` on `PlaybackController::songStarted`
-    (after `SystemMediaPresenter::showSong`, which clears the system artwork)
-    and `clear()` on stop.
-  * The cover comes from `SongParser::extractCoverImage`; a file it cannot
-    open (for example moved or deleted) logs a warning and shows no cover.
-  * Emits `artworkChanged(imageData)` for a song with an embedded cover;
-    `MainWindow` connects it to `SystemMediaPresenter::setArtwork`.
-* These two presenters, `SystemMediaPresenter` and `NowPlayingPresenter` do
-  not know about each other; `MainWindow` drives them.
-* `LyricsLoader` / `LyricsManager`
-  * Lyrics fetch + timed line updates from playback position.
-  * On play, `PlaybackController` refreshes song metadata once;
-    `LyricsLoader::resolveLyrics(...)` then picks the first non-empty of the
-    `attr:unsynced_lyrics` and `attr:lyrics` fields, then of the
-    `unsynced_lyrics` and `lyrics` tag fields with no column. If none is set
-    or it has no timestamped lines, the `.lrc` file is the fallback.
-  * The `.lrc` fallback (`LyricsLoader::getLyrics`) opens
-    `<home>/Music/<artist> - <title>.lrc` only, where `<home>` is
-    `USERPROFILE` on Windows and `HOME` elsewhere; it does not look next to
-    the audio file.
-  * Known issue (Windows): the `.lrc` file name is built as a UTF-8
-    `std::string` and converted to `std::filesystem::path`, which on Windows
-    decodes narrow strings with the active ANSI code page, not UTF-8. A
-    non-ASCII artist or title (for example CJK) maps to a different file name,
-    so its `.lrc` is not found. macOS/Linux are unaffected, as is Windows with
-    the system-wide UTF-8 code page enabled. Fix: build the path from UTF-8
-    explicitly (`std::u8string` or a wide path), as `SongParser` does for
-    TagLib with `MultiByteToWideChar`.
-* Lyrics panel style settings (`LyricsSettingsPage`, the plugin's Settings
-  page, + `LyricsPresenter`)
-  * Uses four settings keys: `lyrics/use_system_default_font`,
-    `lyrics/font_family`, `lyrics/font_size`, and
-    `lyrics/highlight_color`, read and written in one place
-    (`loadLyricsSettings` / `saveLyricsSettings`, lyricssettings.h, with the
-    defaults: system font, application font size, highlight `#0064ff`).
-  * `font_family` is always persisted, even when system default is enabled.
-  * On page load, the font combo selects the stored `font_family`, or the
-    font Qt substitutes for it when it is not installed. The combo is
-    editable, and OK stores its text as typed: an unknown or empty family
-    leaves the application font's families in effect.
-  * When system default is enabled, the combo is disabled but still shows the
-    stored custom family.
-  * `highlight_color` is selected via color picker and applied to highlighted
-    lyric lines.
-  * Apply behavior (on the Settings dialog's OK; [plugins.md](plugins.md)):
-    * `use_system_default_font=true`: system UI family + stored size
-    * `use_system_default_font=false`: stored family + stored size
-  * The lyrics font starts from the application font, and a stored family is
-    put first in its family list, so the CJK fallback families below still
-    apply to characters the chosen font lacks.
-
-### UI styling
-
-Toolbar icons, the Windows application font, the Windows table selection
-fix, and the light/dark theme.
-
-* Playback toolbar icons
-  * `mainwindow.ui` keeps playback controls in a nested
-    `playbackButtonsLayout` so the button group has its own compact spacing
-    before the volume and seek sliders.
-  * `volumeSlider` sits between `playbackButtonsLayout` and the seek slider,
-    persists to `playback/volume_percent`, defaults to `100`, and is reapplied
-    when the active playback backend changes.
-  * SVG assets live in `src/resources/icons` and are registered through
-    `src/resources/resources.qrc`; third-party attribution is tracked in
-    `THIRD_PARTY_NOTICES.md`.
-  * `media-playback-random.svg` is a custom composite icon: play triangle on
-    the left and question mark on the right.
-  * `MainWindow` initializes the resource collection with
-    `Q_INIT_RESOURCE(resources)` because the qrc is compiled into static
-    library target `MYLib`.
-  * Playback buttons render these icons as fixed-size `QToolButton` controls
-    (`setIconOnlyPlaybackButton` in `playbackbuttonstyle.cpp`) and tint them
-    at runtime (`#fcfcfc` in dark mode, `#232629` otherwise).
-  * Tinted icon pixmaps are rendered at the displaying widget's device pixel ratio for
-    sharp high-DPI output, but button/icon sizing stays in Qt logical pixels.
-    The tint fill uses the logical icon rect after `setDevicePixelRatio(...)`
-    so painting remains in the same coordinate space as the displayed icon.
-* Application font and CJK fallback (Windows, `main.cpp`)
-  * Without an explicit family list, Qt does not use Windows font fallback
-    (neither the registry font-link list nor DirectWrite system fallback). It
-    uses a built-in list chosen by user language
-    (`QWindowsFontDatabaseBase::extraTryFontsForFamily`); for non-CJK locales
-    that renders Chinese text in MS UI Gothic / SimSun.
-  * Temporary fix: the app font uses the system UI family, then `Meiryo UI`,
-    `Microsoft JhengHei UI`, `Microsoft YaHei UI`, the order of the `Segoe UI`
-    entry in `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\FontLink\SystemLink`
-    on an en-US install.
-  * Limitation: Han characters shared with Japanese use Meiryo UI glyph
-    shapes, and Simplified-only characters fall through to JhengHei / YaHei,
-    so one line of Chinese can mix fonts (native Windows does the same on
-    non-Chinese locales). Possible replacements: choose the CJK family order
-    by detected text language, or use one CJK family with consistent design
-    across languages (for example Source Han Sans).
-  * Size: native Windows draws CJK fallback fonts larger than the base font
-    (Segoe UI 9pt falls back to Meiryo UI 10pt). This is hard in Qt:
-    `QFontEngineMulti` creates every fallback engine at the base font size,
-    so it would need per-run layout in every place text is drawn (custom
-    delegates, `QProxyStyle` overrides for menus). Instead the whole app font
-    is set to 10pt on Windows.
-  * 10pt also matches the `windows11` style's menu bar, which paints
-    `CE_MenuBarItem` text at a hard-coded 10pt while sizing items from the
-    widget font. With another app font size, menu bar gaps change but the
-    text does not. Other sizes would need a `QProxyStyle` override of
-    `CE_MenuBarItem` or the `windowsvista` style.
-* Table row selection (Windows only, `tableselectionstyle.cpp`, installed in
-  `main.cpp`)
-  * Symptom: in a row-selecting `QTableView`, the `windows11` style draws a
-    selected row as separate rounded boxes, one per cell, each with its own
-    accent-colored bar at the left edge.
-  * Cause, in the Qt style (`qwindows11style.cpp`), not in the app:
-    * `QTableView` calls `PE_PanelItemViewRow` for every cell
-      (`QTableViewPrivate::drawCell`). Since Qt 6.10 the style draws the
-      tree/list accent bar there for any selected item, with no check of the
-      view type; a code comment assumes only `QTreeView` calls it. Qt 6.8
-      drew one bar per row (on the `Beginning` cell only) and 6.9 drew none.
-    * `CE_ItemViewItem` forces `onlyOne = true` for any `QTableView` (seen in
-      6.11; 6.10 unconfirmed), ignoring the `viewItemPosition` that
-      `QTableView` already sets, so each cell gets its own fully rounded box.
-      6.8 and 6.9 used `viewItemPosition` and drew one continuous band.
-    * Both are still present on the Qt `dev` branch (checked 2026-11) and
-      not reported on bugreports.qt.io (searched 2026-11). The bar is the
-      WinUI selection indicator added for `QTreeView` (see QTBUG-140494);
-      tables get it because they use the same primitive.
-  * Fix: `TableSelectionStyle`, a `QProxyStyle` over `windows11`, set as the
-    application style when the default style is `windows11`. For
-    row-selecting tables only, it
-    * draws `PE_PanelItemViewRow` with `State_Selected` removed, which keeps
-      the alternate-row background but drops the bar;
-    * paints the selection band itself in `CE_ItemViewItem`, rounded only
-      at the row's ends as given by `viewItemPosition`, then lets the base
-      style draw the content with the selected/hover state removed.
-  * The band is a neutral gray at 14% opacity (`kFillAlpha`): white in dark
-    themes, black in light ones. The base style's subtle gray (WinUI
-    `fillSubtleSecondary`, 6% / 4%) is hard to see. Its solid accent for
-    alternating rows is not copied either: it leaves dark text on a dark
-    accent (QTBUG-144903, QTBUG-141485), and no table uses alternating rows.
-    On alternating rows the gray band is harder to tell from the alternate
-    background.
-  * `viewItemPosition` counts hidden columns, so a row whose first or last
-    column is hidden would lose its rounded end; no table hides columns.
-  * It does nothing in a high-contrast theme (which the base style detects
-    as `Qt::ColorScheme::Unknown` and draws no bar for). Its 4px radius and
-    2px margins copy private values of the base style, so recheck them when
-    upgrading Qt.
-  * A `QStyledItemDelegate` cannot fix this: the bar is painted by the view
-    before the delegate runs, and the style ignores `viewItemPosition` for
-    tables.
-  * Removal: once a Qt release paints table rows correctly, delete
-    `tableselectionstyle.{h,cpp}` and the `setStyle` block in `main.cpp`.
-* Display theme (`displaytheme.cpp`, used by `SettingsDialog` and `MainWindow`)
-  * Display theme mode is persisted as `display/theme_mode` with values:
-    `system`, `light`, `dark`.
-  * `applyDisplayThemeMode` switches `QStyleHints::colorScheme`
-    (`system`/`light`/`dark`); app widget style remains the system/default
-    style (on Windows, `windows11` wrapped by `TableSelectionStyle`).
-    `MainWindow` re-tints the playback icons after applying it.
+* Playback ([playback.md](playback.md)): `PlaybackQueue`, `PlaybackManager`,
+  the playback policies, `PlayCompletionTracker` and `PlaybackController`
+  (backend); `PlaybackBackendManager` and the `AudioPlayer` backends
+  (`QtAudioPlayer`, `GstAudioPlayer`). The same doc covers stopping and
+  skipping unplayable songs, play counting, the OS media controls
+  (`ISystemMediaInterface`, `SystemMediaPresenter`) and the GStreamer plugin
+  registry and scanner setup on Windows.
+* Info panel ([info-panel.md](info-panel.md)): `SongInfoPresenter`,
+  `SongInfoPanel` and `buildSongInfo` (the Properties tab) and
+  `CoverArtPresenter` (frontend). The Spectrum tab (`SpectrumPresenter`,
+  `SpectrumWidget`) is in [spectrum.md](spectrum.md); the Lyrics tab
+  (`LyricsPanel`, `LyricsPresenter`, `LyricsLoader`, `LyricsManager`,
+  `LyricsSettingsPage`, in `src/plugins/lyrics/`) in [plugins.md](plugins.md).
+* `SystemMediaPresenter`, `CoverArtPresenter` and `NowPlayingPresenter` do not
+  know about each other; `MainWindow` drives them from `PlaybackController`'s
+  signals.
+* Toolbar icons, the Windows font and table selection, and the theme:
+  [ui-styling.md](ui-styling.md).
 
 ## Core Feature Implementation Notes
 
@@ -704,55 +387,6 @@ is ready.
 * `:memory:` databases keep the synchronous path for tests because separate
   SQLite in-memory connections do not share state: `loadLibrary` loads on the
   calling thread and calls back before it returns.
-
-### GStreamer plugin registry and scanner
-
-How `gst_init` learns what the GStreamer plugins provide, and how a plugin
-that crashes while loading is kept out of the app. The setup is for Windows
-with vcpkg's GStreamer, whose install layout GStreamer's defaults do not
-match.
-
-* The registry is GStreamer's cache of what each plugin provides, one file
-  per user (on Windows,
-  `%LOCALAPPDATA%\Microsoft\Windows\INetCache\gstreamer-1.0\registry.*.bin`).
-  `gst_init` reads it, and when the plugin files no longer match it (a file
-  added or changed, another `GST_PLUGIN_PATH`) it rescans: it loads each
-  plugin and runs its `plugin_init`. The scan loads every installed plugin,
-  not only the few the app uses.
-* GStreamer is meant to scan in its helper process, `gst-plugin-scanner.exe`,
-  which it starts and reads the results from. A plugin that crashes while
-  loading then kills only the helper: GStreamer restarts it, retries the
-  plugin once, then records the plugin as blacklisted (skipped until its file
-  changes) and goes on. If it cannot start the helper, it scans in the app's
-  process, where such a crash kills the app.
-* It looks for the helper in `GST_PLUGIN_SCANNER`, then in
-  `libexec\gstreamer-1.0` relative to its own DLL. vcpkg installs it in
-  `tools\gstreamer`, so without the variable GStreamer silently scans
-  in-process (its warning is compiled out of vcpkg's Release build). The
-  README's run commands therefore set `GST_PLUGIN_SCANNER`, as they set
-  `GST_PLUGIN_PATH` for the same layout reason.
-* The crash this guards against: Intel's video plugin, `gstqsv`, probes the
-  GPU's codecs in `plugin_init`, and the Intel driver can corrupt the heap
-  there (roadmap.md, Known Issues).
-* The tests keep their own registry (`src/Tests/test_gstreamer_bootstrap.cpp`:
-  a file in the temporary folder, kept between runs as a cache), so they do
-  not write to the developer's profile. When the tests and the app have
-  different build types, they load different plugins (vcpkg's Debug and
-  Release ones), and with one shared registry each switch between running
-  them and running the app would make the next start rescan.
-* Cost: each Release run configuration (shell, Qt Creator) must set
-  `GST_PLUGIN_SCANNER`. vcpkg ships only a Release helper, which cannot load
-  the Debug plugins and would blacklist them all, so a Debug build (of the
-  app or the tests) leaves it unset and scans in-process, which happens only
-  when the plugins change.
-* Rejected:
-  * Setting `GST_PLUGIN_SCANNER` from the app: the helper is in the build
-    machine's vcpkg folder, which the app does not know at runtime and should
-    not have built in; the plugin folder is set the same way, by environment.
-  * Leaving `gstqsv` out: vcpkg has no option to drop one plugin from
-    `plugins-bad`, which the app needs for `wasapi2sink`, and an overlay port
-    or deleting the DLL after each install is upkeep for a plugin the helper
-    already makes harmless.
 
 ### Song ingest and metadata refresh
 
@@ -815,23 +449,6 @@ How one field value keeps its text, typed value and display format.
     comparisons use shared datetime conversion helpers.
 * Display formatting is schema-driven by `FieldDefinition.displayKind` through
   `FieldTypePool`.
-
-### Play statistics
-
-When a play counts, and where last-played and play counts are stored.
-
-* `last_played_timestamp` is set at playback start.
-* `play_count` increments once per play session with near-end + listened-duration gating.
-  * `PlayCompletionTracker` decides when: the song reached
-    `min(90%, end - 5 s)` and two thirds of its duration were listened to
-    while playing; a seek adds no listened time. It keeps only the session
-    and keeps the duration across sessions, since the backend may not
-    report an unchanged duration again (replaying the same song).
-  * `PlaybackController` reacts, on position updates and `EndOfMedia`:
-    `SongLibrary::incrementPlayCount`, then `markCounted()`,
-    `PlaylistCollection::notifySongChanged` and `playCounted(songPk)`, which
-    `MainWindow` connects to the cloud push.
-* Stats are stored by song identity, so multiple files with the same normalized identity share counters.
 
 ### Playlist persistence
 
