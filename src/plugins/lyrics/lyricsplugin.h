@@ -17,11 +17,11 @@ class LyricsPlugin : public QObject,
                      public IPanelProvider,
                      public ISettingsPageProvider {
   Q_OBJECT
-  Q_PLUGIN_METADATA(IID IPlugin_iid)
+  // The id ("lyrics") and name, read by the host before loading.
+  Q_PLUGIN_METADATA(IID IPlugin_iid FILE "lyricsplugin.json")
   Q_INTERFACES(IPlugin IPanelProvider ISettingsPageProvider)
 
 public:
-  QString id() const override;
   void initialize(IPluginHost &host) override;
   void shutdown() override;
 

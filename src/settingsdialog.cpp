@@ -3,6 +3,8 @@
 #include "displaytheme.h"
 #include "isettingspageprovider.h"
 #include "libraryfolderspage.h"
+#include "pluginmanager.h"
+#include "pluginspage.h"
 #include "ui_settingsdialog.h"
 #include "utils.h"
 #include <QInputDialog>
@@ -10,6 +12,8 @@
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QSettings>
+#include <QStackedWidget>
+#include <QTreeWidget>
 #include <QUuid>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -20,12 +24,11 @@
 SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
                                DatabaseManager &databaseManager,
                                MonitoredLibrary &monitoredLibrary,
-                               const QList<QObject *> &plugins, QWidget *parent)
+                               const QList<PluginEntry> &plugins,
+                               QWidget *parent)
     : QDialog(parent), ui(new Ui::SettingsDialog),
       columnRegistry_(columnRegistry), databaseManager_(databaseManager) {
   ui->setupUi(this);
-  ui->settings_tab_widget->insertTab(
-      1, new LibraryFoldersPage(monitoredLibrary, this), "Library");
 
   ui->backend_combo_box->setCurrentIndex(
       static_cast<int>(loadPlaybackBackendSetting()));
@@ -39,17 +42,6 @@ SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
   const QString initialWindowTitleExpression =
       loadDisplayExpressionSetting(DisplayExpressionKind::WindowTitle);
   const QString initialDisplayThemeMode = loadDisplayThemeModeSetting();
-
-  for (QObject *root : plugins) {
-    auto *provider = qobject_cast<ISettingsPageProvider *>(root);
-    if (provider == nullptr) {
-      continue;
-    }
-    IPluginSettingsPage *page = provider->createSettingsPage(this);
-    ui->settings_tab_widget->addTab(page->widget(),
-                                    provider->settingsPageTitle());
-    pluginPages_.append(page);
-  }
 
   QWidget *statusTab = new QWidget(this);
   QVBoxLayout *statusLayout = new QVBoxLayout(statusTab);
@@ -123,7 +115,8 @@ SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
   setActiveDisplayExpressionEditor(statusExpressionEdit_);
   statusLayout->addWidget(resetDisplayExpressionsButton_, 0, Qt::AlignLeft);
   statusLayout->addStretch();
-  ui->settings_tab_widget->addTab(statusTab, "Display");
+  setUpPageTree(new LibraryFoldersPage(monitoredLibrary, this), statusTab,
+                plugins);
   QString cloudUuid =
       settings.value("cloud_sync/user_uuid").toString().trimmed();
   const bool disabledByUser =
@@ -245,6 +238,72 @@ SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
 }
 
 SettingsDialog::~SettingsDialog() { delete ui; }
+
+void SettingsDialog::setUpPageTree(QWidget *libraryPage, QWidget *displayPage,
+                                   const QList<PluginEntry> &plugins) {
+  QTreeWidget *tree = ui->settings_page_tree;
+  QStackedWidget *stack = ui->settings_pages;
+  // The .ui's pages (Playback, Fields, Cloud Sync) are in the stack already.
+  stack->addWidget(libraryPage);
+  stack->addWidget(displayPage);
+  pluginsPage_ = new PluginsPage(plugins, this);
+  stack->addWidget(pluginsPage_);
+
+  // Each item holds its page, which selecting it shows.
+  const auto addItem = [tree](QTreeWidgetItem *parent, QWidget *page,
+                              const QString &title) {
+    auto *item = parent != nullptr ? new QTreeWidgetItem(parent)
+                                   : new QTreeWidgetItem(tree);
+    item->setText(0, title);
+    // The text is elided when the tree is narrower than it.
+    item->setToolTip(0, title);
+    item->setData(0, Qt::UserRole, QVariant::fromValue(page));
+    return item;
+  };
+  addItem(nullptr, ui->playback_tab, tr("Playback"));
+  addItem(nullptr, libraryPage, tr("Library"));
+  addItem(nullptr, ui->fields_tab, tr("Fields"));
+  addItem(nullptr, displayPage, tr("Display"));
+  addItem(nullptr, ui->cloud_sync_tab, tr("Cloud Sync"));
+  QTreeWidgetItem *pluginsItem = addItem(nullptr, pluginsPage_, tr("Plugins"));
+  // Only a Loaded entry has a root object; qobject_cast of the others' null
+  // root is null.
+  for (const PluginEntry &entry : plugins) {
+    auto *provider = qobject_cast<ISettingsPageProvider *>(entry.root);
+    if (provider == nullptr) {
+      continue;
+    }
+    IPluginSettingsPage *page = provider->createSettingsPage(this);
+    stack->addWidget(page->widget());
+    addItem(pluginsItem, page->widget(), provider->settingsPageTitle());
+    pluginPages_.append(page);
+  }
+  pluginsItem->setExpanded(true);
+  connect(tree, &QTreeWidget::currentItemChanged, this,
+          [stack](QTreeWidgetItem *item) {
+            stack->setCurrentWidget(
+                item->data(0, Qt::UserRole).value<QWidget *>());
+          });
+  tree->setCurrentItem(tree->topLevelItem(0));
+
+  // The tree fits its longest item, within limits (docs/settings-dialog.md,
+  // "Layout"); the dialog widens by it, so the pages keep the .ui's width.
+  // The stack's size hint and minimum size are already its largest page's,
+  // so switching pages does not resize the dialog.
+  constexpr int kMinTreeWidth = 150;
+  // QTreeView's override, which adds each item's indentation, is protected;
+  // QAbstractItemView's declaration is public.
+  const int fit = static_cast<QAbstractItemView *>(tree)->sizeHintForColumn(0) +
+                  2 * tree->frameWidth();
+  // At most a third of the widened dialog: half the pages' width.
+  const int treeWidth = std::clamp(fit, kMinTreeWidth, width() / 2);
+  const int pagesWidth = width();
+  resize(pagesWidth + treeWidth + ui->settings_splitter->handleWidth(),
+         height());
+  // The stack takes any later change of the dialog's width.
+  ui->settings_splitter->setStretchFactor(1, 1);
+  ui->settings_splitter->setSizes({treeWidth, pagesWidth});
+}
 
 void SettingsDialog::setDisplayExpressionPreviewContext(
     const std::unordered_map<std::string, FieldValue> *song,
@@ -577,6 +636,7 @@ void SettingsDialog::applySettings() {
   for (IPluginSettingsPage *page : std::as_const(pluginPages_)) {
     page->apply();
   }
+  pluginsPage_->apply();
   const QString statusExpression = saveDisplayExpressionSetting(
       DisplayExpressionKind::StatusBar, statusExpressionEdit_->toPlainText());
   const QString windowTitleExpression =

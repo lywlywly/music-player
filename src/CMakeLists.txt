@@ -192,6 +192,8 @@ set(PROJECT_SOURCES
   pluginmanager.cpp
   pluginplayerhost.h
   pluginplayerhost.cpp
+  pluginspage.h
+  pluginspage.cpp
   qtaudioplayer.h
   qtaudioplayer.cpp
   replaygain.h

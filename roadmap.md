@@ -60,10 +60,10 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
   page); Lyrics is the first plugin
   - ✅ Plugin API (`src/pluginapi/`) and `PluginManager`
   - ✅ Lyrics plugin (`src/plugins/lyrics/`, `lyricsplugin`)
-  - ⬜ Plugin management: id and name in metadata, disabling a plugin, a
-    Plugins page in Settings (plan in `docs/plugins.md`)
+  - ✅ Plugin management: id and name in metadata, disabling a plugin, a
+    Plugins page in Settings
   - See `docs/plugins.md`
-- ⬜ Settings dialog navigation tree instead of tabs
+- ✅ Settings dialog navigation tree instead of tabs
   - See `docs/settings-dialog.md`
 - ⬜ CLI tool and headless mode
 

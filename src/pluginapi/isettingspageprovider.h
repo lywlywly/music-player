@@ -16,7 +16,7 @@ public:
   virtual void apply() = 0;
 };
 
-// Capability: a tab in the Settings dialog.
+// Capability: a page of the Settings dialog, under Plugins in its tree.
 class ISettingsPageProvider {
 public:
   virtual ~ISettingsPageProvider() = default;

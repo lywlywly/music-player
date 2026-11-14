@@ -14,6 +14,7 @@
 #include <QSpinBox>
 #include <QSplitter>
 #include <QSqlDatabase>
+#include <QStackedWidget>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTabWidget>
@@ -21,6 +22,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTextEdit>
+#include <QTreeWidget>
 #include <QUrl>
 #include <QUuid>
 
@@ -153,6 +155,7 @@ private slots:
   void spectrum_tapGoesToThePlayerWhileShown();
   void splitters_startAtAQuarterAndRestoreDraggedSizes();
   void settings_pluginPageAppliesToItsPanelOnOk();
+  void plugins_disabledPluginHasNoTabOrPage();
 
 private:
   void recreateWindow();
@@ -1375,18 +1378,17 @@ void TestMainWindow::settings_pluginPageAppliesToItsPanelOnOk() {
   window_->findChild<QAction *>("actionPreferences")->trigger();
   auto *dialog = window_->findChild<SettingsDialog *>();
   QVERIFY(dialog != nullptr);
-  auto *pages = dialog->findChild<QTabWidget *>("settings_tab_widget");
+  auto *tree = dialog->findChild<QTreeWidget *>("settings_page_tree");
+  auto *pages = dialog->findChild<QStackedWidget *>("settings_pages");
+  QVERIFY(tree != nullptr);
   QVERIFY(pages != nullptr);
-  // The lyrics plugin's page, before Display.
-  int lyricsIndex = -1;
-  for (int i = 0; i < pages->count(); ++i) {
-    if (pages->tabText(i) == "Lyrics") {
-      lyricsIndex = i;
-    }
-  }
-  QVERIFY(lyricsIndex >= 0);
-  QCOMPARE(pages->tabText(lyricsIndex + 1), QString("Display"));
-  auto *size = pages->widget(lyricsIndex)->findChild<QSpinBox *>();
+  // The lyrics plugin's page, under Plugins.
+  QTreeWidgetItem *plugins = tree->topLevelItem(tree->topLevelItemCount() - 1);
+  QCOMPARE(plugins->text(0), QString("Plugins"));
+  QCOMPARE(plugins->childCount(), 1);
+  QCOMPARE(plugins->child(0)->text(0), QString("Lyrics"));
+  tree->setCurrentItem(plugins->child(0));
+  auto *size = pages->currentWidget()->findChild<QSpinBox *>();
   QVERIFY(size != nullptr);
   size->setValue(30);
 
@@ -1395,6 +1397,34 @@ void TestMainWindow::settings_pluginPageAppliesToItsPanelOnOk() {
       window_->findChild<QWidget *>("lyricsPanel")->findChild<QTextEdit *>();
   QVERIFY(text != nullptr);
   QCOMPARE(text->font().pointSize(), 30);
+}
+
+void TestMainWindow::plugins_disabledPluginHasNoTabOrPage() {
+  {
+    QSettings settings;
+    settings.setValue("plugins/disabled", QStringList{"lyrics"});
+    settings.setValue("infopanel/current_tab", "lyrics");
+  }
+  recreateWindow();
+
+  // No Lyrics tab; the first tab is current, and the saved tab is kept for
+  // when the plugin is enabled again.
+  auto *infoTabs = window_->findChild<QTabWidget *>("infoTabs");
+  QCOMPARE(infoTabs->count(), 2);
+  QCOMPARE(infoTabs->tabText(0), QString("Properties"));
+  QCOMPARE(infoTabs->currentIndex(), 0);
+  QCOMPARE(QSettings().value("infopanel/current_tab").toString(),
+           QString("lyrics"));
+
+  // No page under Plugins.
+  window_->findChild<QAction *>("actionPreferences")->trigger();
+  auto *dialog = window_->findChild<SettingsDialog *>();
+  QVERIFY(dialog != nullptr);
+  auto *tree = dialog->findChild<QTreeWidget *>("settings_page_tree");
+  QTreeWidgetItem *plugins = tree->topLevelItem(tree->topLevelItemCount() - 1);
+  QCOMPARE(plugins->text(0), QString("Plugins"));
+  QCOMPARE(plugins->childCount(), 0);
+  delete dialog;
 }
 
 void TestMainWindow::splitters_startAtAQuarterAndRestoreDraggedSizes() {

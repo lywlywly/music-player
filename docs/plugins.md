@@ -1,7 +1,6 @@
 # Plan: Plugins
 
-Status: implemented, except "Plan: Plugin management" at the end, which is
-not built yet. For a tour of the whole system, with the background, see
+Status: implemented. For a tour of the whole system, with the background, see
 [guides/plugin-system.md](../guides/plugin-system.md).
 
 ## Summary
@@ -9,12 +8,18 @@ not built yet. For a tour of the whole system, with the background, see
 * A **plugin** is a DLL (a shared library on macOS and Linux) that the app
   loads at startup with `QPluginLoader`. It sees the app only through a
   small API and never uses app classes.
+* Each plugin declares an **id** and a display **name** in a metadata JSON
+  that moc embeds into its DLL. The host reads both without running any of
+  the plugin's code, so a plugin that is not loaded is still listed by name.
 * A plugin can contribute several kinds of things, or none (a plugin with no
   UI that only follows playback). Each kind is a **capability**: an
   interface the plugin implements and the host asks for. There are two: an
   **info panel tab** and a **Settings dialog page**. Later kinds (context
   menu actions, main menu commands) are added the same way, without changing
   the existing interfaces or plugins.
+* The user can **disable** a plugin in Settings > Plugins; a disabled plugin
+  is not loaded at the next startup. Enabling or disabling takes effect
+  after a restart.
 * **Lyrics is the first and, for now, only plugin.** Properties and Spectrum
   stay built in.
 * Plugins are built in this repository, with the same Qt, compiler and build
@@ -22,7 +27,8 @@ not built yet. For a tour of the whole system, with the background, see
   (a published SDK, a stable ABI, a package format with a binary per
   platform for installing a plugin separately) are out of scope.
 * A missing plugin, or one that fails to load, contributes nothing; the
-  reason is logged. The app runs without any plugin.
+  reason is logged and shown on the Plugins page. The app runs without any
+  plugin.
 
 ## The boundary
 
@@ -51,11 +57,30 @@ Header-only, Qt types only, no `Q_OBJECT`: a `Q_OBJECT` class in a
 header-only API would have its moc code compiled into the app and into every
 plugin, two metaobjects for one class.
 
+### Metadata
+
+* A plugin's root class declares
+  `Q_PLUGIN_METADATA(IID IPlugin_iid FILE "<name>.json")`, the JSON next to
+  its header: `{ "id": "lyrics", "name": "Lyrics" }` for the lyrics plugin
+  (`lyricsplugin.json`). moc resolves the file next to the header and
+  embeds it, so nothing new is deployed, and AUTOMOC re-runs moc when it
+  changes. The JSON is listed in the target's sources for IDEs.
+* `id`: stable; names the plugin's info panel tab
+  (`infopanel/current_tab`), its settings keys (`<id>/...`) and its entry in
+  the disabled list. `name`: shown on the Plugins page. Both non-empty
+  strings.
+* The host reads them from `QPluginLoader::metaData().value("MetaData")`,
+  which parses the file without running any of its code. They are declared
+  only there, not also in code (see "Rejected").
+* `panelTitle()` and `settingsPageTitle()` stay in code: they label a
+  capability, can differ from the plugin's name, and are translated with
+  `tr()`.
+
 ### Core: every plugin
 
 | Type | Implemented by | Role |
 |---|---|---|
-| `IPlugin` | plugin | `id()` (stable, e.g. `lyrics`; names the plugin in logs, its tab and its settings), `initialize(IPluginHost &)` (once, after loading), `shutdown()` (once, before the host goes) |
+| `IPlugin` | plugin | `initialize(IPluginHost &)` (once, after loading), `shutdown()` (once, before the host goes) |
 | `IPluginHost` | host | The host services: `player()` returns the `IPlayerHost` |
 | `IPlayerHost` | host | `addListener(IPlayerListener *)`, `removeListener(IPlayerListener *)` |
 | `IPlayerListener` | plugin | `trackStarted(const TrackInfo &)`, `stopped()`, `positionChanged(qint64 ms)` |
@@ -100,12 +125,12 @@ work as usual: its `QObject`s live in the DLL only.
 
 * The plugin's root object implements `IPlugin` and any capabilities
   (`Q_INTERFACES(IPlugin IPanelProvider ...)`). The place in the app that
-  uses a capability asks each plugin for it with `qobject_cast`; a plugin
-  without it is skipped there.
+  uses a capability asks each loaded plugin for it with `qobject_cast`; a
+  plugin without it is skipped there.
 * `createPanel` and `createSettingsPage` return widgets parented to
   `parent`, so the tab widget and the Settings dialog own and delete them.
   The plugin keeps its open panels, so `apply()` can restyle them.
-* One panel per plugin, so the plugin's `id()` names its tab in
+* One panel per plugin, so the plugin's id names its tab in
   `infopanel/current_tab` (`lyrics` for the lyrics plugin).
 
 ### Extending the API
@@ -127,11 +152,14 @@ work as usual: its `QObject`s live in the DLL only.
   across the boundary. The host interfaces, the listeners and `TrackInfo` are
   plain classes passed by pointer or reference; nothing checks them, and an
   old plugin calling a changed one would use the wrong function table.
-* So `IPlugin`'s IID (`myplayer.IPlugin/1`) is the version of the **core
-  API**: `IPlugin`, `IPluginHost`, `IPlayerHost`, every listener and
-  `TrackInfo`. Any change to one of them bumps it, and a plugin built
-  against another version is not loaded. The log names the plugin's IID,
-  which `QPluginLoader::metaData()` reads without creating the plugin.
+* So `IPlugin`'s IID (`myplayer.IPlugin/2`) is the version of the **core
+  API**: `IPlugin`, `IPluginHost`, `IPlayerHost`, every listener,
+  `TrackInfo` and the metadata keys. Any change to one of them bumps it, and
+  a plugin built against another version is not loaded: a plugin with old
+  metadata keys is skipped as another API version, not as one with no id.
+  The log
+  names the plugin's IID, which `QPluginLoader::metaData()` reads without
+  creating the plugin.
 * Each capability's IID (`myplayer.IPanelProvider/1`, ...) is the version of
   that capability and the types only it uses (`IPluginSettingsPage` for
   `ISettingsPageProvider`). A plugin built against another version keeps
@@ -148,9 +176,10 @@ work as usual: its `QObject`s live in the DLL only.
   created in the `MainWindow` constructor, before playback can start
   (`setReady` comes after the library load), so every listener sees each song
   start.
-* A plugin stores its settings with `QSettings` under `<id>/` (the host sets
-  the organization and application names, which the plugin's `QSettings`
-  shares through QtCore), as the lyrics plugin's `lyrics/font_family`, ...
+* A plugin stores its settings with `QSettings` under `<id>/`, the id its
+  metadata declares (the host sets the organization and application names,
+  which the plugin's `QSettings` shares through QtCore), as the lyrics
+  plugin's `lyrics/font_family`, ...
 
 ## Host
 
@@ -159,28 +188,55 @@ work as usual: its `QObject`s live in the DLL only.
 Frontend class. `MainWindow` creates it as a child `QObject` after
 `ui->setupUi(...)` and `PlaybackController`.
 
-* Loads every library in one folder, in name order. `MainWindow` passes the
+* Lists every library in one folder, in name order. `MainWindow` passes the
   folder: `../PlugIns` when the executable is in a macOS app bundle
   (`.app/Contents/MacOS`), else `plugins/` next to the executable (Windows,
-  Linux, and the test executables on every platform).
-* Ignores files that are not libraries (a Debug build's `.pdb` and `.ilk`
-  sit next to the plugin). Skips, and logs, a library that Qt refuses
-  (another Qt version or build type) or whose IID is not `IPlugin`'s (both
-  read with `QPluginLoader::metaData()`, before the plugin's code is
-  loaded), one that fails to load, a root object that does not
-  implement `IPlugin` (missing from its `Q_INTERFACES`), and a plugin whose
-  `id()` is already loaded: the id names its tab and its settings keys.
-* Calls `initialize` on each. `plugins()` returns their root objects
-  (`QObject *`), which the places using a capability `qobject_cast`.
+  Linux, and the test executables on every platform). Files that are not
+  libraries (a Debug build's `.pdb` and `.ilk` sit next to the plugin) are
+  ignored.
+* `plugins()` returns a `PluginEntry` per library:
+
+  | Field | Contents |
+  | --- | --- |
+  | `fileName` | The library's file name, for example `lyricsplugin.dll` |
+  | `id`, `name` | From the metadata; empty when it could not be read |
+  | `state` | `Loaded`, `Disabled` or `Skipped` |
+  | `reason` | Why it was skipped, in a few words (see the steps below) |
+  | `details` | The full reason, the text that is logged |
+  | `root` | The root object when `Loaded`, else null |
+
+* For each library, in this order (a skip's `reason`, then its `details`;
+  where no details are given, they are the reason):
+  1. Empty metadata (not a Qt plugin, or another Qt version or build
+     type): skipped, "not a plugin for this app", Qt's `errorString()`.
+  2. Another IID: skipped, "another plugin API", "built for plugin API
+     `<iid>`, the app has `<IPlugin_iid>`".
+  3. No `id` or `name`: skipped, "no id or name in its metadata".
+  4. An id that an earlier entry, loaded or disabled, already has: skipped,
+     "same id as `<file>`". The id names the plugin's info panel tab, its
+     settings keys and its entry in the disabled list.
+  5. Its id is in `plugins/disabled`: `Disabled`, not loaded.
+  6. `instance()` fails: skipped, "failed to load", Qt's `errorString()`.
+     The root object does not implement `IPlugin` (missing from its
+     `Q_INTERFACES`): skipped, "not a plugin for this app", "does not
+     implement IPlugin".
+  7. Otherwise `initialize`: `Loaded`.
+* Steps 1 to 5 read only the metadata, before the plugin's code is loaded,
+  so a disabled plugin's code never runs.
+* `plugins/disabled` is a list of ids. `loadDisabledPluginIds()` and
+  `saveDisabledPluginIds()`, declared with `PluginManager`, are the only code
+  that reads and writes it: the manager reads it once, at construction, and
+  the Plugins page writes it.
 * A library's root object is one per process (`QPluginLoader::instance()`
   returns the same object for the same file), so one manager exists at a
   time: the tests create a `MainWindow` after deleting the previous one, and
   each `initialize` follows the previous `shutdown`.
 * Implements `IPluginHost`; owns the `PluginPlayerHost` (a member).
-* Its destructor calls `shutdown` on each plugin; the `PluginPlayerHost`
-  member is destroyed after that, so a plugin's listeners are gone before
-  their host. Children are destroyed in creation order, so the info panel
-  and the plugin panels in it are destroyed before the manager.
+* Its destructor calls `shutdown` on each loaded plugin; the
+  `PluginPlayerHost` member is destroyed after that, so a plugin's listeners
+  are gone before their host. Children are destroyed in creation order, so
+  the info panel and the plugin panels in it are destroyed before the
+  manager.
 * Never unloads a plugin: its code must stay mapped while its objects live.
 
 ### `PluginPlayerHost`
@@ -194,13 +250,45 @@ Frontend class. `MainWindow` creates it as a child `QObject` after
 
 ### Where the capabilities are used
 
+The places using a capability go through the `Loaded` entries.
+
 * **Info panel** (`MainWindow`): a tab per `IPanelProvider`, before the
-  built-in tabs, in load order, and before `setUpInfoTabs()` restores
-  `infopanel/current_tab`.
-* **Settings dialog**: `MainWindow` passes `plugins()` to `SettingsDialog`,
-  which it creates each time Preferences opens. The dialog adds a tab per
-  `ISettingsPageProvider`, before Display, and calls each page's `apply()`
-  in `applySettings` (on OK).
+  built-in tabs, in load order, named in `infopanel/current_tab` by the
+  entry's `id`, and created before `setUpInfoTabs()` restores that key.
+  When the key names a disabled plugin, the info panel shows its first tab
+  and leaves the key as it is (it is written only when the user changes
+  tabs), so the plugin's tab is current again once it is enabled.
+* **Settings dialog**: `MainWindow` passes the entries to `SettingsDialog`,
+  which it creates each time Preferences opens. Each `ISettingsPageProvider`
+  gets a page under Plugins in the dialog's tree
+  ([settings-dialog.md](settings-dialog.md)), in load order; OK calls each
+  page's `apply()`.
+
+### Plugins page (`PluginsPage`)
+
+* A frontend widget in `src/`, like `LibraryFoldersPage`: a list
+  (`plugins_list`) with a row per entry: the name (the file name when the
+  metadata has none), the file name and the state. Above it, a note that a
+  change takes effect after a restart.
+* `Loaded` and `Disabled` rows have a check box, checked for `Loaded`. The
+  state column follows the box before OK:
+
+  | Entry | Box | State column |
+  | --- | --- | --- |
+  | `Loaded` | checked | Enabled |
+  | `Loaded` | unchecked | Disabled after restart |
+  | `Disabled` | unchecked | Disabled |
+  | `Disabled` | checked | Enabled after restart |
+  | `Skipped` | none | Not loaded: its `reason` |
+
+* A skipped row's tooltip has its `details`: Qt's `errorString()` names the
+  file's path and is too long for the column.
+* A library that is not a Qt plugin at all (a dependency put in the folder)
+  is a skipped row too, so the folder's contents are all visible.
+* `apply()` (on the dialog's OK) saves the ids of the unchecked rows, plus
+  the stored ids that no row with a check box has, so a plugin whose file is
+  removed, or that is skipped for now, is still disabled when it comes back.
+  Cancel leaves the key unchanged.
 
 ## Lyrics plugin: `src/plugins/lyrics/`
 
@@ -212,12 +300,12 @@ Frontend class. `MainWindow` creates it as a child `QObject` after
   the tests link it directly.
 * `lyricsplugin`, a `MODULE` library linking `mylyrics`: the root object
   `LyricsPlugin`, implementing `IPlugin`, `IPanelProvider` and
-  `ISettingsPageProvider`. The build puts it where the app looks (`plugins/`
-  next to `EXEC`, the bundle's `Contents/PlugIns`) and in `Tests/plugins`,
-  next to the test executables; `EXEC` and the tests that load it depend on
-  it, so building them builds it. The root object is not in `mylyrics`: its
-  `Q_PLUGIN_METADATA` would make each test executable linking `mylyrics` a
-  plugin too.
+  `ISettingsPageProvider`, and its metadata, `lyricsplugin.json`. The build
+  puts it where the app looks (`plugins/` next to `EXEC`, the bundle's
+  `Contents/PlugIns`) and in `Tests/plugins`, next to the test executables;
+  `EXEC` and the tests that load it depend on it, so building them builds
+  it. The root object is not in `mylyrics`: its `Q_PLUGIN_METADATA` would
+  make each test executable linking `mylyrics` a plugin too.
 * `createPanel` creates a `LyricsPanel` (object name `lyricsPanel`) and its
   `LyricsPresenter`, a child of the panel. The presenter implements
   `IPlayerListener`, adds itself in its constructor and removes itself in its
@@ -321,186 +409,12 @@ Frontend class. `MainWindow` creates it as a child `QObject` after
   which only matters for third-party plugins; the cost is wrapping strings,
   widgets and settings at every call. Qt's plugin ABI needs a compatible Qt
   and the same build type, which in-tree plugins have.
-
-## Costs
-
-* Plugins must be deployed next to the app (`plugins/`, the bundle's
-  `PlugIns`), and on Windows their build type must match the app's: Qt does
-  not load a Debug plugin into a Release app.
-* Listener registration is manual; a listener that is not removed leaves a
-  dangling pointer in the host.
-* A plugin built against another capability version silently loses that
-  capability (see "Versions"); with plugins rebuilt with the app this
-  happens only with a stale plugin file in the folder.
-* One `TrackInfo` copy of the song's text fields per song start, and a
-  virtual call per event: negligible.
-* Plugin tabs always come before the built-in ones until those are plugins
-  too.
-
-## Tests
-
-* `tst_lyrics`, `tst_lyricspanel`: link `mylyrics`; `resolveLyrics` cases
-  take `TrackInfo`.
-* `tst_plugins`:
-  * `PluginPlayerHost` forwards song start (with its tag fields), position
-    (also from the player a backend switch creates) and stop, not pause, to
-    a listener the test adds, and nothing after it is removed.
-  * `PluginManager` loads the built lyrics plugin from `Tests/plugins`: one
-    plugin, `lyrics`, with a panel and a settings page. The panel shows the
-    tag lyrics of the song that starts and clears on stop.
-  * The lyrics settings: an open panel's font puts the stored family before
-    the application font's families; the page shows the stored size, system
-    font choice and color; the system font disables the family combo;
-    `apply()` writes the four `lyrics/*` keys (the family as typed) and
-    restyles the open panel. Which font the combo selects for a stored
-    family is Qt's substitution, checked by hand: the offscreen platform has
-    no fonts.
-  * `PluginManager` ignores a file that is not a library, and of two copies
-    of the plugin loads one: the second has the same id.
-* `tst_mainwindow::infoTabs_restoreAndShowSelectedSong` checks the Lyrics
-  (through the plugin in `Tests/plugins`), Properties and Spectrum tabs and
-  the restored tab, and that the Lyrics tab is saved as `lyrics`.
-  `settings_pluginPageAppliesToItsPanelOnOk` finds the Lyrics page before
-  Display in Preferences, and checks that its size reaches the panel on OK.
-  It finds the lyrics panel by object name: across a DLL, the test's
-  `LyricsPanel` metaobject is not the plugin's, so
-  `findChild<LyricsPanel *>` (or `<LyricsManager *>`) finds nothing, and the
-  panel's lines are checked in `tst_plugins` instead.
-* The plugin's `QSettings` uses the tests' QSettings folder: the folder is
-  set in QtCore, which the plugin shares.
-
-## Phases
-
-1. **Boundary without loading.** `TrackInfo`, `IPlayerListener`,
-   `IPlayerHost` and `PluginPlayerHost`; the lyrics classes move into
-   `mylyrics` (Qt and `src/pluginapi/` only).
-2. **Loading.** `IPlugin`, `IPluginHost`, `IPanelProvider`,
-   `ISettingsPageProvider`, `IPluginSettingsPage`, `PluginManager`,
-   `lyricsplugin`; the info panel and `SettingsDialog` use the capabilities;
-   lyrics leaves `MainWindow`, `mainwindow.ui` and `SettingsDialog`.
-3. **Docs.** architecture.md, info-panel.md, README.md (where plugins go when
-   running from a build).
-
-## Plan: Plugin management
-
-Status: planned.
-
-### Summary
-
-* Each plugin declares an **id** and a display **name** in a metadata JSON
-  that moc embeds into its DLL. The manager reads both with
-  `QPluginLoader::metaData()`, which parses the file without running any of
-  its code, so a plugin that is not loaded is still listed by name.
-* The user can **disable** a plugin. A disabled plugin is not loaded at the
-  next startup. Enabling or disabling takes effect after a restart.
-* In the Settings dialog's navigation tree
-  ([settings-dialog.md](settings-dialog.md)), a **Plugins** page lists
-  every library in the plugins folder with its state, and each loaded
-  plugin's settings page is a child of it. Lyrics is no longer a page of
-  its own beside Playback and Display.
-
-### Metadata
-
-* `src/plugins/lyrics/lyricsplugin.json`, next to the header with the root
-  object: `{ "id": "lyrics", "name": "Lyrics" }`. `lyricsplugin.h` declares
-  `Q_PLUGIN_METADATA(IID IPlugin_iid FILE "lyricsplugin.json")`. moc resolves
-  the file next to the header and embeds it, so nothing new is deployed, and
-  AUTOMOC re-runs moc when it changes. The JSON is listed in the target's
-  sources for IDEs.
-* The manager reads `metaData().value("MetaData")`: `id` and `name`, both
-  non-empty strings.
-* `IPlugin::id()` is removed: the id is declared once, in the JSON. That
-  changes the core API, so `IPlugin_iid` becomes `myplayer.IPlugin/2`. A
-  plugin still stores its settings under `<id>/`, the id it declares.
-* The metadata keys are part of the core API: adding, removing or changing
-  a required key bumps `IPlugin_iid`, so a plugin with the old keys is
-  skipped as another API version, not as one with no id.
-* `panelTitle()` and `settingsPageTitle()` stay in code: they label a
-  capability, can differ from the plugin's name, and are translated with
-  `tr()`.
-
-### `PluginManager`
-
-* `plugins()` returns a `PluginEntry` per library in the folder, in name
-  order (files that are not libraries are still ignored):
-
-  | Field | Contents |
-  | --- | --- |
-  | `fileName` | The library's file name, for example `lyricsplugin.dll` |
-  | `id`, `name` | From the metadata; empty when it could not be read |
-  | `state` | `Loaded`, `Disabled` or `Skipped` |
-  | `reason` | Why it was skipped, in a few words (see the steps below) |
-  | `details` | The full reason, the text that is logged |
-  | `root` | The root object when `Loaded`, else null |
-
-* For each library, in this order (a skip's `reason`, then its `details`):
-  1. Empty metadata (not a Qt plugin, or another Qt version or build
-     type): skipped, "not a plugin for this app", Qt's `errorString()`.
-  2. Another IID: skipped, "another plugin API", "built for plugin API
-     `<iid>`, the app has `<IPlugin_iid>`".
-  3. No `id` or `name`: skipped, "no id or name in its metadata".
-  4. An id that an earlier entry, loaded or disabled, already has: skipped,
-     "same id as `<file>`". The id names the plugin's info panel tab, its
-     settings keys and its entry in the disabled list.
-  5. Its id is in `plugins/disabled`: `Disabled`, not loaded.
-  6. `instance()` fails: skipped, "failed to load", Qt's `errorString()`.
-     The root object does not implement `IPlugin`: skipped, "not a plugin
-     for this app", "does not implement `IPlugin`".
-  7. Otherwise `initialize`: `Loaded`.
-* Where no `details` are given, they are the `reason`.
-* The places using a capability go through the `Loaded` entries; the info
-  panel names a plugin's tab with the entry's `id`.
-* When `infopanel/current_tab` names a disabled plugin, the info panel
-  shows its first tab and leaves the key as it is (it is written only when
-  the user changes tabs), so the plugin's tab is current again once it is
-  enabled.
-* `plugins/disabled` is a list of ids. `loadDisabledPluginIds()` and
-  `saveDisabledPluginIds()`, declared with `PluginManager`, are the only code
-  that reads and writes it: the manager reads it once, at construction, and
-  the Plugins page writes it.
-
-### Settings dialog
-
-* The dialog's tree and its Plugins item are in
-  [settings-dialog.md](settings-dialog.md). Each `Loaded` plugin with a
-  settings page is a child of Plugins.
-* `SettingsDialog` takes the manager's entries instead of the root objects.
-  OK calls `apply()` on the Plugins page and on each plugin page.
-
-### Plugins page (`PluginsPage`)
-
-* A frontend widget in `src/`, like `LibraryFoldersPage`: a list
-  (`plugins_list`) with a row per entry: the name (the file name when the
-  metadata has none), the file name and the state.
-* `Loaded` and `Disabled` rows have a check box, checked for `Loaded`. The
-  state column follows the box before OK:
-
-  | Entry | Box | State column |
-  | --- | --- | --- |
-  | `Loaded` | checked | Enabled |
-  | `Loaded` | unchecked | Disabled after restart |
-  | `Disabled` | unchecked | Disabled |
-  | `Disabled` | checked | Enabled after restart |
-  | `Skipped` | none | Not loaded: its `reason` |
-
-* A skipped row's tooltip has its `details`: Qt's `errorString()` names the
-  file's path and is too long for the column.
-* A library that is not a Qt plugin at all (a dependency put in the folder)
-  is a skipped row too, so the folder's contents are all visible.
-* `apply()` saves the ids of the unchecked rows, plus the stored ids that no
-  row with a check box has, so a plugin whose file is removed, or that is
-  skipped for now, is still disabled when it comes back. Cancel leaves the
-  key unchanged.
-
-### Rejected
-
-* **The name in code** (`IPlugin::displayName()`, as foobar2000's
-  `componentversion` service). It is known only once the plugin is loaded,
-  so a disabled, skipped or newly added plugin would show its file name, and
-  loading a disabled plugin for its name would run the code the user turned
-  off.
-* **Keeping `IPlugin::id()` beside the JSON id.** Two declarations of one id
-  that can disagree; the manager needs the id before loading anyway.
+* **The id and name in code** (`IPlugin::id()`, a `displayName()`, as
+  foobar2000's `componentversion` service). They are known only once the
+  plugin is loaded, so a disabled, skipped or newly added plugin would show
+  its file name, and loading a disabled plugin for its name would run the
+  code the user turned off. Keeping `id()` beside the JSON id would be two
+  declarations of one id that can disagree.
 * **Enabling and disabling without a restart.** Disabling needs no
   unloading: `shutdown()` and removing the plugin's tab and page, with the
   DLL left mapped. But the info panel and the dialog would have to add and
@@ -518,45 +432,71 @@ Status: planned.
   folder (`QStandardPaths::AppDataLocation`), where Install copies a file
   and Remove deletes it; bundled plugins can then only be disabled.
 
-### Costs
+## Costs
 
+* Plugins must be deployed next to the app (`plugins/`, the bundle's
+  `PlugIns`), and on Windows their build type must match the app's: Qt does
+  not load a Debug plugin into a Release app.
+* Listener registration is manual; a listener that is not removed leaves a
+  dangling pointer in the host.
+* A plugin built against another capability version silently loses that
+  capability (see "Versions"); with plugins rebuilt with the app this
+  happens only with a stale plugin file in the folder.
+* One `TrackInfo` copy of the song's text fields per song start, and a
+  virtual call per event: negligible.
+* Plugin tabs always come before the built-in ones until those are plugins
+  too.
 * A plugin's name is not translatable: JSON has no `tr()`. A translated app
   would need per-language keys in it.
 * Enabling or disabling takes a restart.
 * One JSON file per plugin.
 
-### Tests
+## Tests
 
+* `tst_lyrics`, `tst_lyricspanel`: link `mylyrics`; `resolveLyrics` cases
+  take `TrackInfo`.
 * `tst_plugins`:
-  * `PluginManager` lists the lyrics plugin as `Loaded`, with the id
-    `lyrics`, the name `Lyrics` and its file name.
+  * `PluginPlayerHost` forwards song start (with its tag fields), position
+    (also from the player a backend switch creates) and stop, not pause, to
+    a listener the test adds, and nothing after it is removed.
+  * `PluginManager` lists the built lyrics plugin from `Tests/plugins` as
+    `Loaded`, with the id `lyrics`, the name `Lyrics` and its file name, and
+    with a panel and a settings page. The panel shows the tag lyrics of the
+    song that starts and clears on stop.
+  * The lyrics settings: an open panel's font puts the stored family before
+    the application font's families; the page shows the stored size, system
+    font choice and color; the system font disables the family combo;
+    `apply()` writes the four `lyrics/*` keys (the family as typed) and
+    restyles the open panel. Which font the combo selects for a stored
+    family is Qt's substitution, checked by hand: the offscreen platform has
+    no fonts.
+  * `PluginManager` does not list a file that is not a library, and of two
+    copies of the plugin the second is `Skipped`, with a reason naming the
+    first.
   * With `lyrics` in `plugins/disabled`, its entry is `Disabled` with its
     name and no root object. That its code is not loaded is not checked:
-    other test functions in `tst_plugins` load it first, and Qt never
-    unloads it.
-  * Of two copies, the second is `Skipped`, with a reason naming the first;
-    a file that is not a library is not listed.
-* `tst_settingsdialog_ui`: `PluginsPage`, with entries made by the test (no
-  DLL, so skipped rows are covered too): the state column follows the box;
-  OK writes the unchecked ids and keeps a stored id that no row with a check
-  box has; a skipped row has no check box, its `reason` and its `details`
-  as its tooltip.
-* `tst_mainwindow`: with `lyrics` in `plugins/disabled` and
-  `infopanel/current_tab` set to `lyrics`: no Lyrics info tab, the first
-  tab current and the key unchanged, no Lyrics item under Plugins, and the
-  Plugins page's Lyrics row unchecked and Disabled.
+    other test functions load it first, and Qt never unloads it.
+* `tst_settingsdialog_ui::pluginsPage_stateFollowsBoxAndOkSavesDisabledIds`,
+  with entries made by the test (no DLL, so skipped rows are covered too):
+  the state column follows the box; OK writes the unchecked ids and keeps
+  the stored ids that no row with a check box has; a skipped row has no
+  check box, its `reason` and its `details` as its tooltip.
+* `tst_mainwindow`:
+  * `infoTabs_restoreAndShowSelectedSong` checks the Lyrics (through the
+    plugin in `Tests/plugins`), Properties and Spectrum tabs and the
+    restored tab, and that the Lyrics tab is saved as `lyrics`.
+  * `settings_pluginPageAppliesToItsPanelOnOk` finds the Lyrics page under
+    Plugins in Preferences, and checks that its size reaches the panel on
+    OK. It finds the lyrics panel by object name: across a DLL, the test's
+    `LyricsPanel` metaobject is not the plugin's, so
+    `findChild<LyricsPanel *>` (or `<LyricsManager *>`) finds nothing, and
+    the panel's lines are checked in `tst_plugins` instead.
+  * `plugins_disabledPluginHasNoTabOrPage`: with `lyrics` in
+    `plugins/disabled` and `infopanel/current_tab` set to `lyrics`, no
+    Lyrics info tab, the first tab current and the key unchanged, and no
+    page under Plugins.
+* The plugin's `QSettings` uses the tests' QSettings folder: the folder is
+  set in QtCore, which the plugin shares.
 * By hand: the Plugins page's layout, the state column following the box,
   and that a plugin disabled on OK is gone after a restart and back after
   enabling it and restarting.
-
-### Phases
-
-1. **Metadata and states.** `lyricsplugin.json`, `IPlugin/2` without
-   `id()`, `PluginEntry`, `plugins/disabled`, the manager's states;
-   `MainWindow` and `SettingsDialog` use the `Loaded` entries.
-2. **Plugins page**, in the Settings tree
-   ([settings-dialog.md](settings-dialog.md), built first).
-3. **Docs.** This doc's sections are rewritten for the design in use and
-   this plan removed; guides/plugin-system.md (the JSON, `id()`, `/2`),
-   architecture.md (`MainWindow` passing the entries), README.md (disabling
-   a plugin), roadmap.md.

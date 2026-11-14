@@ -27,14 +27,25 @@
     <number>10</number>
    </property>
    <item>
-    <widget class="QTabWidget" name="settings_tab_widget">
-     <property name="currentIndex">
-      <number>0</number>
+    <widget class="QSplitter" name="settings_splitter">
+     <property name="orientation">
+      <enum>Qt::Orientation::Horizontal</enum>
      </property>
+     <property name="childrenCollapsible">
+      <bool>false</bool>
+     </property>
+     <widget class="QTreeWidget" name="settings_page_tree">
+      <property name="headerHidden">
+       <bool>true</bool>
+      </property>
+      <column>
+       <property name="text">
+        <string notr="true">Page</string>
+       </property>
+      </column>
+     </widget>
+     <widget class="QStackedWidget" name="settings_pages">
      <widget class="QWidget" name="playback_tab">
-      <attribute name="title">
-       <string>Playback</string>
-      </attribute>
       <layout class="QVBoxLayout" name="verticalLayout_7">
        <item>
         <layout class="QHBoxLayout" name="horizontalLayout">
@@ -133,9 +144,6 @@
       </layout>
      </widget>
      <widget class="QWidget" name="fields_tab">
-      <attribute name="title">
-       <string>Fields</string>
-      </attribute>
       <layout class="QVBoxLayout" name="verticalLayout_2">
        <item>
         <widget class="QGroupBox" name="custom_fields_group_box">
@@ -348,9 +356,6 @@
       </layout>
      </widget>
      <widget class="QWidget" name="cloud_sync_tab">
-      <attribute name="title">
-       <string>Cloud Sync</string>
-      </attribute>
       <layout class="QVBoxLayout" name="verticalLayout_5">
        <item>
         <widget class="QGroupBox" name="cloud_sync_group_box">
@@ -459,20 +464,8 @@
        </item>
       </layout>
      </widget>
+     </widget>
     </widget>
-   </item>
-   <item>
-    <spacer name="verticalSpacer">
-     <property name="orientation">
-      <enum>Qt::Orientation::Vertical</enum>
-     </property>
-     <property name="sizeHint" stdset="0">
-      <size>
-       <width>20</width>
-       <height>40</height>
-      </size>
-     </property>
-    </spacer>
    </item>
    <item>
     <widget class="QDialogButtonBox" name="buttonBox">

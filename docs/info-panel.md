@@ -72,14 +72,16 @@ splitter (horizontal)
 
 * The size policy and minimum size are on `infoTabs`, so they hold for every
   tab, including the plugins' panels.
-* `MainWindow::setUpInfoTabs` inserts a tab per plugin panel
+* `MainWindow::setUpInfoTabs` inserts a tab per loaded plugin panel
   (`IPanelProvider`) before Properties, in plugin load order. The lyrics
   panel's object name is `lyricsPanel`.
 * The current tab is stored in `QSettings` as `infopanel/current_tab` (a
   plugin's id, such as `lyrics`, or `properties` or `spectrum`; with none
   saved, the first tab), written on `QTabWidget::currentChanged` and restored
   in the `MainWindow` constructor (`setUpInfoTabs`), after the plugin tabs are
-  added.
+  added. A saved plugin tab whose plugin is disabled leaves the first tab
+  current and the key unchanged ([plugins.md](plugins.md), "Where the
+  capabilities are used").
 
 ### Lyrics while hidden
 

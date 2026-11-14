@@ -6,8 +6,6 @@
 #include "lyricssettingspage.h"
 #include <utility>
 
-QString LyricsPlugin::id() const { return QStringLiteral("lyrics"); }
-
 void LyricsPlugin::initialize(IPluginHost &host) { host_ = &host; }
 
 void LyricsPlugin::shutdown() {

@@ -5,7 +5,6 @@
 #include "displaytheme.h"
 #include "gstaudioplayer.h"
 #include "ipanelprovider.h"
-#include "iplugin.h"
 #include "libraryloader.h"
 #include "librarysearchdialog.h"
 #include "nowplayingpresenter.h"
@@ -211,23 +210,27 @@ void MainWindow::setUpMenuBar() {
 }
 
 void MainWindow::setUpInfoTabs() {
-  // The plugins' panels come first, in load order, each named by its
-  // plugin's id.
+  // The loaded plugins' panels come first, in load order, each named by its
+  // plugin's id. Only a Loaded entry has a root object; qobject_cast of the
+  // others' null root is null.
   std::vector<std::pair<QWidget *, QString>> tabs;
-  for (QObject *root : plugins_->plugins()) {
-    auto *provider = qobject_cast<IPanelProvider *>(root);
+  for (const PluginEntry &entry : plugins_->plugins()) {
+    auto *provider = qobject_cast<IPanelProvider *>(entry.root);
     if (provider == nullptr) {
       continue;
     }
     QWidget *panel = provider->createPanel(ui->infoTabs);
     ui->infoTabs->insertTab(static_cast<int>(tabs.size()), panel,
                             provider->panelTitle());
-    tabs.emplace_back(panel, qobject_cast<IPlugin *>(root)->id());
+    tabs.emplace_back(panel, entry.id);
   }
   tabs.emplace_back(ui->propertiesTab, kInfoTabProperties);
   tabs.emplace_back(ui->spectrumTab, kInfoTabSpectrum);
   // Inserting before the current tab keeps it current; start from the first
-  // tab unless another one is saved.
+  // tab unless another one is saved. A saved tab with no panel (its plugin is
+  // disabled) leaves the first tab current and the key as it is, so that tab
+  // is current again once the plugin is enabled: the key is written only
+  // when the user changes tabs.
   ui->infoTabs->setCurrentIndex(0);
   const QString savedTab = QSettings().value(kInfoTabSettingsKey).toString();
   for (const auto &[tab, name] : tabs) {

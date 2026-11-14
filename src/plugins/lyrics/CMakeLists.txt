@@ -27,6 +27,8 @@ set_target_properties(mylyrics PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_library(lyricsplugin MODULE
   lyricsplugin.h
   lyricsplugin.cpp
+  # Embedded by moc (Q_PLUGIN_METADATA); listed for IDEs.
+  lyricsplugin.json
 )
 target_link_libraries(lyricsplugin PRIVATE mylyrics)
 if(APPLE)

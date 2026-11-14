@@ -75,8 +75,8 @@ pieces matter:
 
 | Piece | Where | What it does |
 | --- | --- | --- |
-| `Q_DECLARE_INTERFACE(IPlugin, "myplayer.IPlugin/1")` | after the interface, in the API header | Gives the interface its name, the **IID** (interface identifier). The part after `/` is its version. |
-| `Q_PLUGIN_METADATA(IID "myplayer.IPlugin/1")` | in the root class | Marks the library as a Qt plugin: writes a label into it saying what kind of plugin it is, and adds the entry point Qt calls to create the root object. |
+| `Q_DECLARE_INTERFACE(IPlugin, "myplayer.IPlugin/2")` | after the interface, in the API header | Gives the interface its name, the **IID** (interface identifier). The part after `/` is its version. |
+| `Q_PLUGIN_METADATA(IID "myplayer.IPlugin/2" FILE "lyricsplugin.json")` | in the root class | Marks the library as a Qt plugin: writes a label into it saying what kind of plugin it is, with the JSON file's contents, and adds the entry point Qt calls to create the root object. |
 | `Q_INTERFACES(IPlugin IPanelProvider ...)` | in the root class | Lists the interfaces the root object implements: its answer sheet for "can you do this?". |
 | `QPluginLoader` | in the app | `metaData()` reads the label without running any plugin code; `instance()` loads the library and creates the root object, returned as a `QObject *`. |
 | `qobject_cast<IPanelProvider *>(root)` | in the app | Asks the object for the interface with that IID. It answers from its `Q_INTERFACES` list: an `IPanelProvider *` if it has it, null if not. |
@@ -88,6 +88,10 @@ How they work together:
   entry point (with the macros in `qplugin.h`) and the answer sheet into the
   root class's generated code. So the root class needs `Q_OBJECT`, and the
   library is a plugin only once moc has run on it.
+* The JSON file is ours: each plugin declares its **id** (a stable name such
+  as `lyrics`) and its display **name** there. Because the label can be read
+  without running the plugin, the app knows every plugin's id and name even
+  for one it does not load, such as a plugin the user disabled.
 * The label also records the Qt version and whether it is a Debug or Release
   build. Qt refuses a plugin built against another major or a newer minor Qt
   version than the app's, and on Windows with MSVC one of the other build
@@ -112,7 +116,7 @@ library can have only one such class: in the lyrics plugin, `LyricsPlugin`.
 class LyricsPlugin : public QObject, public IPlugin,
                      public IPanelProvider, public ISettingsPageProvider {
   Q_OBJECT
-  Q_PLUGIN_METADATA(IID IPlugin_iid)          // this class is the root
+  Q_PLUGIN_METADATA(IID IPlugin_iid FILE "lyricsplugin.json") // the root
   Q_INTERFACES(IPlugin IPanelProvider ISettingsPageProvider)
   ...
 };
@@ -152,7 +156,7 @@ The interfaces in `src/pluginapi/` come in three groups.
 
 | Group | Interface | Implemented by | Role |
 | --- | --- | --- | --- |
-| Core | `IPlugin` | plugin (root object) | `id()`, a stable name such as `lyrics`; `initialize(host)` after loading; `shutdown()` before the host is destroyed |
+| Core | `IPlugin` | plugin (root object) | `initialize(host)` after loading; `shutdown()` before the host is destroyed (the id and name are in the JSON, not in code) |
 | Capabilities | `IPanelProvider` | plugin (root object) | Makes a tab for the info panel |
 | | `ISettingsPageProvider` | plugin (root object) | Makes a page for the Settings dialog, as an `IPluginSettingsPage` (`widget()`, `apply()` on OK) |
 | Host services | `IPluginHost` | app | What the app offers plugins: today only `player()` |
@@ -193,9 +197,10 @@ Three ideas run through it:
 | Piece | Where | Role |
 | --- | --- | --- |
 | `pluginapi` | `src/pluginapi/` | The interfaces, header-only |
-| `PluginManager` | app | Loads the plugins, is their `IPluginHost`, shuts them down |
+| `PluginManager` | app | Lists the plugins and loads those not disabled, is their `IPluginHost`, shuts them down |
 | `PluginPlayerHost` | app | The `IPlayerHost`: turns `PlaybackController`'s signals into listener calls |
 | `MainWindow`, `SettingsDialog` | app | Use the capabilities: add the plugins' tabs and Settings pages |
+| `PluginsPage` | app | Settings > Plugins: lists every plugin with its state, enables and disables them |
 | `mylyrics` | `src/plugins/lyrics/` | The lyrics code: panel, presenter, lyrics loading, settings page |
 | `lyricsplugin` | `src/plugins/lyrics/` | The DLL: only the root object, `LyricsPlugin`, linking `mylyrics` |
 
@@ -218,23 +223,27 @@ Three ideas run through it:
 
 1. **Loading.** `MainWindow` creates a `PluginManager` for the plugins folder.
    For each file, in name order, the manager:
-   1. skips it if it is not a library;
+   1. ignores it if it is not a library;
    2. reads its label and skips it if it is not a plugin Qt can load (another
       Qt version or build type) or does not have the IID
-      `myplayer.IPlugin/1`, so another program's plugin or an old version
+      `myplayer.IPlugin/2`, so another program's plugin or an old version
       never runs;
-   3. loads it and creates the root object (`instance()`), skipping it if
-      that fails;
-   4. skips it if the root object does not implement `IPlugin`, or if its
-      `id()` is already taken;
-   5. calls `initialize(host)` and keeps it.
+   3. reads the id and name from the label, and skips it if either is
+      missing or an earlier plugin, loaded or disabled, has the same id;
+   4. leaves it unloaded if the user disabled its id;
+   5. loads it and creates the root object (`instance()`), skipping it if
+      that fails or the root object does not implement `IPlugin`;
+   6. calls `initialize(host)`.
 
-   Every skip except the first is logged.
-2. **Using the capabilities.** The info panel asks each plugin for
+   Every library gets an entry, with its state: loaded, disabled or skipped
+   (with the reason, which is also logged). The Plugins page in Settings
+   shows these entries; unchecking a plugin there adds its id to the
+   disabled list, which takes effect at the next startup.
+2. **Using the capabilities.** The info panel asks each loaded plugin for
    `IPanelProvider` and adds a tab for each one, before Properties and
    Spectrum. Each time Preferences opens, the Settings dialog asks for
-   `ISettingsPageProvider` and adds a page for each one, and calls each
-   page's `apply()` on OK.
+   `ISettingsPageProvider` and adds a page for each one under Plugins in its
+   tree, and calls each page's `apply()` on OK.
 3. **Following playback.** The Lyrics tab's presenter adds itself as a
    listener when it is created. When a song starts, playback stops or the
    position moves, `PluginPlayerHost` calls `trackStarted`, `stopped` or
@@ -248,8 +257,9 @@ Three ideas run through it:
 ## Versions and compatibility
 
 * **The core API's version** is `IPlugin`'s IID. It covers every core and host
-  interface and `TrackInfo`, which have no IID of their own. Any change to
-  them bumps it (`myplayer.IPlugin/2`), and a plugin built for the old version
+  interface, `TrackInfo` and the JSON's keys, which have no IID of their own.
+  Any change to them bumps it (to `myplayer.IPlugin/3` next), and a plugin
+  built for the old version
   is refused at the label check, before any of its code runs, instead of
   calling functions that no longer match.
 * **Each capability has its own version.** A plugin built for an older
@@ -269,10 +279,13 @@ mismatch only happens with an old DLL left in the plugins folder.
    one: a `MODULE` library that links only Qt and `pluginapi`, written into
    the plugins folder.
 2. Write a root class deriving from `QObject`, `IPlugin` and the capabilities
-   it offers, with `Q_OBJECT`, `Q_PLUGIN_METADATA(IID IPlugin_iid)` and
+   it offers, with `Q_OBJECT`,
+   `Q_PLUGIN_METADATA(IID IPlugin_iid FILE "<name>.json")` and
    `Q_INTERFACES(...)` listing those interfaces.
-3. Give it a stable `id()`: it names the plugin's tab in the saved settings,
-   and its own settings keys start with it (`<id>/...`).
+3. Next to its header, write `<name>.json` with a stable `id` and a display
+   `name`, and list it in the target's sources. The id names the plugin's tab
+   in the saved settings and its entry in the disabled list, and its own
+   settings keys start with it (`<id>/...`).
 4. To follow playback, add a listener to `host.player()`, and remove it by the
    time `shutdown()` returns.
 5. Register it in `src/CMakeLists.txt` (`add_subdirectory`, and a dependency
@@ -283,5 +296,5 @@ mismatch only happens with an old DLL left in the plugins folder.
 * [docs/plugins.md](../docs/plugins.md): the full design, the rules for
   plugins, the rejected alternatives and the tests.
 * `src/pluginapi/`: the interfaces, each with a short comment.
-* `src/pluginmanager.cpp`: the loading steps above, in about fifty lines.
+* `src/pluginmanager.cpp`: the loading steps above, in about a hundred lines.
 * `src/plugins/lyrics/lyricsplugin.cpp`: a complete root object.

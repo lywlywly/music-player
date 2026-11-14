@@ -53,7 +53,9 @@ cmake --build build -j
 Lyrics is a plugin, loaded at startup from `plugins/` next to the executable
 (`build/plugins/`), or from `Contents/PlugIns` in the macOS app bundle; the
 build puts it there. Without it the app runs with no Lyrics tab. On Windows
-the plugin must have the app's build type (Debug or Release).
+the plugin must have the app's build type (Debug or Release). Settings >
+Plugins lists the plugins found, with why one was not loaded, and disables or
+enables one from the next start.
 
 Build with tests:
 

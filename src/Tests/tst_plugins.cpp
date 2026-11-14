@@ -25,7 +25,6 @@
 #include "../playlistcollection.h"
 #include "../pluginapi/ipanelprovider.h"
 #include "../pluginapi/iplayerlistener.h"
-#include "../pluginapi/iplugin.h"
 #include "../pluginapi/isettingspageprovider.h"
 #include "../pluginmanager.h"
 #include "../pluginplayerhost.h"
@@ -73,6 +72,7 @@ private slots:
   void manager_loadsLyricsPlugin();
   void lyricsSettings_loadSaveAndRestyleOpenPanels();
   void manager_skipsNonLibrariesAndDuplicateIds();
+  void manager_listsDisabledPluginWithoutLoadingIt();
 
 private:
   DummyAudioPlayer *player() const;
@@ -92,6 +92,8 @@ private:
 
 void TestPlugins::init() {
   qputenv("MYPLAYER_USE_DUMMY_AUDIO_PLAYER", "1");
+  // No plugin disabled, also when a test that disables one failed.
+  saveDisabledPluginIds({});
   dir_ = new QTemporaryDir();
   QVERIFY(dir_->isValid());
   connectionName_ =
@@ -192,9 +194,14 @@ void TestPlugins::manager_loadsLyricsPlugin() {
   addSong();
   PluginManager manager(*controller_,
                         QCoreApplication::applicationDirPath() + "/plugins");
+  // Its id and name from the metadata embedded in the library.
   QCOMPARE(manager.plugins().size(), 1);
-  QObject *root = manager.plugins().front();
-  QCOMPARE(qobject_cast<IPlugin *>(root)->id(), QString("lyrics"));
+  const PluginEntry &entry = manager.plugins().front();
+  QCOMPARE(entry.state, PluginEntry::State::Loaded);
+  QCOMPARE(entry.id, QString("lyrics"));
+  QCOMPARE(entry.name, QString("Lyrics"));
+  QVERIFY(entry.fileName.contains("lyricsplugin"));
+  QObject *root = entry.root;
   auto *panels = qobject_cast<IPanelProvider *>(root);
   auto *pages = qobject_cast<ISettingsPageProvider *>(root);
   QVERIFY(panels != nullptr);
@@ -231,7 +238,7 @@ void TestPlugins::lyricsSettings_loadSaveAndRestyleOpenPanels() {
 
   PluginManager manager(*controller_,
                         QCoreApplication::applicationDirPath() + "/plugins");
-  QObject *root = manager.plugins().front();
+  QObject *root = manager.plugins().front().root;
   // Destroyed before the manager, as the info panel is.
   QWidget parent;
   QWidget *panel = qobject_cast<IPanelProvider *>(root)->createPanel(&parent);
@@ -291,13 +298,14 @@ void TestPlugins::manager_skipsNonLibrariesAndDuplicateIds() {
   QVERIFY(notes.open(QIODevice::WriteOnly));
   notes.close();
   {
+    // Not listed.
     PluginManager manager(*controller_, folder.path());
     QVERIFY(manager.plugins().isEmpty());
   }
 
   // Two copies of the lyrics plugin under other names: the second has the
-  // id of the first. Copies, so their root objects are not the one
-  // manager_loadsLyricsPlugin initializes.
+  // id of the first, and is skipped. Copies, so their root objects are not
+  // the one manager_loadsLyricsPlugin initializes.
   const QDir built(QCoreApplication::applicationDirPath() + "/plugins");
   QString plugin;
   for (const QString &name : built.entryList(QDir::Files)) {
@@ -310,9 +318,28 @@ void TestPlugins::manager_skipsNonLibrariesAndDuplicateIds() {
   QVERIFY(QFile::copy(plugin, folder.filePath("a." + suffix)));
   QVERIFY(QFile::copy(plugin, folder.filePath("b." + suffix)));
   PluginManager manager(*controller_, folder.path());
+  QCOMPARE(manager.plugins().size(), 2);
+  const PluginEntry &first = manager.plugins().at(0);
+  const PluginEntry &second = manager.plugins().at(1);
+  QCOMPARE(first.fileName, "a." + suffix);
+  QCOMPARE(first.state, PluginEntry::State::Loaded);
+  QCOMPARE(second.fileName, "b." + suffix);
+  QCOMPARE(second.state, PluginEntry::State::Skipped);
+  QCOMPARE(second.reason, "same id as a." + suffix);
+}
+
+void TestPlugins::manager_listsDisabledPluginWithoutLoadingIt() {
+  saveDisabledPluginIds({"lyrics"});
+  PluginManager manager(*controller_,
+                        QCoreApplication::applicationDirPath() + "/plugins");
+  // Its name comes from the metadata, without loading it. That its code is
+  // not loaded is not checked: other test functions load it first, and Qt
+  // never unloads it.
   QCOMPARE(manager.plugins().size(), 1);
-  QCOMPARE(qobject_cast<IPlugin *>(manager.plugins().front())->id(),
-           QString("lyrics"));
+  const PluginEntry &entry = manager.plugins().front();
+  QCOMPARE(entry.state, PluginEntry::State::Disabled);
+  QCOMPARE(entry.name, QString("Lyrics"));
+  QCOMPARE(entry.root, nullptr);
 }
 
 QTEST_MAIN(TestPlugins)

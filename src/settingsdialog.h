@@ -20,19 +20,25 @@
 
 class IPluginSettingsPage;
 class MonitoredLibrary;
+struct PluginEntry;
+class PluginsPage;
 
 namespace Ui {
 class SettingsDialog;
 }
 
+// Preferences: its pages in a navigation tree (docs/settings-dialog.md). OK
+// applies every page but Library, whose actions apply at once.
 class SettingsDialog : public QDialog {
   Q_OBJECT
 
 public:
+  // plugins are the PluginManager's entries: the Plugins page lists them, and
+  // each loaded plugin's settings page is under it.
   explicit SettingsDialog(ColumnRegistry &columnRegistry,
                           DatabaseManager &databaseManager,
                           MonitoredLibrary &monitoredLibrary,
-                          const QList<QObject *> &plugins,
+                          const QList<PluginEntry> &plugins,
                           QWidget *parent = nullptr);
   ~SettingsDialog();
   void setDisplayExpressionPreviewContext(
@@ -49,6 +55,10 @@ signals:
   void displayThemeModeChanged(const QString &mode);
 
 private:
+  // Adds the pages built in code to the stack and an item per page to the
+  // tree, and sizes the tree to fit its items.
+  void setUpPageTree(QWidget *libraryPage, QWidget *displayPage,
+                     const QList<PluginEntry> &plugins);
   void refreshCustomFieldsList();
   void refreshComputedFieldsList();
   void addCustomFieldFromForm();
@@ -80,8 +90,9 @@ private:
   bool initialCloudDisabledByUser_ = false;
   QString pendingCloudUuid_;
   bool pendingCloudDisabledByUser_ = false;
-  // The plugins' pages, one tab each.
+  // The loaded plugins' pages, under Plugins.
   QList<IPluginSettingsPage *> pluginPages_;
+  PluginsPage *pluginsPage_ = nullptr;
   QComboBox *displayThemeModeCombo_ = nullptr;
   QPlainTextEdit *statusExpressionEdit_ = nullptr;
   QPlainTextEdit *windowTitleExpressionEdit_ = nullptr;

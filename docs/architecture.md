@@ -42,7 +42,7 @@ The backend must not depend on how (or whether) it is displayed.
   `PlaylistTableView`, `PlaylistTabs`, `LibrarySearchResultsModel`, dialogs,
   presenters (`SongInfoPresenter`, `SpectrumPresenter`, ...),
   `SongInfoPanel`, `SpectrumWidget`, `buildSongInfo`, `PluginManager`,
-  `PluginPlayerHost`, `MainWindow`.
+  `PluginPlayerHost`, `PluginsPage`, `MainWindow`.
 * The spectrum module (`src/spectrum/`, library `myspectrum`) depends on Qt
   only, never on app classes. Its analysis classes (`fft`, `SpectrumBands`,
   `SpectrumAnalyzer`, `SpectrumSmoother`, `PcmTap`) use no Qt.
@@ -134,12 +134,13 @@ The top-level window and what it owns.
     `PlaylistTabs::newAutoPlaylist`.
   * A permanent status bar label shows `MonitoredLibrary` scan progress, then
     the number of offline watched folders, if any.
-  * Creates `PluginManager`, which loads the plugins, as a child after
-    `PlaybackController`, so the plugins' panels (in the UI) are destroyed
-    before it shuts the plugins down. It passes the plugins to the info panel
-    and to `SettingsDialog`. See [plugins.md](plugins.md).
-  * The info panel at the top left (`infoTabs`) has a tab per plugin panel
-    (Lyrics), then a Properties and a Spectrum tab; the current one is
+  * Creates `PluginManager`, which lists the plugins and loads those not
+    disabled, as a child after `PlaybackController`, so the plugins' panels
+    (in the UI) are destroyed before it shuts the plugins down. It passes the
+    loaded plugins' panels to the info panel, and the manager's entries to
+    `SettingsDialog`. See [plugins.md](plugins.md).
+  * The info panel at the top left (`infoTabs`) has a tab per loaded plugin
+    panel (Lyrics), then a Properties and a Spectrum tab; the current one is
     restored from `infopanel/current_tab` (the plugin's id, `properties` or
     `spectrum`). `MainWindow` connects
     `PlaylistTabs::selectedSongChanged` to `SongInfoPresenter::showSong`, and
@@ -233,7 +234,7 @@ The in-memory song store and reading/writing audio file tags.
   * Recursive efsw watches. Events arrive on efsw's thread and are forwarded
     to the main thread as queued `pathsChanged` / `folderNeedsRescan`
     signals. `DummyFileSystemMonitor` replaces it in tests.
-* `LibraryFoldersPage` (frontend, the Settings > Library tab)
+* `LibraryFoldersPage` (frontend, the Settings > Library page)
   * Lists the watched folders (marked "Offline" or "Live updates
     unavailable") and calls `MonitoredLibrary`
     for Add, Remove, Rescan Now and Remove Missing Songs (enabled for a folder
@@ -353,8 +354,9 @@ Each has its own doc; the classes are listed here with where they sit.
   signals.
 * Toolbar icons, the Windows font and table selection, and the theme:
   [ui-styling.md](ui-styling.md).
-* The Settings dialog (`SettingsDialog`), its pages and the docs that
-  describe each: [settings-dialog.md](settings-dialog.md).
+* The Settings dialog (`SettingsDialog`), its navigation tree, its pages and
+  the docs that describe each: [settings-dialog.md](settings-dialog.md). The
+  Plugins page (`PluginsPage`) is in [plugins.md](plugins.md).
 
 ## Core Feature Implementation Notes
 

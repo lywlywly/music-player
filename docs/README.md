@@ -15,7 +15,7 @@ subsystem, are in [../guides/](../guides).
 | [monitored-library.md](monitored-library.md) | Watched folders, scans, the file system watcher, autoplaylists, Playlist Search | The library or its watcher |
 | [info-panel.md](info-panel.md) | The info panel's tabs, the Properties tab, the cover art | The info panel |
 | [spectrum.md](spectrum.md) | The Spectrum tab, the `src/spectrum/` module, the players' audio taps | The spectrum or the players' audio path |
-| [plugins.md](plugins.md) | Plugins (DLLs with capabilities), the plugin API and its boundary, the Lyrics plugin | The plugin API, a plugin or lyrics |
-| [settings-dialog.md](settings-dialog.md) | Plan: the Settings dialog's navigation tree, its pages and the docs that describe them | The Settings dialog's layout or a new page |
+| [plugins.md](plugins.md) | Plugins (DLLs with capabilities), the plugin API and its boundary, plugin metadata, disabling and the Plugins page, the Lyrics plugin | The plugin API, a plugin, the Plugins page or lyrics |
+| [settings-dialog.md](settings-dialog.md) | The Settings dialog's navigation tree, its pages and the docs that describe them | The Settings dialog's layout or a new page |
 | [ui-styling.md](ui-styling.md) | Toolbar icons, the Windows font and CJK fallback, the Windows table selection fix, the theme | Icons, fonts, styles or the theme |
 | [cloud-sync.md](cloud-sync.md) | Play-count sync: DynamoDB model, Lambda API (`infra/aws/lambda`) | Play stats or sync |

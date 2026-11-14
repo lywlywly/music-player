@@ -20,14 +20,40 @@
 #include <QTimer>
 #include <QUuid>
 
+#include <QStackedWidget>
+#include <QTreeWidget>
+
 #include "../columnregistry.h"
 #include "../databasemanager.h"
 #include "../dummyfilesystemmonitor.h"
 #include "../libraryfolderspage.h"
 #include "../monitoredlibrary.h"
 #include "../playbackbackendmanager.h"
+#include "../pluginapi/isettingspageprovider.h"
+#include "../pluginmanager.h"
 #include "../settingsdialog.h"
 #include "../songlibrary.h"
+
+namespace {
+class EmptySettingsPage : public QWidget, public IPluginSettingsPage {
+public:
+  using QWidget::QWidget;
+  QWidget *widget() override { return this; }
+  void apply() override {}
+};
+
+// A plugin root object with a settings page, without a library.
+class PageProvider : public QObject, public ISettingsPageProvider {
+  Q_OBJECT
+  Q_INTERFACES(ISettingsPageProvider)
+
+public:
+  QString settingsPageTitle() const override { return "Plugin Page"; }
+  IPluginSettingsPage *createSettingsPage(QWidget *parent) override {
+    return new EmptySettingsPage(parent);
+  }
+};
+} // namespace
 
 class TestSettingsDialogUi : public QObject {
   Q_OBJECT
@@ -45,6 +71,8 @@ private slots:
   void displayThemeMode_restoresPersistsAndEmitsSignal();
   void playbackSettings_restorePersistAndEmitSignals();
   void replayGain_opensOnTrackWhenNotStored();
+  void pageTree_listsPagesAndShowsTheSelectedOne();
+  void pluginsPage_stateFollowsBoxAndOkSavesDisabledIds();
   void libraryPage_addsRescansAndRemovesFolders();
   void libraryPage_marksOfflineFoldersAndRemovesMissingSongs();
   void libraryPage_marksFoldersWithoutLiveUpdates();
@@ -408,6 +436,103 @@ void TestSettingsDialogUi::replayGain_opensOnTrackWhenNotStored() {
       dialog.findChild<QComboBox *>("replaygain_combo_box");
   QVERIFY(replayGainCombo != nullptr);
   QCOMPARE(replayGainCombo->currentText(), QString("Track"));
+}
+
+void TestSettingsDialogUi::pageTree_listsPagesAndShowsTheSelectedOne() {
+  PageProvider provider;
+  const QList<PluginEntry> plugins{
+      {.fileName = "page.dll",
+       .id = "page",
+       .name = "Page",
+       .state = PluginEntry::State::Loaded,
+       .root = &provider},
+      // Loaded without a settings page.
+      {.fileName = "plain.dll",
+       .id = "plain",
+       .name = "Plain",
+       .state = PluginEntry::State::Loaded,
+       .root = new QObject(&provider)},
+  };
+  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_, plugins);
+  auto *tree = dialog.findChild<QTreeWidget *>("settings_page_tree");
+  auto *pages = dialog.findChild<QStackedWidget *>("settings_pages");
+  QVERIFY(tree != nullptr);
+  QVERIFY(pages != nullptr);
+  QStringList titles;
+  for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+    titles << tree->topLevelItem(i)->text(0);
+  }
+  QCOMPARE(titles, (QStringList{"Playback", "Library", "Fields", "Display",
+                                "Cloud Sync", "Plugins"}));
+  // The plugin page under Plugins, which is expanded.
+  QTreeWidgetItem *pluginsItem = tree->topLevelItem(5);
+  QVERIFY(pluginsItem->isExpanded());
+  QCOMPARE(pluginsItem->childCount(), 1);
+  QCOMPARE(pluginsItem->child(0)->text(0), QString("Plugin Page"));
+
+  // Opens on Playback; selecting an item shows its page.
+  QCOMPARE(tree->currentItem(), tree->topLevelItem(0));
+  QCOMPARE(pages->currentWidget()->objectName(), QString("playback_tab"));
+  tree->setCurrentItem(tree->topLevelItem(1));
+  QVERIFY(qobject_cast<LibraryFoldersPage *>(pages->currentWidget()));
+  tree->setCurrentItem(pluginsItem);
+  QVERIFY(pages->currentWidget()->findChild<QTreeWidget *>("plugins_list"));
+  tree->setCurrentItem(pluginsItem->child(0));
+  QVERIFY(dynamic_cast<EmptySettingsPage *>(pages->currentWidget()));
+}
+
+void TestSettingsDialogUi::pluginsPage_stateFollowsBoxAndOkSavesDisabledIds() {
+  // "gone" has no file now, and "skipped" is skipped for now: both stay
+  // disabled.
+  saveDisabledPluginIds({"disabled", "skipped", "gone"});
+  const QList<PluginEntry> plugins{
+      {.fileName = "loaded.dll",
+       .id = "loaded",
+       .name = "Loaded Plugin",
+       .state = PluginEntry::State::Loaded},
+      {.fileName = "disabled.dll",
+       .id = "disabled",
+       .name = "Disabled Plugin",
+       .state = PluginEntry::State::Disabled},
+      {.fileName = "skipped.dll",
+       .id = "skipped",
+       .name = "Skipped Plugin",
+       .state = PluginEntry::State::Skipped,
+       .reason = "failed to load",
+       .details = "Cannot load library skipped.dll"},
+      {.fileName = "other.dll",
+       .state = PluginEntry::State::Skipped,
+       .reason = "not a plugin for this app"},
+  };
+  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_, plugins);
+  auto *list = dialog.findChild<QTreeWidget *>("plugins_list");
+  QVERIFY(list != nullptr);
+  QCOMPARE(list->topLevelItemCount(), 4);
+  QTreeWidgetItem *loaded = list->topLevelItem(0);
+  QTreeWidgetItem *disabled = list->topLevelItem(1);
+  QTreeWidgetItem *skipped = list->topLevelItem(2);
+  QTreeWidgetItem *other = list->topLevelItem(3);
+  QCOMPARE(loaded->text(0), QString("Loaded Plugin"));
+  QCOMPARE(loaded->text(1), QString("loaded.dll"));
+  QCOMPARE(loaded->checkState(0), Qt::Checked);
+  QCOMPARE(loaded->text(2), QString("Enabled"));
+  QCOMPARE(disabled->checkState(0), Qt::Unchecked);
+  QCOMPARE(disabled->text(2), QString("Disabled"));
+  // A skipped row has no check box; its tooltip has the details.
+  QVERIFY(!skipped->data(0, Qt::CheckStateRole).isValid());
+  QCOMPARE(skipped->text(2), QString("Not loaded: failed to load"));
+  QCOMPARE(skipped->toolTip(2), QString("Cannot load library skipped.dll"));
+  // Without a name, the file name.
+  QCOMPARE(other->text(0), QString("other.dll"));
+
+  // The state follows the box before OK.
+  loaded->setCheckState(0, Qt::Unchecked);
+  QCOMPARE(loaded->text(2), QString("Disabled after restart"));
+  disabled->setCheckState(0, Qt::Checked);
+  QCOMPARE(disabled->text(2), QString("Enabled after restart"));
+
+  dialog.accept();
+  QCOMPARE(loadDisabledPluginIds(), (QStringList{"loaded", "skipped", "gone"}));
 }
 
 void TestSettingsDialogUi::libraryPage_addsRescansAndRemovesFolders() {
