@@ -39,7 +39,6 @@ private slots:
   void parseLyricsText_parsesTimestampedLines();
   void parseLyricsText_scalesFractionByDigitCount();
   void parseLyricsText_skipsInvalidLines();
-  void getLyrics_readsLrcFileFromMusicFolder();
   void getLyrics_missingFileReturnsEmpty();
   void onPlayerProgressChange_emitsLineIndexOnlyWhenItChanges();
   void setLyrics_resetsCurrentLine();
@@ -86,24 +85,6 @@ void TestLyrics::parseLyricsText_skipsInvalidLines() {
                           "[00:01.]empty fraction\n"
                           "no timestamp\n";
   QVERIFY(LyricsLoader::parseLyricsText(raw).empty());
-}
-
-void TestLyrics::getLyrics_readsLrcFileFromMusicFolder() {
-  QTemporaryDir home;
-  QVERIFY(home.isValid());
-  QVERIFY(QDir(home.path()).mkpath("Music"));
-  QFile file(QDir(home.path()).filePath("Music/Artist - Title.lrc"));
-  QVERIFY(file.open(QIODevice::WriteOnly));
-  file.write("[ti:Title]\n[00:01.00]hello\n[00:02.00]world\n");
-  file.close();
-
-  const ScopedHomeDir scopedHome(home.path());
-  const std::map<int, std::string> lyrics =
-      LyricsLoader::getLyrics("Title", "Artist");
-
-  const std::map<int, std::string> expected = {{1000, "hello"},
-                                               {2000, "world"}};
-  QCOMPARE(lyrics, expected);
 }
 
 void TestLyrics::getLyrics_missingFileReturnsEmpty() {

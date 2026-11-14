@@ -17,9 +17,9 @@ class PluginManager : public QObject, public IPluginHost {
 
 public:
   // Loads and initializes every plugin in folder, in file name order, and
-  // ignores files that are not libraries. A library that is not a plugin of
-  // this core API version, or a plugin whose id is already loaded, is skipped
-  // and logged.
+  // ignores files that are not libraries. Skips, and logs, a library that is
+  // not a plugin of this core API version, fails to load or whose root object
+  // does not implement IPlugin, and a plugin whose id is already loaded.
   PluginManager(PlaybackController &playback, const QString &folder,
                 QObject *parent = nullptr);
   // Shuts the plugins down. They stay loaded: their code must stay mapped

@@ -1,10 +1,15 @@
+#include <QApplication>
+#include <QCheckBox>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFontComboBox>
 #include <QLibrary>
 #include <QObject>
+#include <QPushButton>
 #include <QSettings>
+#include <QSpinBox>
 #include <QSqlDatabase>
 #include <QTemporaryDir>
 #include <QTest>
@@ -66,6 +71,7 @@ private slots:
 
   void playerHost_forwardsStartPositionAndStop();
   void manager_loadsLyricsPlugin();
+  void lyricsSettings_loadSaveAndRestyleOpenPanels();
   void manager_skipsNonLibrariesAndDuplicateIds();
 
 private:
@@ -209,9 +215,69 @@ void TestPlugins::manager_loadsLyricsPlugin() {
 
   IPluginSettingsPage *page = pages->createSettingsPage(&parent);
   QCOMPARE(page->widget()->parentWidget(), &parent);
-  QSettings().remove("lyrics");
+}
+
+void TestPlugins::lyricsSettings_loadSaveAndRestyleOpenPanels() {
+  // Not an installed family: the offscreen platform has no fonts. Which font
+  // the page's combo then selects is Qt's substitution, checked by hand.
+  const QString family = "Stored Family";
+  {
+    QSettings settings;
+    settings.setValue("lyrics/use_system_default_font", false);
+    settings.setValue("lyrics/font_family", family);
+    settings.setValue("lyrics/font_size", 20);
+    settings.setValue("lyrics/highlight_color", "#ff0000");
+  }
+
+  PluginManager manager(*controller_,
+                        QCoreApplication::applicationDirPath() + "/plugins");
+  QObject *root = manager.plugins().front();
+  // Destroyed before the manager, as the info panel is.
+  QWidget parent;
+  QWidget *panel = qobject_cast<IPanelProvider *>(root)->createPanel(&parent);
+  auto *text = panel->findChild<QTextEdit *>();
+  QVERIFY(text != nullptr);
+
+  // The stored family comes first, before the application font's families
+  // (its CJK fallback on Windows), installed or not.
+  QCOMPARE(text->font().families().front(), family);
+  for (const QString &fallback : QApplication::font().families()) {
+    QVERIFY(text->font().families().contains(fallback));
+  }
+  QCOMPARE(text->font().pointSize(), 20);
+
+  // The page shows the stored values (the family is substituted, see above).
+  IPluginSettingsPage *page =
+      qobject_cast<ISettingsPageProvider *>(root)->createSettingsPage(&parent);
+  QWidget *widget = page->widget();
+  auto *familyCombo = widget->findChild<QFontComboBox *>();
+  auto *sizeSpin = widget->findChild<QSpinBox *>();
+  auto *systemFontCheck = widget->findChild<QCheckBox *>();
+  auto *colorButton = widget->findChild<QPushButton *>();
+  QVERIFY(familyCombo && sizeSpin && systemFontCheck && colorButton);
+  QCOMPARE(sizeSpin->value(), 20);
+  QVERIFY(!systemFontCheck->isChecked());
+  QVERIFY(familyCombo->isEnabled());
+  QCOMPARE(colorButton->text(), QString("#ff0000"));
+
+  // The system font disables the family, which is still saved, as typed.
+  systemFontCheck->setChecked(true);
+  QVERIFY(!familyCombo->isEnabled());
+  familyCombo->setEditText("Typed Family");
+  sizeSpin->setValue(14);
   page->apply();
-  QVERIFY(QSettings().contains("lyrics/font_size"));
+  QSettings settings;
+  QCOMPARE(settings.value("lyrics/use_system_default_font").toBool(), true);
+  QCOMPARE(settings.value("lyrics/font_family").toString(),
+           QString("Typed Family"));
+  QCOMPARE(settings.value("lyrics/font_size").toInt(), 14);
+  QCOMPARE(settings.value("lyrics/highlight_color").toString(),
+           QString("#ff0000"));
+
+  // Applying restyles the open panel: the system font is the application
+  // font, at the stored size.
+  QCOMPARE(text->font().families(), QApplication::font().families());
+  QCOMPARE(text->font().pointSize(), 14);
 }
 
 void TestPlugins::manager_skipsNonLibrariesAndDuplicateIds() {

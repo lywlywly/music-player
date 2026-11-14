@@ -4,7 +4,8 @@ The design of the app, for contributors. [architecture.md](architecture.md)
 holds the design shared by the whole app and links each topic doc; a topic doc
 holds one feature's design. Progress and known issues are in
 [roadmap.md](../roadmap.md); the user guide and build steps in
-[README.md](../README.md).
+[README.md](../README.md). Explanatory guides, for the whole picture of a
+subsystem, are in [../guides/](../guides).
 
 | Doc | Contents | Read before changing |
 | --- | --- | --- |

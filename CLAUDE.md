@@ -8,6 +8,7 @@ macOS, Windows and Linux.
 | --- | --- | --- |
 | [roadmap.md](roadmap.md) | Progress (✅ / 🟡 / ⬜) and known issues | Before starting a task |
 | [docs/README.md](docs/README.md) | The design docs: architecture.md and one doc per feature, each with when to read it | Before changing design or code; then the docs it points to |
+| [guides/](guides) | Explanatory guides for people new to a subsystem (e.g. `plugin-system.md`) | To understand a subsystem before its design doc |
 | [README.md](README.md) | For users: features, build, query syntax, play stats | When a user-visible feature or the build changes |
 | [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Third-party components and their licenses | Before adding or updating a dependency |
 
@@ -27,6 +28,9 @@ macOS, Windows and Linux.
 - docs/architecture.md holds the design shared by the whole app; a topic doc holds one feature's design,
   linked from architecture.md and listed in docs/README.md. Both describe only the approach in use; each
   important choice says why, what was rejected and why, and its cost.
+- guides/ holds explanatory guides: the whole picture of a subsystem with the background to follow it,
+  for human readers. They explain, they do not decide: each design choice lives in its docs/ doc, which
+  the guide links to. Update a guide when the design it explains changes.
 - roadmap.md records progress and known issues. README.md is for users.
 - Concise but complete. No history, verification narratives or build statistics (those go in commit
   messages). When a decision changes, rewrite its section instead of appending notes.
