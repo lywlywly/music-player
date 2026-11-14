@@ -60,7 +60,11 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
   page); Lyrics is the first plugin
   - ✅ Plugin API (`src/pluginapi/`) and `PluginManager`
   - ✅ Lyrics plugin (`src/plugins/lyrics/`, `lyricsplugin`)
+  - ⬜ Plugin management: id and name in metadata, disabling a plugin, a
+    Plugins page in Settings (plan in `docs/plugins.md`)
   - See `docs/plugins.md`
+- ⬜ Settings dialog navigation tree instead of tabs
+  - See `docs/settings-dialog.md`
 - ⬜ CLI tool and headless mode
 
 ## Architecture
@@ -109,3 +113,13 @@ See `docs/architecture.md` (Design Principles).
 - `.lrc` fallback misses files with non-ASCII artist/title on Windows
   (UTF-8 file name decoded with the ANSI code page); see
   `docs/plugins.md` (Where lyrics come from)
+- Settings > Playback's ReplayGain combo (No Gain / Apply Gain,
+  `settingsdialog.ui`) has never been connected: no code reads it, and it
+  always opens on No Gain. The GStreamer backend always applies track gain
+  (`rgvolume`); the Qt Multimedia backend applies none. Fix: connect it to a
+  setting that switches `rgvolume` (and track or album gain), or remove it
+- Settings OK with an invalid cloud UUID loses changes: `applySettings`
+  runs after the dialog is accepted, so it has closed; Playback, plugin and
+  Display settings are already saved, then it shows a warning and returns
+  before saving Cloud Sync and Fields. Fix: validate before accepting
+  (override `accept`) and keep the dialog open

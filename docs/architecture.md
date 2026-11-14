@@ -191,6 +191,12 @@ and display formats, and how columns are laid out.
   * Process-wide pool of `FieldDefinition`, keyed by `fieldId`.
   * `FieldValue` resolves type/display behavior through this pool.
   * `ColumnRegistry` and `StatusRuntimeSymbolTable` upsert active definitions.
+* The Settings dialog's Fields page lists, adds and removes custom tag
+  fields (display name, tag key, value type, visible by default) and
+  computed fields (the same, with an expression whose type must match the
+  value type). OK writes the changes through `ColumnRegistry` in one
+  database transaction and, when the set of fields changed, emits
+  `customFieldsChanged`.
 
 ### Song domain
 
@@ -325,7 +331,7 @@ The UI for one song: viewing and editing its tags, and revealing its file.
 * `AddFieldDialog`
   * Adds a new raw tag key/value pair (no `attr:` prefix input).
 
-### Playback, system media and info panel
+### Playback, system media, info panel and other UI
 
 Each has its own doc; the classes are listed here with where they sit.
 
@@ -347,6 +353,8 @@ Each has its own doc; the classes are listed here with where they sit.
   signals.
 * Toolbar icons, the Windows font and table selection, and the theme:
   [ui-styling.md](ui-styling.md).
+* The Settings dialog (`SettingsDialog`), its pages and the docs that
+  describe each: [settings-dialog.md](settings-dialog.md).
 
 ## Core Feature Implementation Notes
 
