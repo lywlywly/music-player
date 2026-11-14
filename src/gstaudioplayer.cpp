@@ -3,9 +3,11 @@
 #include "spectrum/pcmtap.h"
 #include <QAudioDevice>
 #include <QtGlobal>
+#include <cmath>
 #include <cstring>
 #include <future>
 #include <mutex>
+#include <optional>
 #include <qdebug.h>
 
 namespace {
@@ -25,6 +27,26 @@ void ensureGstInitialized() {
     return;
   }
   runGstInit();
+}
+
+std::optional<double> tagDouble(const GstTagList *tags, const gchar *tag) {
+  gdouble value = 0.0;
+  if (!gst_tag_list_get_double(tags, tag, &value)) {
+    return std::nullopt;
+  }
+  return value;
+}
+
+// The tags rgvolume reads; GStreamer's demuxers and parsers map each file
+// format's ReplayGain fields to them.
+ReplayGainTagValues replayGainTagValues(const GstTagList *tags) {
+  return {.trackGain = tagDouble(tags, GST_TAG_TRACK_GAIN),
+          .trackGainR128 = tagDouble(tags, GST_TAG_TRACK_GAIN_R128),
+          .trackPeak = tagDouble(tags, GST_TAG_TRACK_PEAK),
+          .albumGain = tagDouble(tags, GST_TAG_ALBUM_GAIN),
+          .albumGainR128 = tagDouble(tags, GST_TAG_ALBUM_GAIN_R128),
+          .albumPeak = tagDouble(tags, GST_TAG_ALBUM_PEAK),
+          .referenceLevel = tagDouble(tags, GST_TAG_REFERENCE_LEVEL)};
 }
 } // namespace
 
@@ -227,6 +249,18 @@ void GstAudioPlayer::setVolume(int volumePercent) {
   }
 }
 
+void GstAudioPlayer::setReplayGainMode(ReplayGainMode mode) {
+  AudioPlayer::setReplayGainMode(mode);
+  std::lock_guard lock(replayGainMutex_);
+  applyReplayGain();
+}
+
+void GstAudioPlayer::applyReplayGain() {
+  const double db = replayGainTags_.gainDb(replayGainMode());
+  // The volume element applies the new factor from its next buffer.
+  g_object_set(replayGainVolume_, "volume", std::pow(10.0, db / 20.0), NULL);
+}
+
 void GstAudioPlayer::emitDurationIfAvailable() {
   if (!playbin_) {
     return;
@@ -297,6 +331,32 @@ GstPadProbeReturn GstAudioPlayer::onPcmProbe(GstPad *pad, GstPadProbeInfo *info,
   return GST_PAD_PROBE_OK;
 }
 
+GstPadProbeReturn GstAudioPlayer::onTagProbe(GstPad *, GstPadProbeInfo *info,
+                                             gpointer user_data) {
+  auto *self = static_cast<GstAudioPlayer *>(user_data);
+  GstEvent *event = GST_PAD_PROBE_INFO_EVENT(info);
+  switch (GST_EVENT_TYPE(event)) {
+  case GST_EVENT_STREAM_START: {
+    // The first event of each song, before its tags and audio.
+    std::lock_guard lock(self->replayGainMutex_);
+    self->replayGainTags_ = {};
+    self->applyReplayGain();
+    break;
+  }
+  case GST_EVENT_TAG: {
+    GstTagList *tags = nullptr;
+    gst_event_parse_tag(event, &tags);
+    std::lock_guard lock(self->replayGainMutex_);
+    self->replayGainTags_.merge(replayGainTagValues(tags));
+    self->applyReplayGain();
+    break;
+  }
+  default:
+    break;
+  }
+  return GST_PAD_PROBE_OK;
+}
+
 void GstAudioPlayer::onBusMessage(GstBus *, GstMessage *msg,
                                   gpointer user_data) {
   auto *self = static_cast<GstAudioPlayer *>(user_data);
@@ -332,25 +392,31 @@ void GstAudioPlayer::onBusMessage(GstBus *, GstMessage *msg,
 
 void GstAudioPlayer::initializePipeline() {
   playbin_ = gst_element_factory_make("playbin", "player");
-  rgvolume_ = gst_element_factory_make("rgvolume", "rgvolume");
+  replayGainVolume_ = gst_element_factory_make("volume", "replaygain");
 
-  if (!playbin_ || !rgvolume_) {
+  if (!playbin_ || !replayGainVolume_) {
     qFatal("GstAudioPlayer: failed to create GStreamer elements");
   }
-  gst_object_ref(rgvolume_);
+  gst_object_ref(replayGainVolume_);
   g_object_set(playbin_, "volume",
                static_cast<gdouble>(this->volumePercent()) / 100.0, NULL);
 
-  g_object_set(rgvolume_, "album-mode", FALSE, "pre-amp", 0.0, "fallback-gain",
-               0.0, "headroom", 0.0, NULL);
-  g_object_set(playbin_, "audio-filter", rgvolume_, NULL);
-  if (GstPad *pad = gst_element_get_static_pad(rgvolume_, "src")) {
-    // Not removed: teardownPipeline stops the streaming first, and the probe
-    // goes with rgvolume.
-    gst_pad_add_probe(pad, GST_PAD_PROBE_TYPE_BUFFER,
-                      &GstAudioPlayer::onPcmProbe, this, nullptr);
-    gst_object_unref(pad);
+  {
+    std::lock_guard lock(replayGainMutex_);
+    replayGainTags_ = {};
+    applyReplayGain();
   }
+  g_object_set(playbin_, "audio-filter", replayGainVolume_, NULL);
+  // The probes are not removed: teardownPipeline stops the streaming first,
+  // and they go with the element.
+  GstPad *sinkPad = gst_element_get_static_pad(replayGainVolume_, "sink");
+  gst_pad_add_probe(sinkPad, GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM,
+                    &GstAudioPlayer::onTagProbe, this, nullptr);
+  gst_object_unref(sinkPad);
+  GstPad *srcPad = gst_element_get_static_pad(replayGainVolume_, "src");
+  gst_pad_add_probe(srcPad, GST_PAD_PROBE_TYPE_BUFFER,
+                    &GstAudioPlayer::onPcmProbe, this, nullptr);
+  gst_object_unref(srcPad);
 
   audioSink_ =
       gst_element_factory_make(platformSinkFactoryName(), "audio_sink");
@@ -402,9 +468,9 @@ void GstAudioPlayer::teardownPipeline() {
     gst_object_unref(audioSink_);
     audioSink_ = nullptr;
   }
-  if (rgvolume_) {
-    gst_object_unref(rgvolume_);
-    rgvolume_ = nullptr;
+  if (replayGainVolume_) {
+    gst_object_unref(replayGainVolume_);
+    replayGainVolume_ = nullptr;
   }
 }
 

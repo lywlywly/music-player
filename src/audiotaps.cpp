@@ -13,10 +13,8 @@ struct CapsFormat {
 };
 
 // Core GStreamer only (not gstreamer-audio): the format names of the caps.
-// These are the formats of rgvolume's inner volume element, which ends the
-// audio-filter: its advertised F32LE/S16LE is only the bin's template (a
-// 24-bit FLAC comes out as S24LE). The platforms the app supports are
-// little-endian.
+// These are the formats of the volume element that is the audio filter. The
+// platforms the app supports are little-endian.
 constexpr CapsFormat kCapsFormats[] = {
     {"F32LE", PcmTap::SampleFormat::Float32, 4},
     {"F64LE", PcmTap::SampleFormat::Float64, 8},

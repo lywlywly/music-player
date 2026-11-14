@@ -43,7 +43,8 @@ private slots:
   void displayExpressions_persistAndEmitSignals();
   void displayExpressionPreview_tracksActiveEditor();
   void displayThemeMode_restoresPersistsAndEmitsSignal();
-  void playbackBackend_restoresPersistsAndEmitsSignal();
+  void playbackSettings_restorePersistAndEmitSignals();
+  void replayGain_opensOnTrackWhenNotStored();
   void libraryPage_addsRescansAndRemovesFolders();
   void libraryPage_marksOfflineFoldersAndRemovesMissingSongs();
   void libraryPage_marksFoldersWithoutLiveUpdates();
@@ -363,15 +364,17 @@ void TestSettingsDialogUi::displayThemeMode_restoresPersistsAndEmitsSignal() {
   QCOMPARE(settings.value("display/theme_mode").toString(), QString("dark"));
 }
 
-void TestSettingsDialogUi::playbackBackend_restoresPersistsAndEmitsSignal() {
+void TestSettingsDialogUi::playbackSettings_restorePersistAndEmitSignals() {
   {
     QSettings settings;
     settings.setValue(
         "playback/backend",
         static_cast<int>(PlaybackBackendManager::Backend::GStreamer));
+    settings.setValue("playback/replaygain", "album");
   }
   SettingsDialog dialog(*registry_, *databaseManager_, *monitored_, {});
   QSignalSpy backendSpy(&dialog, &SettingsDialog::backendChanged);
+  QSignalSpy replayGainSpy(&dialog, &SettingsDialog::replayGainModeChanged);
 
   QComboBox *backendCombo = dialog.findChild<QComboBox *>("backend_combo_box");
   QVERIFY(backendCombo != nullptr);
@@ -379,15 +382,32 @@ void TestSettingsDialogUi::playbackBackend_restoresPersistsAndEmitsSignal() {
            static_cast<int>(PlaybackBackendManager::Backend::GStreamer));
   backendCombo->setCurrentIndex(
       static_cast<int>(PlaybackBackendManager::Backend::QMediaPlayer));
+  QComboBox *replayGainCombo =
+      dialog.findChild<QComboBox *>("replaygain_combo_box");
+  QVERIFY(replayGainCombo != nullptr);
+  QCOMPARE(replayGainCombo->currentText(), QString("Album"));
+  replayGainCombo->setCurrentIndex(replayGainCombo->findText("Off"));
 
   dialog.accept();
 
   QCOMPARE(backendSpy.count(), 1);
   QCOMPARE(backendSpy.at(0).at(0).value<PlaybackBackendManager::Backend>(),
            PlaybackBackendManager::Backend::QMediaPlayer);
+  QCOMPARE(replayGainSpy.count(), 1);
+  QCOMPARE(replayGainSpy.at(0).at(0).value<ReplayGainMode>(),
+           ReplayGainMode::Off);
   QSettings settings;
   QCOMPARE(settings.value("playback/backend").toInt(),
            static_cast<int>(PlaybackBackendManager::Backend::QMediaPlayer));
+  QCOMPARE(settings.value("playback/replaygain").toString(), QString("off"));
+}
+
+void TestSettingsDialogUi::replayGain_opensOnTrackWhenNotStored() {
+  SettingsDialog dialog(*registry_, *databaseManager_, *monitored_, {});
+  QComboBox *replayGainCombo =
+      dialog.findChild<QComboBox *>("replaygain_combo_box");
+  QVERIFY(replayGainCombo != nullptr);
+  QCOMPARE(replayGainCombo->currentText(), QString("Track"));
 }
 
 void TestSettingsDialogUi::libraryPage_addsRescansAndRemovesFolders() {

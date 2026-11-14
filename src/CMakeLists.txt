@@ -194,6 +194,8 @@ set(PROJECT_SOURCES
   pluginplayerhost.cpp
   qtaudioplayer.h
   qtaudioplayer.cpp
+  replaygain.h
+  replaygain.cpp
   settingsdialog.ui
   settingsdialog.h
   settingsdialog.cpp

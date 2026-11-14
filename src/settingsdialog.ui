@@ -79,20 +79,25 @@
          <item>
           <widget class="QLabel" name="label_2">
            <property name="text">
-            <string>ReplayGain:</string>
+            <string>ReplayGain (GStreamer):</string>
            </property>
           </widget>
          </item>
          <item>
-          <widget class="QComboBox" name="comboBox_2">
+          <widget class="QComboBox" name="replaygain_combo_box">
            <item>
             <property name="text">
-             <string>No Gain</string>
+             <string>Off</string>
             </property>
            </item>
            <item>
             <property name="text">
-             <string>Apply Gain</string>
+             <string>Track</string>
+            </property>
+           </item>
+           <item>
+            <property name="text">
+             <string>Album</string>
             </property>
            </item>
           </widget>

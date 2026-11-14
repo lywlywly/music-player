@@ -6,7 +6,7 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
 
 - ✅ Playback backends
   - ✅ `QMediaPlayer` and `GStreamer` backends
-  - ✅ ReplayGain (GStreamer backend)
+  - ✅ ReplayGain (GStreamer backend): Off, Track or Album, in Settings
 - ✅ Playback policy and queue
   - ✅ Sequential and Shuffle (tracks)
   - ⬜ Random by album/artist
@@ -113,11 +113,6 @@ See `docs/architecture.md` (Design Principles).
 - `.lrc` fallback misses files with non-ASCII artist/title on Windows
   (UTF-8 file name decoded with the ANSI code page); see
   `docs/plugins.md` (Where lyrics come from)
-- Settings > Playback's ReplayGain combo (No Gain / Apply Gain,
-  `settingsdialog.ui`) has never been connected: no code reads it, and it
-  always opens on No Gain. The GStreamer backend always applies track gain
-  (`rgvolume`); the Qt Multimedia backend applies none. Fix: connect it to a
-  setting that switches `rgvolume` (and track or album gain), or remove it
 - Settings OK with an invalid cloud UUID loses changes: `applySettings`
   runs after the dialog is accepted, so it has closed; Playback, plugin and
   Display settings are already saved, then it shows a warning and returns

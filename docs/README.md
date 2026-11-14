@@ -10,7 +10,7 @@ subsystem, are in [../guides/](../guides).
 | Doc | Contents | Read before changing |
 | --- | --- | --- |
 | [architecture.md](architecture.md) | Design principles, main classes and responsibilities, startup, ingest, storage, threading | The design or the code structure |
-| [playback.md](playback.md) | Playback queue, policies, skipping, play counting, audio backends, OS media controls, the GStreamer plugin scanner on Windows | Playback, the backends or system media |
+| [playback.md](playback.md) | Playback queue, policies, skipping, play counting, audio backends, ReplayGain, OS media controls, the GStreamer plugin scanner on Windows | Playback, the backends or system media |
 | [expressions.md](expressions.md) | The expression language: song filters, status bar and window title | Search, autoplaylists or display expressions |
 | [monitored-library.md](monitored-library.md) | Watched folders, scans, the file system watcher, autoplaylists, Playlist Search | The library or its watcher |
 | [info-panel.md](info-panel.md) | The info panel's tabs, the Properties tab, the cover art | The info panel |

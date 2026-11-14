@@ -62,7 +62,7 @@ private slots:
   void removingPlayingPlaylist_stops();
   void removingCurrentSongFromLibrary_stopsAndClearsIt();
 
-  void setBackend_stopsAndMovesSignalsVolumeAndTapToNewPlayer();
+  void setBackend_stopsAndMovesSignalsAndSettingsToNewPlayer();
 
 private:
   // Appends a song to playlist_; its WAV file is written only if exists.
@@ -450,7 +450,7 @@ void TestPlaybackController::removingCurrentSongFromLibrary_stopsAndClearsIt() {
 }
 
 void TestPlaybackController::
-    setBackend_stopsAndMovesSignalsVolumeAndTapToNewPlayer() {
+    setBackend_stopsAndMovesSignalsAndSettingsToNewPlayer() {
   addSong("Song");
   playlist_->setLastPlayed(playlist_->getPkByIndex(0));
   controller_->play();
@@ -458,6 +458,8 @@ void TestPlaybackController::
   const auto tap = std::make_shared<PcmTap>();
   controller_->setPcmTap(tap);
   QCOMPARE(player()->pcmTap(), tap);
+  controller_->setReplayGainMode(ReplayGainMode::Album);
+  QCOMPARE(player()->replayGainMode(), ReplayGainMode::Album);
   QSignalSpy stateSpy(controller_, &PlaybackController::playbackStateChanged);
 
   controller_->setBackend(PlaybackBackendManager::Backend::GStreamer);
@@ -472,6 +474,7 @@ void TestPlaybackController::
 
   QCOMPARE(newPlayer->volumeForTest(), 40);
   QCOMPARE(newPlayer->pcmTap(), tap);
+  QCOMPARE(newPlayer->replayGainMode(), ReplayGainMode::Album);
   // Created after the switch: stopping the old player reports position 0.
   QSignalSpy positionSpy(controller_, &PlaybackController::positionChanged);
   newPlayer->setPosition(2500);

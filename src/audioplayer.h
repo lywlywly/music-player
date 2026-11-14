@@ -1,7 +1,9 @@
 #ifndef AUDIOPLAYER_H
 #define AUDIOPLAYER_H
 
+#include "replaygain.h"
 #include <QObject>
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <qmediaplayer.h>
@@ -24,6 +26,10 @@ public:
   virtual void setPcmTap(std::shared_ptr<PcmTap> tap);
   // Any thread: the GStreamer player pushes on its streaming thread.
   std::shared_ptr<PcmTap> pcmTap() const;
+  // Only the GStreamer player applies ReplayGain; the others store the mode.
+  virtual void setReplayGainMode(ReplayGainMode mode);
+  // Any thread: the GStreamer player reads it on its streaming thread.
+  ReplayGainMode replayGainMode() const;
 
 protected:
   int volumePercent() const;
@@ -39,6 +45,7 @@ private:
   int volumePercent_ = 100;
   mutable std::mutex pcmTapMutex_;
   std::shared_ptr<PcmTap> pcmTap_;
+  std::atomic<ReplayGainMode> replayGainMode_{ReplayGainMode::Track};
 };
 
 #endif // AUDIOPLAYER_H

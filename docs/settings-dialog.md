@@ -41,7 +41,7 @@ Status: planned.
 
 | Item | Page | Doc |
 | --- | --- | --- |
-| Playback | The playback backend (`.ui`) | [playback.md](playback.md) |
+| Playback | The playback backend and ReplayGain (`.ui`) | [playback.md](playback.md) |
 | Library | `LibraryFoldersPage` | [monitored-library.md](monitored-library.md) |
 | Fields | Custom tag and computed fields (`.ui`) | [architecture.md](architecture.md), "Column and layout metadata" |
 | Display | Theme, status bar and window title expressions (built in code) | [expressions.md](expressions.md), [ui-styling.md](ui-styling.md) |

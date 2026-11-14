@@ -1,9 +1,9 @@
 # Playback
 
 What plays and in which order, how unplayable songs are skipped, how plays
-are counted, the audio backends and their GStreamer setup on Windows, and the
-OS media controls. The classes are backend unless marked; how they fit the
-rest of the app is in [architecture.md](architecture.md).
+are counted, the audio backends, ReplayGain, the GStreamer setup on Windows,
+and the OS media controls. The classes are backend unless marked; how they
+fit the rest of the app is in [architecture.md](architecture.md).
 
 ## Classes
 
@@ -68,13 +68,87 @@ rest of the app is in [architecture.md](architecture.md).
     integer percentage (`0..100`), mapped to `QAudioOutput::setVolume` or to
     `playbin`'s `volume` property.
   * `setPcmTap(tap)`: decoded audio, before the volume, goes to the tap for
-    the spectrum. `GstAudioPlayer` probes `rgvolume`'s src pad; `QtAudioPlayer`
-    sets a `QAudioBufferOutput`, which only Qt's FFmpeg media backend fills
-    (not the `darwin` one of Homebrew's Qt). The conversion is in
+    the spectrum. `GstAudioPlayer` probes the src pad of its audio filter,
+    after ReplayGain; `QtAudioPlayer` sets a `QAudioBufferOutput`, which
+    only Qt's FFmpeg media backend fills (not the `darwin` one of Homebrew's
+    Qt). The conversion is in
     `audiotaps.{h,cpp}`; see [spectrum.md](spectrum.md).
   * `bitrateChanged(bitsPerSecond)` reports the bitrate while playing.
+  * `setReplayGainMode(mode)`: see "ReplayGain". `PlaybackController` keeps
+    the mode for a new backend, like the volume.
 * Volume slider (`volumeSlider`, frontend): between the playback buttons and
   the seek slider; stored in `playback/volume_percent` (default `100`).
+
+## ReplayGain
+
+* Settings > Playback > ReplayGain, stored in `playback/replaygain`: `off`,
+  `track` (the default) or `album` (`loadReplayGainModeSetting` /
+  `saveReplayGainModeSetting` in `replaygain.{h,cpp}`, for `MainWindow` and
+  `SettingsDialog`). Only `GstAudioPlayer` applies it; Qt Multimedia has no
+  ReplayGain.
+* `playbin`'s audio filter is a `volume` element, set to the gain.
+  GStreamer's demuxers and parsers map each format's ReplayGain fields to
+  standard tags (`GST_TAG_TRACK_GAIN`, ...), which a probe on the element's
+  sink pad reads on the streaming thread:
+  * stream-start, the first event of each song: clears the stored tags;
+  * a tag event: adds its values to them (`ReplayGainTags::merge`);
+  * after either, the gain for the mode is set on the element.
+
+  The events pass unchanged.
+* `setReplayGainMode` recomputes the gain from the stored tags and sets it,
+  so every switch, Off included, applies to the song playing. A mutex guards
+  the stored tags, which the probe writes and the UI thread reads.
+* A switch is heard about 1.2 s later on Windows, in each direction.
+  `playbin` puts its audio filter before its audio queue (`aqueue`, up to
+  1 s of audio, `gstplaysink.c`), and the sink buffers more (`wasapi2sink`:
+  200 ms, its `buffer-time`), so that much audio already has the old gain.
+  Kept: the mode is changed rarely, and each way to shorten the delay costs
+  more than the delay:
+  * the gain in `playbin`'s `volume` (with the slider's), after the queue:
+    `wasapi2sink`'s volume stops at 1.0, which cuts positive gains, and the
+    spectrum would read the audio before ReplayGain;
+  * the gain element in a sink bin before the sink: `playbin` takes a
+    volume element in the sink bin for the slider, which could be ours;
+  * a smaller `aqueue`, set through `element-setup`: depends on `playbin`'s
+    internal element name, and less buffering risks dropouts;
+  * a flushing seek on a switch: an audible gap.
+* `ReplayGainTags` (`replaygain.{h,cpp}`, no GStreamer) holds the rules of
+  GStreamer's `rgvolume` (`gstrgvolume.c`, 1.28.7), with 0 dB pre-amp,
+  fallback gain and headroom:
+  * Track uses the track gain, Album the album gain; each falls back to the
+    other. Without either, 0 dB.
+  * A gain uses its own peak; a missing peak counts as full scale. The gain
+    is cut so the peak reaches full scale at most, so a positive gain
+    without a peak tag gives 0 dB.
+  * The gain is at most +20 dB, the `volume` element's maximum.
+  * R128 gains (Opus) take priority, +5 dB, without the event's peak. A
+    positive reference level (dB SPL) moves the event's gains to 89 dB SPL;
+    one of 0 or below (LUFS) does not.
+  * Gains outside ±60 dB and peaks of 0 or below are ignored; peaks above
+    1.0 are clamped.
+
+  Off gives 0 dB.
+* Where it differs from `rgvolume`, with no audible effect in this app:
+  * `rgvolume` clears its tags when it goes from READY to PAUSED and at the
+    end of the stream; the probe clears them at stream-start. Each song
+    starts with `setSource`, which goes through READY, so both clear before
+    the song's tags.
+  * An ignored value keeps the stored one; `rgvolume` overwrites its stored
+    value with it.
+  * `rgvolume` removes the gain tags from the events it passes on; nothing
+    after the filter reads them.
+* Rejected:
+  * `rgvolume` as the filter. It has no Off, and it keeps the gain tags it
+    has read until its stream resets. Off would have to hide the tags from
+    it, so a switch to Off would wait for the next song, and one from Off
+    until the decoder sends the tags again, which it may never do.
+  * `rgvolume` with a second `volume` element that cancels its gain for Off:
+    a workaround that applies a gain to undo it.
+* Cost: the app keeps `rgvolume`'s rules itself, and a change to them in
+  GStreamer does not reach it.
+* Tests: `tst_replaygain`, each rule; `tst_gstaudioplayer`, a tagged tone
+  read at the spectrum tap in each mode, switched while it plays, and an
+  untagged song after it.
 
 ## Stopping and skipping (`PlaybackController`)
 

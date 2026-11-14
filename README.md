@@ -18,7 +18,8 @@ A cross-platform desktop music player focused on local-library playback, lyrics,
 * Playlist Search over the shown playlist (Edit > Search Playlist, `Ctrl+F` /
   `Cmd+F`), with plain words or an expression
 * Song Properties dialog for viewing and editing tags
-* ReplayGain (GStreamer backend)
+* ReplayGain (GStreamer backend): track or album gain, or off (Settings >
+  Playback)
 * Lyrics display, a plugin (embedded tag lyrics on play, with `.lrc`
   fallback)
 * Properties tab next to Lyrics: the selected song's file name, folder, path,

@@ -32,8 +32,8 @@ GstPadProbeReturn pushProbe(GstPad *pad, GstPadProbeInfo *info,
 }
 } // namespace
 
-// Every format rgvolume can output (that of its inner volume element), and
-// audio the tap cannot take.
+// Every format the volume element (the audio filter) can output, and audio
+// the tap cannot take.
 void TestAudioTaps::gstBuffers_fillTheTapWithStreamTimes_data() {
   QTest::addColumn<QString>("format");
   QTest::addColumn<QString>("layout");

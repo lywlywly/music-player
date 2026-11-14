@@ -53,6 +53,7 @@ set(TEST_NAMES
     spectrumpresenter
     audiotaps
     gstaudioplayer
+    replaygain
 )
 
 SETUP_TESTS(${TEST_NAMES})

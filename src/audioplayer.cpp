@@ -20,6 +20,14 @@ std::shared_ptr<PcmTap> AudioPlayer::pcmTap() const {
   return pcmTap_;
 }
 
+void AudioPlayer::setReplayGainMode(ReplayGainMode mode) {
+  replayGainMode_.store(mode);
+}
+
+ReplayGainMode AudioPlayer::replayGainMode() const {
+  return replayGainMode_.load();
+}
+
 void AudioPlayer::clearPcmTap() {
   if (const std::shared_ptr<PcmTap> tap = pcmTap()) {
     tap->clear();

@@ -9,6 +9,11 @@ bool writeSilentWav(const QString &path);
 // Writes a stereo 24-bit 44.1 kHz PCM WAV of a sine of hz at half scale
 // (-6 dB), seconds long.
 bool writeToneWav(const QString &path, double hz, double seconds);
+// Like writeToneWav, preceded by an ID3v2.3 tag holding REPLAYGAIN_TRACK_GAIN
+// and REPLAYGAIN_ALBUM_GAIN user text frames. GStreamer reads tags from an
+// ID3v2 tag before the RIFF header (id3demux), not from a WAV's "id3 " chunk.
+bool writeToneWavWithReplayGain(const QString &path, double hz, double seconds,
+                                double trackGainDb, double albumGainDb);
 // Like writeSilentWav, with an ID3v2.3 tag in an "id3 " chunk holding one
 // front-cover APIC frame with imageData (e.g. PNG bytes) of mimeType.
 bool writeWavWithCover(const QString &path, const QByteArray &imageData,

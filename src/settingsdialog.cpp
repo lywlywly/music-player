@@ -29,6 +29,10 @@ SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
 
   ui->backend_combo_box->setCurrentIndex(
       static_cast<int>(loadPlaybackBackendSetting()));
+  // The items are in ReplayGainMode's order, as the backend's are in
+  // Backend's.
+  ui->replaygain_combo_box->setCurrentIndex(
+      static_cast<int>(loadReplayGainModeSetting()));
   QSettings settings;
   const QString initialStatusExpression =
       loadDisplayExpressionSetting(DisplayExpressionKind::StatusBar);
@@ -563,6 +567,10 @@ void SettingsDialog::applySettings() {
 
   emit backendChanged(selectedBackend);
   savePlaybackBackendSetting(selectedBackend);
+  const auto replayGainMode =
+      static_cast<ReplayGainMode>(ui->replaygain_combo_box->currentIndex());
+  saveReplayGainModeSetting(replayGainMode);
+  emit replayGainModeChanged(replayGainMode);
 
   QSettings settings;
 

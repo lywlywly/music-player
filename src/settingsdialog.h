@@ -7,6 +7,7 @@
 #include "displayexpression.h"
 #include "libraryexpression.h"
 #include "playbackbackendmanager.h"
+#include "replaygain.h"
 #include "statusruntimesymboltable.h"
 #include <QComboBox>
 #include <QDialog>
@@ -40,6 +41,7 @@ public:
 
 signals:
   void backendChanged(PlaybackBackendManager::Backend backend);
+  void replayGainModeChanged(ReplayGainMode mode);
   void customFieldsChanged();
   void cloudUuidChanged(const QString &uuid);
   void statusBarExpressionChanged(const QString &expression);

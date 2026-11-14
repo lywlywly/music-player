@@ -338,10 +338,10 @@ Each has its own doc; the classes are listed here with where they sit.
 * Playback ([playback.md](playback.md)): `PlaybackQueue`, `PlaybackManager`,
   the playback policies, `PlayCompletionTracker` and `PlaybackController`
   (backend); `PlaybackBackendManager` and the `AudioPlayer` backends
-  (`QtAudioPlayer`, `GstAudioPlayer`). The same doc covers stopping and
-  skipping unplayable songs, play counting, the OS media controls
-  (`ISystemMediaInterface`, `SystemMediaPresenter`) and the GStreamer plugin
-  registry and scanner setup on Windows.
+  (`QtAudioPlayer`, `GstAudioPlayer`), and ReplayGain (`ReplayGainTags`).
+  The same doc covers stopping and skipping unplayable songs, play counting,
+  the OS media controls (`ISystemMediaInterface`, `SystemMediaPresenter`)
+  and the GStreamer plugin registry and scanner setup on Windows.
 * Info panel ([info-panel.md](info-panel.md)): `SongInfoPresenter`,
   `SongInfoPanel` and `buildSongInfo` (the Properties tab) and
   `CoverArtPresenter` (frontend). The Spectrum tab (`SpectrumPresenter`,

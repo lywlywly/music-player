@@ -13,6 +13,7 @@
 #include "playlistdialogs.h"
 #include "playlistsearchdialog.h"
 #include "pluginmanager.h"
+#include "replaygain.h"
 #include "settingsdialog.h"
 #include "songdialogs.h"
 #include "songinfopanel.h"
@@ -361,6 +362,8 @@ void MainWindow::initSettings() {
             [this](PlaybackBackendManager::Backend backend) {
               playback_->setBackend(backend);
             });
+    connect(dialog, &SettingsDialog::replayGainModeChanged, playback_,
+            &PlaybackController::setReplayGainMode);
     connect(dialog, &SettingsDialog::customFieldsChanged, this, [this]() {
       if (!columnRegistry_.loadDynamicColumns(databaseManager_.db())) {
         qFatal("initSettings: failed to reload dynamic columns");
@@ -401,6 +404,7 @@ void MainWindow::initSettings() {
 void MainWindow::setUpPlayback() {
   // Created after setUpPlaylist, so a file-backed library loads on its worker
   // thread meanwhile.
+  playback_->setReplayGainMode(loadReplayGainModeSetting());
   playback_->setBackend(loadPlaybackBackendSetting());
   playback_->setShownPlaylist(
       [this]() { return playlistTabs->currentPlaylist(); });

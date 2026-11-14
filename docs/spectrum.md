@@ -155,11 +155,12 @@ swapped later.
 
 ### `GstAudioPlayer`
 
-* A buffer probe (`onPcmProbe`) on the `src` pad of `rgvolume` (a bin with a
-  ghost pad), installed with the pipeline. That is after ReplayGain and
-  before the volume, which playsink applies later: the bars move at volume
-  0. It is not removed: teardown sets the pipeline to NULL first, and the
-  probe goes with `rgvolume`.
+* A buffer probe (`onPcmProbe`) on the `src` pad of the ReplayGain `volume`
+  element, `playbin`'s audio filter ([playback.md](playback.md),
+  "ReplayGain"), installed with the pipeline. That is after ReplayGain and
+  before the volume slider, which playsink applies later: the bars move at
+  volume 0. It is not removed: teardown sets the pipeline to NULL first, and
+  the probe goes with the element.
 * `setSource`, `setPosition` and `stop` clear the tap.
 
 ### `QtAudioPlayer`
@@ -175,12 +176,10 @@ swapped later.
 
 * `pushGstBuffer(pad, buffer, tap)`: reads `format`, `rate`, `channels` and
   `layout` from the pad's current caps with core `GstStructure` calls (no
-  `gstreamer-audio-1.0`). It takes every format `rgvolume` can output:
-  `F32LE`, `F64LE`, `S8`, `S16LE`, `S24LE`, `S32LE`, interleaved only (the
-  supported platforms are little-endian). `rgvolume` advertises only `F32LE`
-  and `S16LE`, but that is the bin's template; its inner `volume` element
-  passes the others through, so a 24-bit FLAC arrives as `S24LE`. The
-  buffer PTS becomes stream time through the pad's sticky segment
+  `gstreamer-audio-1.0`). It takes every format the `volume` element can
+  output: `F32LE`, `F64LE`, `S8`, `S16LE`, `S24LE`, `S32LE`, interleaved
+  only (the supported platforms are little-endian); a 24-bit FLAC arrives as
+  `S24LE`. The buffer PTS becomes stream time through the pad's sticky segment
   (`gst_segment_to_stream_time`), which is what the position query reports.
 * `pushAudioBuffer(buffer, tap)`: maps `QAudioFormat` to the tap's formats;
   `QAudioBuffer::startTime()` is the stream time. Buffers without one are
@@ -232,7 +231,7 @@ send no buffers.
   widget while playing, from position 0 with no further position report (the
   estimate moves on); pause freezes; stop falls to the floor; the no-audio
   message appears after the delay and goes with audio or stop.
-* `tst_audiotaps`: for each format `rgvolume` can output, an
+* `tst_audiotaps`: for each format the `volume` element can output, an
   `audiotestsrc` pipeline with the probe fills a tap with the right rate and
   stream times (the tone reads in its band at about 0 dB); big-endian and
   non-interleaved audio is skipped; a `QAudioBuffer` does the same, and one

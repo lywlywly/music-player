@@ -196,6 +196,7 @@ void PlaybackController::setBackend(PlaybackBackendManager::Backend backend) {
   connectPlayer();
   player()->setVolume(volumePercent_);
   player()->setPcmTap(pcmTap_);
+  player()->setReplayGainMode(replayGainMode_);
 }
 
 void PlaybackController::setVolume(int volumePercent) {
@@ -209,6 +210,13 @@ void PlaybackController::setPcmTap(std::shared_ptr<PcmTap> tap) {
   pcmTap_ = std::move(tap);
   if (backendManager_ != nullptr) {
     player()->setPcmTap(pcmTap_);
+  }
+}
+
+void PlaybackController::setReplayGainMode(ReplayGainMode mode) {
+  replayGainMode_ = mode;
+  if (backendManager_ != nullptr) {
+    player()->setReplayGainMode(replayGainMode_);
   }
 }
 

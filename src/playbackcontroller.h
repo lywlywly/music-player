@@ -67,13 +67,15 @@ public:
   void seek(qint64 positionMs);
 
   // The first call creates the audio backend. A later call switches it if it
-  // differs: stops playback (as stop()) and moves the volume to the new
-  // player.
+  // differs: stops playback (as stop()) and moves the volume, the tap and the
+  // ReplayGain mode to the new player.
   void setBackend(PlaybackBackendManager::Backend backend);
   // 0..100. Kept for the backend setBackend() creates or switches to.
   void setVolume(int volumePercent);
   // The decoded audio goes to tap (nullptr: nowhere). Kept, like the volume.
   void setPcmTap(std::shared_ptr<PcmTap> tap);
+  // Kept, like the volume.
+  void setReplayGainMode(ReplayGainMode mode);
 
 signals:
   // A song is about to start, before its source is set (the backend may
@@ -132,6 +134,7 @@ private:
   bool ready_ = false;
   int volumePercent_ = 100;
   std::shared_ptr<PcmTap> pcmTap_;
+  ReplayGainMode replayGainMode_ = ReplayGainMode::Track;
   // The song most recently passed to the backend by playSong, or -1.
   int currentSongPk_ = -1;
   int consecutiveFailures_ = 0;
