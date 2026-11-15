@@ -48,6 +48,14 @@ ReplayGainTagValues replayGainTagValues(const GstTagList *tags) {
           .albumPeak = tagDouble(tags, GST_TAG_ALBUM_PEAK),
           .referenceLevel = tagDouble(tags, GST_TAG_REFERENCE_LEVEL)};
 }
+
+// Accurate, not KEY_UNIT: a KEY_UNIT seek in a FLAC file without a seek
+// table searches the file in the calling thread (the UI thread) and can land
+// on a false sync code, which skips the song or crashes. An accurate seek
+// starts from a known frame boundary and parses forward to the target on
+// the streaming thread (docs/playback.md, "Seeking").
+constexpr auto kSeekFlags =
+    static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE);
 } // namespace
 
 #if defined(Q_OS_MACOS)
@@ -235,10 +243,7 @@ void GstAudioPlayer::setPosition(qint64 milliseconds) {
   clearPcmTap();
   gint64 position_ns = static_cast<gint64>(milliseconds) * GST_MSECOND;
 
-  gst_element_seek_simple(
-      playbin_, GST_FORMAT_TIME,
-      static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT),
-      position_ns);
+  gst_element_seek_simple(playbin_, GST_FORMAT_TIME, kSeekFlags, position_ns);
 }
 
 void GstAudioPlayer::setVolume(int volumePercent) {
@@ -591,9 +596,7 @@ void GstAudioPlayer::handleAudioOutputsChanged() {
     gst_element_get_state(playbin_, nullptr, nullptr, GST_CLOCK_TIME_NONE);
 
     if (GST_CLOCK_TIME_IS_VALID(positionNs)) {
-      gst_element_seek_simple(playbin_, GST_FORMAT_TIME,
-                              static_cast<GstSeekFlags>(GST_SEEK_FLAG_FLUSH |
-                                                        GST_SEEK_FLAG_KEY_UNIT),
+      gst_element_seek_simple(playbin_, GST_FORMAT_TIME, kSeekFlags,
                               positionNs);
       trackedPositionMs_ = positionNs / GST_MSECOND;
     }

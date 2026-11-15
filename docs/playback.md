@@ -189,6 +189,36 @@ fit the rest of the app is in [architecture.md](architecture.md).
   `Cannot play file: <path>` in the status bar. The count resets when the
   position advances, or on stop.
 
+## Seeking (`GstAudioPlayer`)
+
+* `setPosition` runs a flushing, accurate seek
+  (`GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE`) with
+  `gst_element_seek_simple`, on the main thread; so does the seek back to
+  the old position after an output device change (`handleAudioOutputsChanged`).
+* An accurate seek starts from a known frame boundary (an index entry from
+  frames already parsed, the file's seek table, or byte 0) and parses
+  forward to the target on the streaming thread. The call returns at once,
+  and playback resumes at the exact sample.
+* Rejected: `GST_SEEK_FLAG_KEY_UNIT` (seek to the nearest frame start). In
+  a FLAC file without a seek table (GStreamer 1.28.7), it can freeze the
+  app for seconds, skip the song or crash it, depending on the target:
+  * Freeze: with no seek table or index entry for the target,
+    `gst_base_parse_handle_seek` searches the file for the target frame
+    (`gst_base_parse_locate_time`) in the thread that called seek, the UI
+    thread here, holding the parser's stream lock.
+  * Skip: if, after the jump, the parser finds no frame within 2 MiB
+    (`gst_base_parse_check_sync`), it posts `Failed to parse stream`, which
+    the app takes for an unplayable file ("Stopping and skipping").
+  * Crash: when the jump lands on a false sync code (`0xFFF8` inside the
+    audio data), `gst_flac_parse_frame_is_valid` finds the header invalid
+    and returns 0, which `gst_flac_parse_handle_frame` takes for a whole
+    frame of size 0 (`if (next == 0) ret = TRUE`). A Release GStreamer has
+    its checks compiled out and pushes the empty frame on, and the parser
+    thread reads the missing buffer.
+* Cost: without a seek table, the parser reads from the boundary to the
+  target before playback resumes, a fraction of a second on a high-bitrate
+  file (96 kHz, 24-bit, 3.2 Mbit/s).
+
 ## Order (`PlaybackPolicySequential`, `PlaybackPolicyShuffle`)
 
 * `PlaybackPolicyShuffle` sizes its history to half the playlist and follows

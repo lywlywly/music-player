@@ -467,10 +467,9 @@ About 0.1 s with GStreamer, with a gap at each jump:
 * **Reaching B**: the loop seeks on the first position at or past B, so it
   plays up to 100 ms past B. The position is the audio output's, and a
   flushing seek drops the buffered audio, so the overshoot is what is heard.
-* **Landing at A**: `GstAudioPlayer::setPosition` seeks with
-  `GST_SEEK_FLAG_KEY_UNIT`, to the nearest point the format can resume
-  from: typically one frame (MP3, AAC, FLAC: about 20 to 100 ms), further
-  for a VBR MP3 without a seek index, whose position is estimated.
+* **Landing at A**: `GstAudioPlayer::setPosition` seeks accurately
+  ([playback.md](playback.md), "Seeking"), to the exact position, except
+  in a VBR MP3 without a seek index, whose position is estimated.
 * **The jump**: the flushing seek restarts the output, a short gap or click.
 * With Qt Multimedia, Qt's media backend sets how often the position
   arrives, and seeks on macOS are inaccurate (roadmap.md Known Issues).
@@ -483,9 +482,6 @@ About 0.1 s with GStreamer, with a gap at each jump:
 
 Options to tighten it, not planned:
 
-* **Accurate seeks**: `GST_SEEK_FLAG_ACCURATE` in `setPosition` lands at
-  the exact position, at the cost of decoding from the previous frame,
-  little for audio. It applies to every seek, the slider's too.
 * **A timer for B in the plugin**: a position within one update of B starts
   a single-shot `Qt::PreciseTimer` for the rest, which seeks when it fires.
   The overshoot drops to the timer's and the position's error, a few
