@@ -140,8 +140,10 @@ private:
   int consecutiveFailures_ = 0;
   // Runs next() after a failure from the event loop rather than recursively:
   // the next() that hit the failure finishes first, so its movedToRow does
-  // not override the skip's, and a long run of unplayable songs cannot
-  // overflow the stack. stop() cancels a pending skip.
+  // not override the skip's, a long run of unplayable songs cannot overflow
+  // the stack, and the window repaints between attempts, so Stop can end the
+  // run: stop() cancels a pending skip (docs/playback.md, "Stopping and
+  // skipping").
   QTimer skipFailedSongTimer_;
 };
 

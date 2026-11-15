@@ -7,6 +7,10 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
 - ✅ Playback backends
   - ✅ `QMediaPlayer` and `GStreamer` backends
   - ✅ ReplayGain (GStreamer backend): Off, Track or Album, in Settings
+  - ⬜ Event ordering: a synchronous core with queued edges; see
+    `docs/event-ordering.md` (Plan: A synchronous core with queued edges)
+    - ⬜ The playback generation, with the slider drag fix
+    - ⬜ GStreamer's bus messages in one queued hop (a sync handler)
 - ✅ Playback policy and queue
   - ✅ Sequential and Shuffle (tracks)
   - ⬜ Random by album/artist
@@ -62,6 +66,9 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
   - ✅ Lyrics plugin (`src/plugins/lyrics/`, `lyricsplugin`)
   - ✅ Plugin management: id and name in metadata, disabling a plugin, a
     Plugins page in Settings
+  - ⬜ Playback commands for plugins, deferred and checked against the
+    playback generation; see `docs/event-ordering.md` (Plan: A synchronous
+    core with queued edges)
   - See `docs/plugins.md`
 - ✅ Settings dialog navigation tree instead of tabs
   - See `docs/settings-dialog.md`
@@ -113,6 +120,27 @@ See `docs/architecture.md` (Design Principles).
 - `.lrc` fallback misses files with non-ASCII artist/title on Windows
   (UTF-8 file name decoded with the ANSI code page); see
   `docs/plugins.md` (Where lyrics come from)
+- A seek released in the last milliseconds of a song can be undone by the
+  end-of-stream GStreamer posted just before it: the next song starts. See
+  `docs/event-ordering.md` (Known races)
+- A seek slider drag held past the end of a song seeks the next song on
+  release. See `docs/event-ordering.md` (Known races)
+- Stopping the GLib loop (macOS, Windows) can hang the main thread:
+  `PlaybackBackendManager::stopGlibLoop` quits only once the GLib thread
+  has set `glibLoop_` and `glibRunning_`, and a `g_main_loop_quit` before
+  `g_main_loop_run` starts is lost (the run marks the loop running again);
+  either way `join()` waits forever. `glibLoop_` is also a plain pointer
+  written on the GLib thread and read on the main thread without
+  synchronization, a data race. A hang needs a stop before the new thread
+  reaches `g_main_loop_run`: no caller stops that soon today (the earliest
+  stop is a Settings change, the app's exit or the end of a
+  `tst_gstaudioplayer` test), but code that switches away from a new
+  GStreamer manager or destroys it at once would hang. Fix: create the
+  loop on the main thread before starting the thread, and quit through a
+  source on its context (`g_idle_add` calling `g_main_loop_quit`), which
+  runs only once the loop runs. The planned sync handler removes the GLib
+  thread, and this bug with it (`docs/playback.md`, Alternative: one hop
+  through a sync handler)
 - Settings OK with an invalid cloud UUID loses changes: `applySettings`
   runs after the dialog is accepted, so it has closed; Playback, plugin and
   Display settings are already saved, then it shows a warning and returns

@@ -1,7 +1,6 @@
 # Plan: Plugins
 
-Status: implemented. For a tour of the whole system, with the background, see
-[guides/plugin-system.md](../guides/plugin-system.md).
+Status: implemented.
 
 ## Summary
 
@@ -112,8 +111,11 @@ work as usual: its `QObject`s live in the DLL only.
 * A new event in an existing area is a new method on its listener, with a
   core API version bump (see "Versions").
 * Delivery is synchronous, on the main thread, in the order the listeners
-  were added. A listener must not add or remove listeners during a call
-  (the rule for backend signal handlers, which must not mutate the sender).
+  were added. A listener must not add or remove listeners during a call:
+  `PluginPlayerHost` delivers by looping over its `std::vector` of
+  listeners, which adding (a reallocation) or removing (a shift) would
+  invalidate mid-loop. Re-entry and the planned playback commands are in
+  [event-ordering.md](event-ordering.md).
 
 ### Capabilities: what a plugin contributes
 

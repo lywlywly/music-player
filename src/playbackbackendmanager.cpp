@@ -51,6 +51,8 @@ void PlaybackBackendManager::setBackend(Backend backend) {
   if (backend == backend_)
     return;
 
+  // The old player is only deleted later (deleteLater), so the GLib thread,
+  // which may be in its onBusMessage, is joined before it goes.
   stopAndDestroyBackend();
 
 #if defined(Q_OS_MACOS) || defined(Q_OS_WIN)
@@ -106,6 +108,9 @@ QString PlaybackBackendManager::getBackendName(Backend backend) {
   return "Never";
 }
 
+// Qt's event loop runs GLib's default main context on Linux only, so on macOS
+// and Windows this thread runs it, delivering GstAudioPlayer's bus messages
+// (docs/playback.md, "GStreamer bus messages").
 void PlaybackBackendManager::startGlibLoop() {
   glibThread_ = std::thread([this] {
     glibLoop_ = g_main_loop_new(nullptr, FALSE);

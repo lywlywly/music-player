@@ -354,6 +354,9 @@ Each has its own doc; the classes are listed here with where they sit.
   signals.
 * Toolbar icons, the Windows font and table selection, and the theme:
   [ui-styling.md](ui-styling.md).
+* Event ordering: re-entry in synchronous signals and listener calls,
+  races between commands and playback events, and the plan for a
+  synchronous core with queued edges: [event-ordering.md](event-ordering.md).
 * The Settings dialog (`SettingsDialog`), its navigation tree, its pages and
   the docs that describe each: [settings-dialog.md](settings-dialog.md). The
   Plugins page (`PluginsPage`) is in [plugins.md](plugins.md).
@@ -493,7 +496,8 @@ What is saved per playlist, and which class writes each table.
 ## Threading / Async Model
 
 * Qt UI/model code runs on the main thread, and so do backend playlist and
-  playback operations; their signals use direct connections.
+  playback operations; their signals use direct connections, except
+  GStreamer's bus messages on macOS and Windows (below).
 * Cloud sync HTTP functions run synchronously on a coordinator-owned worker
   thread; results that touch `SongLibrary` or UI models are delivered back to
   the main thread.
@@ -504,7 +508,14 @@ What is saved per playlist, and which class writes each table.
   main thread in batches, one transaction each. One scan runs at a time.
 * efsw runs its own watcher thread; `EfswFileSystemMonitor` only queues its
   events to the main thread.
-* GStreamer GLib loop uses a dedicated `std::thread` on macOS/Windows.
+* GStreamer's bus messages reach the main thread in two hops on macOS and
+  Windows: from a streaming thread to a dedicated GLib loop `std::thread`,
+  which runs `GstAudioPlayer::onBusMessage`, then queued to the main thread.
+  On Linux Qt's event loop is GLib's, so they arrive on the main thread
+  directly. See [playback.md](playback.md), "GStreamer bus messages".
+* What the thread of each delivery means for the order receivers run in
+  (queued bus messages on macOS and Windows, direct calls on Linux), and the
+  races that follow: [event-ordering.md](event-ordering.md).
 * Playlist DB writes, including the bulk `playlist_items` delete in
   `Playlist::clear()`, are synchronous, so rows appended right after a clear
   are never removed by a late delete. Batches of row writes (appends,

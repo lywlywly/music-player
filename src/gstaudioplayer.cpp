@@ -361,6 +361,12 @@ void GstAudioPlayer::onBusMessage(GstBus *, GstMessage *msg,
                                   gpointer user_data) {
   auto *self = static_cast<GstAudioPlayer *>(user_data);
 
+  // On Linux this runs on the main thread, and PlaybackController, the only
+  // receiver of mediaStatusChanged, switches or stops the pipeline inside
+  // the emit (on macOS and Windows the GLib loop has its own thread, so the
+  // signal is queued). So each emit is the last statement of its case, and
+  // nothing after it may rely on the pipeline's earlier state
+  // (docs/event-ordering.md, "When a receiver may change the sender").
   switch (GST_MESSAGE_TYPE(msg)) {
   case GST_MESSAGE_EOS:
     emit self->mediaStatusChanged(QMediaPlayer::MediaStatus::EndOfMedia);
@@ -441,6 +447,9 @@ void GstAudioPlayer::initializePipeline() {
   if (!bus) {
     qFatal("GstAudioPlayer: failed to get pipeline bus");
   }
+  // A source on GLib's default main context: onBusMessage runs on the thread
+  // that runs it, the main thread on Linux, PlaybackBackendManager's GLib
+  // thread on macOS and Windows (docs/playback.md, "GStreamer bus messages").
   gst_bus_add_signal_watch(bus);
   g_signal_connect(bus, "message", G_CALLBACK(&GstAudioPlayer::onBusMessage),
                    this);

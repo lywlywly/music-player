@@ -58,7 +58,8 @@ fit the rest of the app is in [architecture.md](architecture.md).
     `loadPlaybackBackendSetting` / `savePlaybackBackendSetting` read and write
     `playback/backend`, for `MainWindow` and `SettingsDialog`.
   * Runs the GLib main loop for GStreamer on its own `std::thread` on macOS
-    and Windows.
+    and Windows, which delivers the bus messages (see "GStreamer bus
+    messages").
   * When GStreamer is the saved backend, `MainWindow` prewarms it: `gst_init`
     on all platforms, and the default output device lookup on macOS. That
     device result is used at startup only; later output refreshes query
@@ -166,9 +167,23 @@ fit the rest of the app is in [architecture.md](architecture.md).
   * The skip behaves like the user pressing Next: queued songs first, then
     `Playback follows cursor`, then the playback order; with `Cursor follows
     playback` on, the selection moves to the song that plays.
-  * It runs from a zero-delay timer, not recursively, so the `next()` that hit
-    the failure finishes (including its `movedToRow`) before the skip starts.
-    `stop()` cancels a pending skip.
+  * It runs from a zero-delay timer, not recursively:
+    * The `next()` that hit the failure finishes (including its
+      `movedToRow`) before the skip starts. Called inside it, the skip's
+      `movedToRow` would come first, and the selection would end on the
+      unplayable song.
+    * Up to the shown playlist's song count of failures come in a row (a
+      playlist on an unplugged drive): recursively, that many nested
+      `next()` calls could overflow the stack; from the timer, the depth is
+      constant.
+    * Each attempt is one event-loop turn, so the window keeps repainting
+      during a long run of failures, and the user can press Stop, which
+      cancels a pending skip.
+    * For `InvalidMedia`, which the player reports from its own
+      `mediaStatusChanged`, only `player()->stop()` runs inside that emit;
+      the next song starts afterwards
+      ([event-ordering.md](event-ordering.md), "Re-entry in the app").
+    * Cost: each skip starts one event-loop turn later, which is inaudible.
 * After as many consecutive failures as the shown playlist has songs,
   playback stops and `playbackFailed(path)` is emitted; `MainWindow` shows
   `Cannot play file: <path>` in the status bar. The count resets when the
@@ -227,6 +242,130 @@ fit the rest of the app is in [architecture.md](architecture.md).
     `MainWindow` connects to `setArtwork` ([info-panel.md](info-panel.md)).
   * It does not know `CoverArtPresenter` or `NowPlayingPresenter`;
     `MainWindow` drives all three.
+
+## GStreamer bus messages (`GstAudioPlayer`, `PlaybackBackendManager`)
+
+GStreamer's elements post bus messages (end-of-stream, errors, `ASYNC_DONE`)
+from the thread they run on: a streaming thread, or the thread changing the
+state. `GstAudioPlayer` reads them through a bus watch
+(`gst_bus_add_signal_watch`), a source on GLib's default main context, so
+`onBusMessage` runs on whichever thread runs that context. On macOS and
+Windows a message takes two hops to reach `PlaybackController`:
+
+1. **Streaming thread to the GLib thread.** The bus queues the message and
+   wakes the default context. `PlaybackBackendManager` runs that context
+   with a `GMainLoop` on its own `std::thread`, started with the GStreamer
+   backend, and the watch calls `onBusMessage` there.
+2. **GLib thread to the main thread.** `onBusMessage` emits
+   `mediaStatusChanged` or `durationChanged`. Their receiver,
+   `PlaybackController`, lives on the main thread, so Qt's `AutoConnection`
+   queues the call with its arguments copied, and the main thread's event
+   loop runs it.
+
+On Linux there is one hop, onto the main thread: Qt's event dispatcher there
+is GLib's (`QEventDispatcherGlib`), which runs the default context, so
+`onBusMessage` runs on the main thread and its signals are direct calls.
+
+A library that needs a GLib loop can be served in three ways: one loop runs
+the other's sources, each loop gets its own thread, or the other loop is
+skipped. Linux uses the first (Qt's event loop is GLib's), macOS and
+Windows the second; the third is the planned alternative below.
+
+* Why the thread on macOS and Windows: Qt's dispatchers there (Cocoa's run
+  loop, the Win32 message queue) do not run GLib contexts, so without a
+  thread running one no bus message would be handled.
+* Rejected:
+  * Running GLib's sources inside Qt's loop on macOS and Windows: driving
+    the default context with `g_main_context_prepare`, `query`, `check`
+    and `dispatch` around the system's wait (the reverse of Linux, where
+    GLib's loop runs Qt's sources). Neither Qt nor GLib provides it for
+    those loops, so the app would own the glue: GLib's handles in
+    `MsgWaitForMultipleObjectsEx` on Windows (at most 64 handles), a
+    `CFFileDescriptor` per fd and a `CFRunLoopTimer` for the deadline on
+    macOS, updated whenever GLib's set of fds changes. The thread does the
+    same job in a few lines.
+  * Polling the bus (`gst_bus_pop`) from a `QTimer` on the main thread. A
+    message waits up to the timer's interval, and the timer wakes the main
+    thread even when nothing was posted.
+* Planned, not built: a sync handler that delivers in one hop, skipping
+  GLib's loop on every platform (below), part of
+  [event-ordering.md](event-ordering.md), "Plan: A synchronous core with
+  queued edges".
+* Costs:
+  * Delivery differs by platform: queued on macOS and Windows, direct and
+    nested inside the bus dispatch on Linux
+    ([event-ordering.md](event-ordering.md), "Delivery").
+  * On macOS and Windows the whole `onBusMessage` switch runs on the GLib
+    thread, not only the emits, so it may only do what is safe off the main
+    thread: GStreamer calls such as `ASYNC_DONE`'s duration query on
+    `playbin_`, which stays valid because `PlaybackBackendManager` joins the
+    GLib thread before the player is deleted.
+  * Linux needs a Qt built with GLib, as the distributions' Qt is: with
+    `QT_NO_GLIB=1` or a Qt without GLib, its dispatcher is
+    `QEventDispatcherUNIX`, nothing runs the default context, and no bus
+    message is handled.
+
+### Alternative: one hop through a sync handler (planned)
+
+A sync handler (`gst_bus_set_sync_handler`) in place of the bus watch.
+GStreamer calls it on the posting thread as the message is posted; it only
+posts the message to the main thread and returns `GST_BUS_DROP`:
+
+```cpp
+GstBusSyncReply GstAudioPlayer::onSyncMessage(GstBus *, GstMessage *msg,
+                                              gpointer data) {
+  auto *self = static_cast<GstAudioPlayer *>(data);
+  // GST_BUS_DROP hands msg's reference to the handler; the lambda owns it
+  // and releases it when destroyed, also when Qt drops the call because
+  // self is gone.
+  std::shared_ptr<GstMessage> held(msg, gst_message_unref);
+  QMetaObject::invokeMethod(
+      self, [self, held] { self->handleBusMessage(held.get()); },
+      Qt::QueuedConnection);
+  return GST_BUS_DROP;
+}
+```
+
+* `handleBusMessage` is today's `onBusMessage` switch. It runs on the main
+  thread, in its own event-loop turn, on every platform, so its emits are
+  direct calls that nest inside nothing.
+* Only `GST_BUS_DROP` fits: `GST_BUS_PASS` would also queue the message on
+  the bus, where nothing reads it, and `GST_BUS_ASYNC` would block the
+  posting thread until someone pops it, which nobody does.
+* The handler also runs on the main thread, inside the player's own
+  `gst_element_set_state` (state-change messages); it posts there too, so
+  that delivery does not nest either.
+* Teardown sets the pipeline to `NULL` first, which stops the streaming
+  threads, then clears the handler, so no streaming thread can call it once
+  the player is gone. The state change itself posts messages on the main
+  thread, inside the player's destructor; the handler queues them to the
+  player, `QObject`'s destructor removes them unrun, and each lambda
+  releases its message.
+
+Gains:
+
+* One delivery model: queued on every platform, and no nesting on Linux.
+* No GLib thread: `PlaybackBackendManager::startGlibLoop` and
+  `stopGlibLoop` go.
+* Works on Linux with a Qt without GLib.
+* The whole switch runs on the main thread, so it can use any of the
+  player's state.
+
+Costs:
+
+* On Linux each message is delivered one event-loop turn later than today,
+  which is inaudible.
+* The handler runs on GStreamer's threads: it must only post, never change
+  the pipeline (stopping it from a streaming thread deadlocks).
+* Every message wakes the main thread, also those the switch ignores (each
+  element's state changes, stream status), which the GLib thread absorbs
+  today on macOS and Windows. A check of `GST_MESSAGE_TYPE` in the handler,
+  safe on any thread, keeps them off it.
+
+Unchanged: a message queued before `setSource` is still delivered after it,
+as today on macOS and Windows, and the stale end-of-stream race
+([event-ordering.md](event-ordering.md), "Known races") still needs its own
+fix.
 
 ## GStreamer plugin registry and scanner
 

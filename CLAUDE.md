@@ -30,7 +30,8 @@ macOS, Windows and Linux.
   important choice says why, what was rejected and why, and its cost.
 - guides/ holds explanatory guides: the whole picture of a subsystem with the background to follow it,
   for human readers. They explain, they do not decide: each design choice lives in its docs/ doc, which
-  the guide links to. Update a guide when the design it explains changes.
+  the guide links to. Code and docs/ never reference a guide; only docs/README.md and this file list
+  them. Update a guide when the design it explains changes.
 - roadmap.md records progress and known issues. README.md is for users.
 - Concise but complete. No history, verification narratives or build statistics (those go in commit
   messages). When a decision changes, rewrite its section instead of appending notes.
