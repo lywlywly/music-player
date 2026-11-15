@@ -148,6 +148,12 @@ See `docs/architecture.md` (Design Principles).
   runs only once the loop runs. The planned sync handler removes the GLib
   thread, and this bug with it (`docs/playback.md`, Alternative: one hop
   through a sync handler)
+- A seek on Windows (GStreamer backend) can skip the song with
+  `Failed to write to device` (`AUDCLNT_E_BUFFER_TOO_LARGE`): when the
+  flushed ring buffer runs out partway through a write, `wasapi2sink` asks
+  WASAPI for more silence than fits. Clicking around the seek slider hits
+  it after many seeks. The fix is GStreamer's (to report). See
+  `docs/playback.md` (Seeking)
 - Settings OK with an invalid cloud UUID loses changes: `applySettings`
   runs after the dialog is accepted, so it has closed; Playback, plugin and
   Display settings are already saved, then it shows a warning and returns

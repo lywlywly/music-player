@@ -218,6 +218,19 @@ fit the rest of the app is in [architecture.md](architecture.md).
 * Cost: without a seek table, the parser reads from the boundary to the
   target before playback resumes, a fraction of a second on a high-bitrate
   file (96 kHz, 24-bit, 3.2 Mbit/s).
+* Known issue (Windows, `wasapi2sink`, GStreamer 1.28.7): a seek can skip
+  the song with `Failed to write to device` (`AUDCLNT_E_BUFFER_TOO_LARGE`).
+  A flushing seek empties the sink's ring buffer. When the device asks for
+  audio, `gst_wasapi2_rbuf_process_write` copies segments into the free
+  space (`can_write` frames), setting `can_write` to each segment's size;
+  if the ring buffer runs out partway, it fills the rest with silence but
+  asks `GetBuffer` for the last segment's `can_write` frames, not the
+  frames left (`can_write_bytes` over the frame size). When the last
+  segment was larger than what is left, WASAPI refuses, the sink posts an
+  error, and the app takes it for an unplayable file ("Stopping and
+  skipping"). Clicking around the seek slider hits it after many seeks.
+  Fix: GStreamer's, the frames left in that `GetBuffer` and
+  `ReleaseBuffer`.
 
 ## Order (`PlaybackPolicySequential`, `PlaybackPolicyShuffle`)
 
