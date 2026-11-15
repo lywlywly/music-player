@@ -1,5 +1,5 @@
-# The lyrics plugin (docs/plugins.md). Depends on Qt and the plugin API only,
-# not on the app.
+# The lyrics plugin (docs/plugins/lyrics.md). Depends on Qt and the plugin
+# API only, not on the app.
 
 # The plugin's code: the Lyrics panel, its presenter, loading lyrics, and the
 # settings page. A library of its own so the tests link it directly.

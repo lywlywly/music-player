@@ -48,8 +48,8 @@ fit the rest of the app is in [architecture.md](architecture.md).
     `SystemMediaPresenter` connects to the state, seek, position and duration
     signals; `NowPlayingPresenter` ([expressions.md](expressions.md)) to
     `songAboutToStart`, `songStarted`, state, position, duration and bitrate;
-    `PluginPlayerHost` ([plugins.md](plugins.md)) to `songStarted`, stop and
-    position.
+    `PluginPlayerHost` ([plugins/plugin-system.md](plugins/plugin-system.md)) to
+    `songStarted`, stop and position.
   * Transport commands are ignored until the backend exists and
     `setReady(true)`, which `MainWindow` calls once the library and playlists
     are loaded.

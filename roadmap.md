@@ -38,6 +38,9 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
 - ✅ Lyrics
   - ✅ Embedded tag lyrics on play, with `.lrc` fallback
   - 🟡 Lyrics panel polish
+    - ⬜ Click a line to seek, hover highlight, scroll hold; see
+      `docs/plugins/lyrics.md` (Plan: Seeking from a line, hover and the scroll
+      hold)
 - ✅ Info panel: Lyrics and Properties tabs (top left)
   - ✅ Lyrics panel moved into a tab
   - ✅ Properties tab for the selected song: file name, folder, path, size,
@@ -73,7 +76,8 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
   - ⬜ Playback commands for plugins checked against the playback
     generation; see `docs/event-ordering.md` (Plan: A synchronous core with
     queued edges)
-  - See `docs/plugins.md`
+  - See `docs/plugins/plugin-system.md`, `docs/plugins/lyrics.md` and
+    `docs/plugins/abrepeat.md`
 - ✅ Settings dialog navigation tree instead of tabs
   - See `docs/settings-dialog.md`
 - ⬜ CLI tool and headless mode
@@ -123,7 +127,7 @@ See `docs/architecture.md` (Design Principles).
     (GStreamer plugin registry and scanner)
 - `.lrc` fallback misses files with non-ASCII artist/title on Windows
   (UTF-8 file name decoded with the ANSI code page); see
-  `docs/plugins.md` (Where lyrics come from)
+  `docs/plugins/lyrics.md` (Where lyrics come from)
 - A seek released in the last milliseconds of a song can be undone by the
   end-of-stream GStreamer posted just before it: the next song starts. See
   `docs/event-ordering.md` (Known races)

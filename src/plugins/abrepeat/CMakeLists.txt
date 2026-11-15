@@ -1,5 +1,5 @@
-# The A-B Repeat plugin (docs/plugins.md). Depends on Qt and the plugin API
-# only, not on the app.
+# The A-B Repeat plugin (docs/plugins/abrepeat.md). Depends on Qt and the
+# plugin API only, not on the app.
 
 # The loop, with no UI. A library of its own so the tests link it directly.
 add_library(myabrepeat STATIC

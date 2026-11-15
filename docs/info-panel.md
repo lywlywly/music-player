@@ -2,7 +2,7 @@
 
 Status: implemented. The Spectrum tab is described in
 [spectrum.md](spectrum.md), and the Lyrics tab's classes in
-[plugins.md](plugins.md).
+[plugins/lyrics.md](plugins/lyrics.md).
 
 ## Summary
 
@@ -80,7 +80,8 @@ splitter (horizontal)
   saved, the first tab), written on `QTabWidget::currentChanged` and restored
   in the `MainWindow` constructor (`setUpInfoTabs`), after the plugin tabs are
   added. A saved plugin tab whose plugin is disabled leaves the first tab
-  current and the key unchanged ([plugins.md](plugins.md), "Where the
+  current and the key unchanged
+  ([plugins/plugin-system.md](plugins/plugin-system.md), "Where the
   capabilities are used").
 
 ### Lyrics while hidden

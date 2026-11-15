@@ -16,9 +16,9 @@ alike:
 
 A Qt signal with a direct connection (the default between objects on one
 thread) is a method call, so both are the same for Qt code and for plugin
-listener calls ([plugins.md](plugins.md), "Events: subscription"). Which
-code runs on which thread is in [architecture.md](architecture.md),
-"Threading / Async Model".
+listener calls ([plugins/plugin-system.md](plugins/plugin-system.md),
+"Events: subscription"). Which code runs on which thread is in
+[architecture.md](architecture.md), "Threading / Async Model".
 
 All races below are rare, except the slider drag across the end of a song,
 which needs only a drag held past the end; each is listed with the exact
@@ -54,7 +54,8 @@ timing it needs.
 ## Rules in use
 
 * **A listener does not add or remove listeners during a call**
-  ([plugins.md](plugins.md), "Events: subscription").
+  ([plugins/plugin-system.md](plugins/plugin-system.md),
+  "Events: subscription").
 * **A skip of an unplayable song is deferred** with a zero-delay timer
   (`skipFailedSongTimer_`), not called recursively: the app's own case of
   deferring a call out of the delivery that triggered it. The reasons are in
@@ -65,7 +66,8 @@ timing it needs.
 * **Plugin commands are deferred**: `PluginPlayerHost` queues each one to
   the main thread's event loop, so a command called inside a listener call
   runs after every listener has the current value ("Plugin commands: the
-  contract"; [plugins.md](plugins.md), "Commands: `IPlayerControl`").
+  contract"; [plugins/plugin-system.md](plugins/plugin-system.md),
+  "Commands: `IPlayerControl`").
 * **The seek slider seeks only on release** (`sliderReleased`), and
   `positionChanged` moves it only while it is not held, so setting its value
   never seeks: no loop between the two.
@@ -173,7 +175,8 @@ All of it is safe:
 ## Plan: A synchronous core with queued edges
 
 Status: partly implemented. Built: plugin commands, `seek` only, not yet
-checked against the generation ([plugins.md](plugins.md), "Commands:
+checked against the generation
+([plugins/plugin-system.md](plugins/plugin-system.md), "Commands:
 `IPlayerControl`"). Planned: the playback generation, with the slider fix
 ("A slider drag across the end of a song seeks the next song") and the
 check on plugin seeks ("A plugin seek lands in the next song"); then
@@ -196,7 +199,8 @@ comes from outside reaches it as one queued call:
   Linux); a sync handler ([playback.md](playback.md), "Alternative: one hop
   through a sync handler") makes it one queued hop everywhere, without the
   GLib thread.
-* **Synchronous events to plugins**, as today ([plugins.md](plugins.md),
+* **Synchronous events to plugins**, as today
+  ([plugins/plugin-system.md](plugins/plugin-system.md),
   "Events: subscription"): a listener sees the current value and may update
   its UI directly. It returns quickly; longer work runs on the plugin's own
   thread, and its result comes back as a command or the plugin's own queued
@@ -284,8 +288,9 @@ states all but rule 6, which comes with the generation:
 7. **Not merged.** Every queued command runs.
 8. **Dropped at shutdown.** Commands still queued when the host is destroyed
    are dropped. Plugins are loaded at startup and unloaded at exit only
-   (disabling takes a restart, [plugins.md](plugins.md)), so no plugin goes
-   away while its commands are queued.
+   (disabling takes a restart,
+   [plugins/plugin-system.md](plugins/plugin-system.md)), so no
+   plugin goes away while its commands are queued.
 
 * **The timing the generation check closes** is in "A plugin seek lands in
   the next song": with the check, the queued seek is dropped, and the next

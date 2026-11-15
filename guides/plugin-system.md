@@ -3,7 +3,7 @@
 A guide to how plugins work in this app, with the background needed to follow
 it. Read it before the code. The detailed design, the reasons behind each
 choice and the rejected alternatives are in
-[docs/plugins.md](../docs/plugins.md).
+[docs/plugins/plugin-system.md](../docs/plugins/plugin-system.md).
 
 ## What a plugin is
 
@@ -148,7 +148,7 @@ Another common design, the COM style, has no root object: a library registers
 many separate service objects, and the host looks them up by interface across
 all plugins. Here the app asks each plugin's single root object instead, which
 is simpler while each plugin adds only a few things
-([docs/plugins.md](../docs/plugins.md), "Rejected").
+([docs/plugins/plugin-system.md](../docs/plugins/plugin-system.md), "Rejected").
 
 ## The plugin API
 
@@ -315,8 +315,11 @@ mismatch only happens with an old DLL left in the plugins folder.
 
 ## Where to read next
 
-* [docs/plugins.md](../docs/plugins.md): the full design, the rules for
-  plugins, the rejected alternatives and the tests.
+* [docs/plugins/plugin-system.md](../docs/plugins/plugin-system.md): the
+  full design, the rules for plugins, the rejected alternatives and the
+  tests. Each plugin's own design is in its doc beside it:
+  [lyrics.md](../docs/plugins/lyrics.md) and
+  [abrepeat.md](../docs/plugins/abrepeat.md).
 * `src/pluginapi/`: the interfaces, each with a short comment.
 * `src/pluginmanager.cpp`: the loading steps above, in about a hundred lines.
 * `src/plugins/lyrics/lyricsplugin.cpp`: a complete root object.

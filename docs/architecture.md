@@ -49,7 +49,7 @@ The backend must not depend on how (or whether) it is displayed.
 * A plugin (`src/plugins/<name>/`) depends on Qt and the plugin API
   (`src/pluginapi/`) only. The app never links it: `PluginManager` loads it
   at startup, and the plugin sees the app only through the API's host
-  interfaces. See [plugins.md](plugins.md).
+  interfaces. See [plugins/plugin-system.md](plugins/plugin-system.md).
 
 | Backend classes may use | Backend classes must not use |
 |---|---|
@@ -139,7 +139,7 @@ The top-level window and what it owns.
     (in the UI) are destroyed before it shuts the plugins down. It passes the
     loaded plugins' panels to the info panel, their menus to the Playback
     menu, and the manager's entries to `SettingsDialog`. See
-    [plugins.md](plugins.md).
+    [plugins/plugin-system.md](plugins/plugin-system.md).
   * The info panel at the top left (`infoTabs`) has a tab per loaded plugin
     panel (Lyrics), then a Properties and a Spectrum tab; the current one is
     restored from `infopanel/current_tab` (the plugin's id, `properties` or
@@ -350,8 +350,10 @@ Each has its own doc; the classes are listed here with where they sit.
   `CoverArtPresenter` (frontend). The Spectrum tab (`SpectrumPresenter`,
   `SpectrumWidget`) is in [spectrum.md](spectrum.md); the Lyrics tab
   (`LyricsPanel`, `LyricsPresenter`, `LyricsLoader`, `LyricsManager`,
-  `LyricsSettingsPage`, in `src/plugins/lyrics/`) in [plugins.md](plugins.md),
-  as is the A-B Repeat plugin (`ABRepeat`, in `src/plugins/abrepeat/`).
+  `LyricsSettingsPage`, in `src/plugins/lyrics/`) in
+  [plugins/lyrics.md](plugins/lyrics.md), and the A-B Repeat plugin
+  (`ABRepeat`, in `src/plugins/abrepeat/`) in
+  [plugins/abrepeat.md](plugins/abrepeat.md).
 * `SystemMediaPresenter`, `CoverArtPresenter` and `NowPlayingPresenter` do not
   know about each other; `MainWindow` drives them from `PlaybackController`'s
   signals.
@@ -362,7 +364,8 @@ Each has its own doc; the classes are listed here with where they sit.
   synchronous core with queued edges: [event-ordering.md](event-ordering.md).
 * The Settings dialog (`SettingsDialog`), its navigation tree, its pages and
   the docs that describe each: [settings-dialog.md](settings-dialog.md). The
-  Plugins page (`PluginsPage`) is in [plugins.md](plugins.md).
+  Plugins page (`PluginsPage`) is in
+  [plugins/plugin-system.md](plugins/plugin-system.md).
 
 ## Core Feature Implementation Notes
 

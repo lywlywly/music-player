@@ -34,7 +34,7 @@ fallback, the Windows table selection fix, and the light and dark theme.
   `Microsoft JhengHei UI`, `Microsoft YaHei UI`, the order of the `Segoe UI`
   entry in `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\FontLink\SystemLink`
   on an en-US install. The lyrics font starts from it, so these families
-  apply there too ([plugins.md](plugins.md)).
+  apply there too ([plugins/lyrics.md](plugins/lyrics.md)).
 * Limitation: Han characters shared with Japanese use Meiryo UI glyph shapes,
   and Simplified-only characters fall through to JhengHei / YaHei, so one line
   of Chinese can mix fonts (native Windows does the same on non-Chinese

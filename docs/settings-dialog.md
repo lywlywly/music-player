@@ -4,8 +4,8 @@ Status: implemented.
 
 `SettingsDialog` (Preferences) shows its pages in a **navigation tree**, so
 a page can have child pages: the Plugins page and, under it, each loaded
-plugin's settings page ([plugins.md](plugins.md)). Each page's contents are
-described in its feature's doc (see "Pages").
+plugin's settings page ([plugins/plugin-system.md](plugins/plugin-system.md)).
+Each page's contents are described in its feature's doc (see "Pages").
 
 ## Layout
 
@@ -43,7 +43,7 @@ described in its feature's doc (see "Pages").
 | Fields | Custom tag and computed fields (`.ui`) | [architecture.md](architecture.md), "Column and layout metadata" |
 | Display | Theme, status bar and window title expressions (built in code) | [expressions.md](expressions.md), [ui-styling.md](ui-styling.md) |
 | Cloud Sync | User UUID (`.ui`) | [cloud-sync.md](cloud-sync.md) |
-| Plugins | `PluginsPage`; a child per loaded plugin with a settings page, in load order, titled with its `settingsPageTitle()`; expanded | [plugins.md](plugins.md) |
+| Plugins | `PluginsPage`; a child per loaded plugin with a settings page, in load order, titled with its `settingsPageTitle()`; expanded | [plugins/plugin-system.md](plugins/plugin-system.md) |
 
 * A new built-in page is a new top-level item, before Plugins.
 

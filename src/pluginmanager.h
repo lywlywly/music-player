@@ -11,7 +11,7 @@
 class PlaybackController;
 
 // A library in the plugins folder, and what the manager did with it
-// (docs/plugins.md, "PluginManager").
+// (docs/plugins/plugin-system.md, "PluginManager").
 struct PluginEntry {
   enum class State { Loaded, Disabled, Skipped };
 
@@ -33,9 +33,9 @@ struct PluginEntry {
 QStringList loadDisabledPluginIds();
 void saveDisabledPluginIds(const QStringList &ids);
 
-// Loads the plugins in a folder and is their host (docs/plugins.md).
-// Frontend class. A plugin's root object is one per process, so one manager
-// exists at a time.
+// Loads the plugins in a folder and is their host
+// (docs/plugins/plugin-system.md). Frontend class. A plugin's root object is
+// one per process, so one manager exists at a time.
 class PluginManager : public QObject, public IPluginHost {
   Q_OBJECT
 

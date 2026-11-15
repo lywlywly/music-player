@@ -1,4 +1,4 @@
-# Plan: Plugins
+# Plan: Plugin system
 
 Status: implemented.
 
@@ -21,8 +21,10 @@ Status: implemented.
 * The user can **disable** a plugin in Settings > Plugins; a disabled plugin
   is not loaded at the next startup. Enabling or disabling takes effect
   after a restart.
-* **The plugins are Lyrics and A-B Repeat.** Properties and Spectrum stay
-  built in.
+* **The plugins are Lyrics ([lyrics.md](lyrics.md)) and A-B Repeat
+  ([abrepeat.md](abrepeat.md)),** each designed in its own doc in this
+  folder; this doc is the plugin system they share. Properties and Spectrum
+  stay built in.
 * Plugins are built in this repository, with the same Qt, compiler and build
   type as the app, and the build puts them next to it. Third-party plugins
   (a published SDK, a stable ABI, a package format with a binary per
@@ -51,6 +53,24 @@ Enforced by the build: `pluginapi` is a CMake `INTERFACE` library (its
 include path only). A plugin target links only Qt and `pluginapi`, so its
 include path has `src/pluginapi/` but not `src/`, and including an app header
 fails to compile.
+
+## Building a plugin: `src/plugins/<name>/`
+
+* Two targets per plugin, added in `src/CMakeLists.txt`
+  (`add_subdirectory`):
+  * `my<name>` (`mylyrics`, `myabrepeat`): a static library with the
+    plugin's code, linking Qt and `pluginapi` only. Built
+    position-independent, as it is linked into a shared library; the tests
+    link it directly.
+  * `<name>plugin` (`lyricsplugin`, `abrepeatplugin`): a `MODULE` library
+    linking it, with the root object and its metadata JSON. The root object
+    is not in the static library: its `Q_PLUGIN_METADATA` would make each
+    test executable linking that library a plugin too.
+* `myplayer_deploy_plugin` (`src/CMakeLists.txt`) puts the module where the
+  app looks (`plugins/` next to `EXEC`, the bundle's `Contents/PlugIns`) and
+  in `Tests/plugins`, next to the test executables. `EXEC` and the tests
+  that load plugins depend on the modules, so building them builds the
+  plugins.
 
 ## Plugin API: `src/pluginapi/`
 
@@ -117,13 +137,13 @@ work as usual: its `QObject`s live in the DLL only.
   were added. A listener must not add or remove listeners during a call:
   `PluginPlayerHost` delivers by looping over its `std::vector` of
   listeners, which adding (a reallocation) or removing (a shift) would
-  invalidate mid-loop. Re-entry is in [event-ordering.md](event-ordering.md).
+  invalidate mid-loop. Re-entry is in [event-ordering.md](../event-ordering.md).
 
 ### Commands: `IPlayerControl`
 
 * `seek` is the only command; `play`, `pause` and others come with a plugin
   that uses them.
-* Its header states the contract of [event-ordering.md](event-ordering.md)
+* Its header states the contract of [event-ordering.md](../event-ordering.md)
   ("Plugin commands: the contract"), except rule 6: deferred, in order,
   allowed inside a listener call, callable from any thread, reported by
   events, not merged, dropped at shutdown. `seek` is not yet bound to a
@@ -306,7 +326,7 @@ The places using a capability go through the `Loaded` entries.
 * **Settings dialog**: `MainWindow` passes the entries to `SettingsDialog`,
   which it creates each time Preferences opens. Each `ISettingsPageProvider`
   gets a page under Plugins in the dialog's tree
-  ([settings-dialog.md](settings-dialog.md)), in load order; OK calls each
+  ([settings-dialog.md](../settings-dialog.md)), in load order; OK calls each
   page's `apply()`.
 * **Playback menu** (`MainWindow::setUpPluginMenus`): each
   `IMenuProvider`'s menu at the end of Playback, in load order, after one
@@ -338,158 +358,6 @@ The places using a capability go through the `Loaded` entries.
   the stored ids that no row with a check box has, so a plugin whose file is
   removed, or that is skipped for now, is still disabled when it comes back.
   Cancel leaves the key unchanged.
-
-## Lyrics plugin: `src/plugins/lyrics/`
-
-* `mylyrics`, a static library depending on Qt and `src/pluginapi/` only:
-  `LyricsPanel` (+ `.ui`), `LyricsManager`, `LyricsLoader`,
-  `LyricsPresenter`, `LyricsSettingsPage`, and `loadLyricsSettings` /
-  `saveLyricsSettings` (the `lyrics/*` keys, for the presenter and the
-  page). Built position-independent, as it is linked into a shared library;
-  the tests link it directly.
-* `lyricsplugin`, a `MODULE` library linking `mylyrics`: the root object
-  `LyricsPlugin`, implementing `IPlugin`, `IPanelProvider` and
-  `ISettingsPageProvider`, and its metadata, `lyricsplugin.json`. The build
-  (`myplayer_deploy_plugin` in `src/CMakeLists.txt`) puts it where the app
-  looks (`plugins/` next to `EXEC`, the bundle's `Contents/PlugIns`) and in
-  `Tests/plugins`, next to the test executables; `EXEC` and the tests that
-  load it depend on it, so building them builds it. The root object is not
-  in `mylyrics`: its `Q_PLUGIN_METADATA` would make each test executable
-  linking `mylyrics` a plugin too.
-* `createPanel` creates a `LyricsPanel` (object name `lyricsPanel`) and its
-  `LyricsPresenter`, a child of the panel. The presenter implements
-  `IPlayerListener`, adds itself in its constructor and removes itself in its
-  destructor, so it listens for the panel's lifetime, while the host exists.
-  The plugin keeps the presenters (`QPointer`s, as the panels are deleted by
-  the tab widget).
-* `LyricsPresenter` owns the `LyricsManager`, shows the playing song's lyrics
-  in its `LyricsPanel` and applies the style settings to it. `LyricsManager`
-  holds the lyrics and moves the current line with the play position.
-* `LyricsPanel` keeps the index of its current line and re-centers on it,
-  without animation, in `showEvent` and `resizeEvent`: the tab keeps getting
-  positions while hidden, but a `QTabWidget` sizes only its current page, so
-  the hidden panel can be resized later ([info-panel.md](info-panel.md)).
-
-### Where lyrics come from (`LyricsLoader`)
-
-* On play, `PlaybackController` refreshes the song's metadata from its file
-  once, so the `TrackInfo` has the file's current tags.
-* `LyricsLoader::resolveLyrics` picks the first non-empty of `fields`
-  (`attr:unsynced_lyrics`, `attr:lyrics`), then of `tagFields`
-  (`unsynced_lyrics`, `lyrics`). If none is set, or it has no timestamped
-  lines, the `.lrc` file is the fallback.
-* The `.lrc` fallback (`LyricsLoader::getLyrics`) opens
-  `<home>/Music/<artist> - <title>.lrc` only, where `<home>` is `USERPROFILE`
-  on Windows and `HOME` elsewhere; it does not look next to the audio file.
-* Known issue (Windows): the `.lrc` file name is built as a UTF-8
-  `std::string` and converted to `std::filesystem::path`, which on Windows
-  decodes narrow strings with the active ANSI code page, not UTF-8. A
-  non-ASCII artist or title (for example CJK) maps to a different file name,
-  so its `.lrc` is not found. macOS and Linux are unaffected, as is Windows
-  with the system-wide UTF-8 code page. Fix: build the path from UTF-8
-  explicitly (`std::u8string` or a wide path), as `SongParser` does for
-  TagLib with `MultiByteToWideChar`.
-
-### Settings (`LyricsSettingsPage`, `lyricssettings.h`)
-
-* Four keys, read and written only by `loadLyricsSettings` /
-  `saveLyricsSettings`: `lyrics/use_system_default_font`,
-  `lyrics/font_family`, `lyrics/font_size` and `lyrics/highlight_color`.
-  Defaults: the system font unless a family is stored, the application
-  font's size, and highlight `#0064ff` (also used for a stored color that is
-  not valid).
-* `font_family` is always stored, even while the system font is used. With
-  the system font on, the font combo is disabled but still shows the stored
-  family.
-* On page load, the combo selects the stored family, or the font Qt
-  substitutes for it when it is not installed. The combo is editable, and OK
-  stores its text as typed: an unknown or empty family leaves the
-  application font's families in effect.
-* `highlight_color` is picked with a color dialog and colors the current
-  line.
-* `apply()` (on the Settings dialog's OK) writes the keys and sends
-  `applied`, on which the plugin re-applies them to the open panels.
-* The lyrics font is the application font at the stored size. With the
-  system font off, the stored family is put first in its family list, so the
-  application font's CJK fallback families ([ui-styling.md](ui-styling.md))
-  still cover characters the chosen font lacks.
-
-## A-B Repeat plugin: `src/plugins/abrepeat/`
-
-Loops a section of the playing song: the user marks A and B in a submenu of
-Playback, and playback jumps back to A each time it reaches B.
-
-| Item | Does |
-| --- | --- |
-| Set A | Marks the current position as A and clears B |
-| Set B | Marks the current position as B; enabled once A is set. Playback then loops |
-| Clear | Removes A and B; enabled once A is set |
-
-* The items show the marked times ("Set A (1:23)"), so the loop's state is
-  visible without a widget of its own.
-* While A and B are set, a position at or past B seeks to A. A seek past B
-  (with the slider) jumps back to A at the next position; a seek before A
-  plays on until B.
-* Set B at or before A does nothing: B is marked while listening past A, so
-  this is rare. Swapping A and B instead would make a loop the user did not
-  mark.
-* A song start (the same song again too) and a stop clear A and B; they are
-  not saved. The items are disabled while no song is loaded: before the
-  first song starts and after a stop.
-* Three items, not one cycling through Set A, Set B and Clear: what that
-  item did next would depend on a state the menu has to spell out, and
-  marking A again in a set loop would take a Clear first.
-
-### Code
-
-* `myabrepeat`, a static library depending on Qt and `src/pluginapi/` only,
-  like `mylyrics`: `ABRepeat`, the loop and its `IPlayerListener`, no UI.
-  It holds A, B, the last position and whether a song is loaded. A position
-  at or past B calls `seek(A)`; `trackStarted` and `stopped` clear A and B.
-* `abrepeatplugin`, a `MODULE` library linking `myabrepeat`, built and
-  deployed like `lyricsplugin`: the root object `ABRepeatPlugin` (`IPlugin`,
-  `IMenuProvider`) and its metadata, `abrepeatplugin.json`
-  (`{ "id": "abrepeat", "name": "A-B Repeat" }`).
-* `initialize` creates the `ABRepeat` with the host's `IPlayerControl` and
-  adds it as a listener; `shutdown` removes and destroys it.
-* `createMenu` builds the submenu (object name `abRepeatMenu`). Its
-  `aboutToShow` sets the items' text and enabled state from the `ABRepeat`,
-  so the menu needs no notification from it.
-* Set A and Set B use the last position the listener received, as the host
-  has no position query; the error this adds is in "Precision".
-
-### Precision
-
-About 0.1 s with GStreamer, with a gap at each jump:
-
-* **Marks**: A and B are the last position received, up to one position
-  update (100 ms) before the click.
-* **Reaching B**: the loop seeks on the first position at or past B, so it
-  plays up to 100 ms past B. The position is the audio output's, and a
-  flushing seek drops the buffered audio, so the overshoot is what is heard.
-* **Landing at A**: `GstAudioPlayer::setPosition` seeks accurately
-  ([playback.md](playback.md), "Seeking"), to the exact position, except
-  in a VBR MP3 without a seek index, whose position is estimated.
-* **The jump**: the flushing seek restarts the output, a short gap or click.
-* With Qt Multimedia, Qt's media backend sets how often the position
-  arrives, and seeks on macOS are inaccurate (roadmap.md Known Issues).
-* **Near the end of a song**: with B in the last position update (100 ms
-  with GStreamer), the end-of-stream can come before a position at or past
-  B, and the next song plays. Or the position reporting B and the
-  end-of-stream are pending in the same event-loop turn, and the queued
-  seek lands in the next song ([event-ordering.md](event-ordering.md),
-  "Known races").
-
-Options to tighten it, not planned:
-
-* **A timer for B in the plugin**: a position within one update of B starts
-  a single-shot `Qt::PreciseTimer` for the rest, which seeks when it fires.
-  The overshoot drops to the timer's and the position's error, a few
-  milliseconds, with no API change.
-* **A gapless loop in the backend**: a segment seek from A to B, seeking
-  again on GStreamer's segment-done message, loops sample-exact without a
-  gap. It is a loop command for the backend, not a plugin `seek`, and Qt
-  Multimedia has no equivalent.
 
 ## Rejected
 
@@ -572,8 +440,6 @@ Options to tighten it, not planned:
 * A command takes effect one event-loop turn later, and a plugin seek can
   land in the next song until the generation check ("Commands").
 * Plugin menu items have no shortcuts.
-* The A-B loop's precision is about 0.1 s, with a gap at each jump (A-B
-  Repeat plugin, "Precision").
 * Plugin tabs always come before the built-in ones until those are plugins
   too.
 * A plugin's name is not translatable: JSON has no `tr()`. A translated app
@@ -583,12 +449,9 @@ Options to tighten it, not planned:
 
 ## Tests
 
-* `tst_lyrics`, `tst_lyricspanel`: link `mylyrics`; `resolveLyrics` cases
-  take `TrackInfo`.
-* `tst_abrepeat`, linking `myabrepeat`, with an `IPlayerControl` made by the
-  test that records seeks: a position at or past B seeks to A, one before B
-  does not; Set B at or before A is ignored; Set A clears B; a song start
-  (the same song again too) and a stop clear the loop.
+Each plugin's own tests are in its doc. These cover the API and the host,
+through the built plugins in `Tests/plugins`.
+
 * `tst_plugins`:
   * `PluginPlayerHost` forwards song start (with its tag fields), position
     (also from the player a backend switch creates) and stop, not pause, to
@@ -601,15 +464,7 @@ Options to tighten it, not planned:
   * A seek queued by a host that is then destroyed never runs.
   * `PluginManager` lists the built lyrics plugin from `Tests/plugins` as
     `Loaded`, with the id `lyrics`, the name `Lyrics` and its file name, and
-    with a panel and a settings page. The panel shows the tag lyrics of the
-    song that starts and clears on stop.
-  * The lyrics settings: an open panel's font puts the stored family before
-    the application font's families; the page shows the stored size, system
-    font choice and color; the system font disables the family combo;
-    `apply()` writes the four `lyrics/*` keys (the family as typed) and
-    restyles the open panel. Which font the combo selects for a stored
-    family is Qt's substitution, checked by hand: the offscreen platform has
-    no fonts.
+    with a panel and a settings page.
   * `PluginManager` does not list a file that is not a library, and of two
     copies of the plugin the second is `Skipped`, with a reason naming the
     first.
@@ -636,15 +491,8 @@ Options to tighten it, not planned:
     `lyrics`, no Lyrics info tab, the first tab current and the key
     unchanged, no page under Plugins, and no A-B Repeat submenu or separator
     in Playback.
-  * `abRepeatMenu_loopsThePlayingSong`: the A-B Repeat submenu is last in
-    Playback, its items disabled with no song; with a song playing, Set A
-    and Set B show their times, and a position past B seeks the player to
-    A. Items are triggered after the menu's `aboutToShow`, as when the user
-    opens it: a disabled action does not trigger.
 * The plugin's `QSettings` uses the tests' QSettings folder: the folder is
   set in QtCore, which the plugin shares.
 * By hand: the Plugins page's layout, the state column following the box,
   and that a plugin disabled on OK is gone after a restart and back after
-  enabling it and restarting. An A-B loop with GStreamer and with Qt
-  Multimedia; the submenu's text and enabled state in the macOS native menu
-  bar; B near a song's end.
+  enabling it and restarting.

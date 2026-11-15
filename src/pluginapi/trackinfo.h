@@ -5,7 +5,7 @@
 #include <QString>
 
 // A song as plugins see it: plain text the host copies from the app's song,
-// so plugins need no app type (docs/plugins.md, "The boundary").
+// so plugins need no app type (docs/plugins/plugin-system.md, "The boundary").
 struct TrackInfo {
   // Column fields by id (e.g. "title", "artist", "attr:lyrics"), as text.
   QHash<QString, QString> fields;

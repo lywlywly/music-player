@@ -11,8 +11,8 @@ class PlaybackController;
 
 // The playback host for plugins: forwards PlaybackController's song start,
 // stop and position to the listeners, with the song as a TrackInfo (plugins
-// see no app types; docs/plugins.md), and queues the plugins' playback
-// commands. Frontend class.
+// see no app types; docs/plugins/plugin-system.md), and queues the plugins'
+// playback commands. Frontend class.
 class PluginPlayerHost : public QObject,
                          public IPlayerHost,
                          public IPlayerControl {

@@ -8,10 +8,10 @@ struct PluginEntry;
 class QTreeWidget;
 class QTreeWidgetItem;
 
-// The Settings > Plugins page (docs/plugins.md, "Plugins page"): a row per
-// library in the plugins folder with its name, file and state. A loaded or
-// disabled plugin has a check box, which enables or disables it from the next
-// startup.
+// The Settings > Plugins page (docs/plugins/plugin-system.md, "Plugins page"):
+// a row per library in the plugins folder with its name, file and state. A
+// loaded or disabled plugin has a check box, which enables or disables it from
+// the next startup.
 class PluginsPage : public QWidget {
   Q_OBJECT
 

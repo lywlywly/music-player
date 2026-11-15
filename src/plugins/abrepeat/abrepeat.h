@@ -9,7 +9,7 @@ class IPlayerControl;
 // The A-B loop: points A and B in the playing song; while both are set, a
 // position at or past B seeks to A. A song start (the same song again too)
 // and a stop clear them. Marks use the last position received, as the host
-// has no position query (docs/plugins.md, "A-B Repeat plugin").
+// has no position query (docs/plugins/abrepeat.md, "Code").
 class ABRepeat : public IPlayerListener {
 public:
   explicit ABRepeat(IPlayerControl &control);
