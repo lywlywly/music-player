@@ -62,6 +62,10 @@ timing it needs.
 * **State is updated before the signal that reports it.** When the playing
   song is removed from the library, `currentSongPk_` is reset before
   `stop()`, so `stop()`'s receivers see no current song.
+* **Plugin commands are deferred**: `PluginPlayerHost` queues each one to
+  the main thread's event loop, so a command called inside a listener call
+  runs after every listener has the current value ("Plugin commands: the
+  contract"; [plugins.md](plugins.md), "Commands: `IPlayerControl`").
 * **The seek slider seeks only on release** (`sliderReleased`), and
   `positionChanged` moves it only while it is not held, so setting its value
   never seeks: no loop between the two.
@@ -149,13 +153,31 @@ All of it is safe:
 * **Fix, not built**: the playback generation ("Plan: A synchronous core
   with queued edges"), noted on `sliderPressed` and checked on release.
 
+### A plugin seek lands in the next song
+
+* **Timing**: a plugin's `seek` is queued and a song change runs before
+  it. With the A-B Repeat plugin, B in the last position update of a song
+  (100 ms with GStreamer):
+
+  | Thread | Event |
+  | --- | --- |
+  | Main | The position timer reports B: the plugin queues `seek(A)` |
+  | Main | The end-of-stream, pending in the same turn: `EndOfMedia` → `next()` |
+  | Main | The queued seek runs on the next song, which starts at A |
+
+* **Cause**: the seek was meant for the session it was called in, and
+  `seek` is not bound to one.
+* **Fix, not built**: the generation check on plugin seeks ("Plugin
+  commands: the contract", rule 6).
+
 ## Plan: A synchronous core with queued edges
 
-Status: planned. First the playback generation, with the slider fix ("A
-slider drag across the end of a song seeks the next song"); then one-hop
-delivery of GStreamer's bus messages; plugin commands with the first plugin
-that controls playback. The plugin API has no commands today, so plugins
-cannot re-enter or race.
+Status: partly implemented. Built: plugin commands, `seek` only, not yet
+checked against the generation ([plugins.md](plugins.md), "Commands:
+`IPlayerControl`"). Planned: the playback generation, with the slider fix
+("A slider drag across the end of a song seeks the next song") and the
+check on plugin seeks ("A plugin seek lands in the next song"); then
+one-hop delivery of GStreamer's bus messages.
 
 Playback state lives on the main thread and changes synchronously; whatever
 comes from outside reaches it as one queued call:
@@ -222,7 +244,7 @@ another thread.
 | Artwork threads → the system media interfaces | Each interface | `invokeMethod` to itself, with a task id |
 | SMTC callbacks (Windows) → `WindowsMediaCenter` | `WindowsMediaCenter` | `invokeMethod` to itself |
 | Cloud sync worker ↔ `CloudPlayStatsSyncCoordinator` | The coordinator | `invokeMethod` both ways |
-| Plugin commands → `PlaybackController` | The host (`IPlayerControl`) | The plugin calls a plain method, from anywhere; the host queues it and checks the generation |
+| Plugin commands → `PlaybackController` | The host (`IPlayerControl`) | The plugin calls a plain method, from anywhere; the host queues it; planned: it checks the generation |
 
 * **App edges are queued by hand** in the class that owns the foreign
   thread. The rule (code on another thread queues before it touches the
@@ -236,9 +258,9 @@ another thread.
 
 ### Plugin commands: the contract
 
-`IPlayerControl` (`play`, `pause`, `seek`), reached through a new
-`IPluginHost` method: a core API change, `myplayer.IPlugin/3`. Its header
-states:
+`IPlayerControl`, reached through `IPluginHost::control()`; `seek` is
+built, `play` and `pause` come with a plugin that uses them. Its header
+states all but rule 6, which comes with the generation:
 
 1. **Deferred.** A command returns at once; the host queues it
    (`QMetaObject::invokeMethod` with `Qt::QueuedConnection`, the host object
@@ -265,11 +287,9 @@ states:
    (disabling takes a restart, [plugins.md](plugins.md)), so no plugin goes
    away while its commands are queued.
 
-* **The timing the generation check closes**: an A-B repeat plugin with B
-  in the last position interval (100 ms) of a song. The position tick that reports B and the
-  end-of-stream can be pending in the same event-loop turn; if the tick runs
-  first, the queued seek runs after `next()` and would jump the next song
-  to A. With the generation check it is dropped, and the next song plays.
+* **The timing the generation check closes** is in "A plugin seek lands in
+  the next song": with the check, the queued seek is dropped, and the next
+  song plays from its start.
 * **Deferral fixes re-entry, not races.** It adds one event-loop turn to a
   race's window; only the check when the command runs closes it.
 
@@ -331,8 +351,8 @@ states:
   hop through a sync handler").
 * Tests that let the event loop run (`QTRY_COMPARE`): a listener seeking
   inside `positionChanged` (the test player emits synchronously, so nesting
-  would show), and a song change, also to the same song, before the queued
-  seek runs.
+  would show; built), and, with the generation, a song change, also to the
+  same song, before the queued seek runs.
 
 ## How other players handle it
 
@@ -397,8 +417,8 @@ From its source (`src/messagepump.c`, `src/main.c`, `src/streamer.c`):
 
 | | This app | foobar2000 (SDK) | DeaDBeeF (source) |
 | --- | --- | --- | --- |
-| Commands from inside a callback | No plugin commands yet; planned: allowed, deferred by the host | Forbidden by the documentation; the component defers | Allowed; every message is queued |
-| Where deferral happens | Planned: the host, for commands | The component (`inMainThread`) | The host, for everything |
+| Commands from inside a callback | Allowed, deferred by the host | Forbidden by the documentation; the component defers | Allowed; every message is queued |
+| Where deferral happens | The host, for plugin commands | The component (`inMainThread`) | The host, for everything |
 | Plugin callbacks' thread | Main (UI) thread | Main (UI) thread | A message thread |
 | A stale end of a song or track undoes a seek | Possible (end-of-stream on the bus) | Most likely not | Not possible (a marker under a lock) |
-| A seek meant for one song or track lands in the next | Possible (slider drag; planned plugin commands guarded by the generation) | Not addressed in the SDK | Possible, unguarded |
+| A seek meant for one song or track lands in the next | Possible (slider drag, plugin seeks; planned: guarded by the generation) | Not addressed in the SDK | Possible, unguarded |

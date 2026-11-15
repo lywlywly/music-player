@@ -48,6 +48,7 @@ set(TEST_NAMES
     efswfilesystemmonitor
     songinfo
     lyricspanel
+    abrepeat
     plugins
     spectrum
     spectrumpresenter
@@ -61,9 +62,11 @@ SETUP_TESTS(${TEST_NAMES})
 # The lyrics code, tested directly (the app loads it as a plugin).
 target_link_libraries(lyrics mylyrics)
 target_link_libraries(lyricspanel mylyrics)
-# These load the lyrics plugin from Tests/plugins.
-add_dependencies(mainwindow lyricsplugin)
-add_dependencies(plugins lyricsplugin)
+# The A-B loop, tested directly too.
+target_link_libraries(abrepeat myabrepeat)
+# These load the plugins from Tests/plugins.
+add_dependencies(mainwindow lyricsplugin abrepeatplugin)
+add_dependencies(plugins lyricsplugin abrepeatplugin)
 
 set_tests_properties(mainwindow PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"

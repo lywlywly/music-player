@@ -1,6 +1,7 @@
 #ifndef PLUGINPLAYERHOST_H
 #define PLUGINPLAYERHOST_H
 
+#include "iplayercontrol.h"
 #include "iplayerhost.h"
 #include <QObject>
 #include <vector>
@@ -10,8 +11,11 @@ class PlaybackController;
 
 // The playback host for plugins: forwards PlaybackController's song start,
 // stop and position to the listeners, with the song as a TrackInfo (plugins
-// see no app types; docs/plugins.md). Frontend class.
-class PluginPlayerHost : public QObject, public IPlayerHost {
+// see no app types; docs/plugins.md), and queues the plugins' playback
+// commands. Frontend class.
+class PluginPlayerHost : public QObject,
+                         public IPlayerHost,
+                         public IPlayerControl {
   Q_OBJECT
 
 public:
@@ -21,7 +25,10 @@ public:
   void addListener(IPlayerListener *listener) override;
   void removeListener(IPlayerListener *listener) override;
 
+  void seek(qint64 positionMs) override;
+
 private:
+  PlaybackController &playback_;
   std::vector<IPlayerListener *> listeners_;
 };
 

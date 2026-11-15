@@ -22,6 +22,8 @@ A cross-platform desktop music player focused on local-library playback, lyrics,
   Playback)
 * Lyrics display, a plugin (embedded tag lyrics on play, with `.lrc`
   fallback)
+* A-B Repeat, a plugin (Playback > A-B Repeat): loops a section of the
+  playing song between two marked points, to about 0.1 s
 * Properties tab next to Lyrics: the selected song's file name, folder, path,
   size, modified/created times, audio properties, tags and play stats
 * Spectrum tab: the playing song's spectrum, 20 bands with peak marks
@@ -50,10 +52,11 @@ cmake --build build -j
 ./build/EXEC.app/Contents/MacOS/EXEC   # macOS
 ```
 
-Lyrics is a plugin, loaded at startup from `plugins/` next to the executable
-(`build/plugins/`), or from `Contents/PlugIns` in the macOS app bundle; the
-build puts it there. Without it the app runs with no Lyrics tab. On Windows
-the plugin must have the app's build type (Debug or Release). Settings >
+Lyrics and A-B Repeat are plugins, loaded at startup from `plugins/` next to
+the executable (`build/plugins/`), or from `Contents/PlugIns` in the macOS
+app bundle; the build puts them there. Without them the app runs with no
+Lyrics tab and no A-B Repeat menu. On Windows a plugin must have the app's
+build type (Debug or Release). Settings >
 Plugins lists the plugins found, with why one was not loaded, and disables or
 enables one from the next start.
 

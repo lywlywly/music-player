@@ -7,8 +7,9 @@ class IPluginHost;
 
 // A plugin's root object implements this, and the capabilities it provides
 // (IPanelProvider, ...). Its IID is the version of the core API: IPlugin,
-// IPluginHost, IPlayerHost, IPlayerListener, TrackInfo and the metadata keys;
-// changing any of them bumps it (docs/plugins.md, "Versions").
+// IPluginHost, IPlayerHost, IPlayerControl, IPlayerListener, TrackInfo and the
+// metadata keys. It stays at 1 while the API is in development
+// (docs/plugins.md, "Versions").
 //
 // The plugin declares its metadata in a JSON file given to
 // Q_PLUGIN_METADATA(IID IPlugin_iid FILE "<name>.json"), which the host reads
@@ -26,7 +27,7 @@ public:
   virtual void shutdown() = 0;
 };
 
-#define IPlugin_iid "myplayer.IPlugin/2"
+#define IPlugin_iid "myplayer.IPlugin/1"
 Q_DECLARE_INTERFACE(IPlugin, IPlugin_iid)
 
 #endif // IPLUGIN_H

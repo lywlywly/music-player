@@ -4,6 +4,7 @@
 #include "databasemanager.h"
 #include "displaytheme.h"
 #include "gstaudioplayer.h"
+#include "imenuprovider.h"
 #include "ipanelprovider.h"
 #include "libraryloader.h"
 #include "librarysearchdialog.h"
@@ -143,6 +144,7 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
   setUpPlaybackButtonIcons(ui);
   setUpMenuBar();
   setUpInfoTabs();
+  setUpPluginMenus();
   initCloudSync();
   setUpPlaylist();
   setUpLibraryScanStatus();
@@ -207,6 +209,25 @@ void MainWindow::setUpMenuBar() {
           &MainWindow::openPlaylistSearchDialog);
   connect(ui->actionManual_cloud_rebase, &QAction::triggered, this,
           &MainWindow::triggerManualCloudRebase);
+}
+
+void MainWindow::setUpPluginMenus() {
+  // At the end of Playback, in load order, after one separator; none without
+  // a provider. Only a Loaded entry has a root object; qobject_cast of the
+  // others' null root is null. The menus are destroyed with the menu bar,
+  // before the plugins are shut down.
+  bool separated = false;
+  for (const PluginEntry &entry : plugins_->plugins()) {
+    auto *provider = qobject_cast<IMenuProvider *>(entry.root);
+    if (provider == nullptr) {
+      continue;
+    }
+    if (!separated) {
+      ui->menuPlayback->addSeparator();
+      separated = true;
+    }
+    ui->menuPlayback->addMenu(provider->createMenu(ui->menuPlayback));
+  }
 }
 
 void MainWindow::setUpInfoTabs() {

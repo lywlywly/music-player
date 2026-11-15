@@ -24,6 +24,7 @@
 #include "../playbackcontroller.h"
 #include "../playlistcollection.h"
 #include "../pluginapi/ipanelprovider.h"
+#include "../pluginapi/iplayercontrol.h"
 #include "../pluginapi/iplayerlistener.h"
 #include "../pluginapi/isettingspageprovider.h"
 #include "../pluginmanager.h"
@@ -59,6 +60,34 @@ public:
 
   QStringList events;
 };
+
+// Seeks once, inside the delivery of a position.
+class SeekingListener : public IPlayerListener {
+public:
+  SeekingListener(IPlayerControl &control, qint64 atMs, qint64 toMs)
+      : control_(control), atMs_(atMs), toMs_(toMs) {}
+  void positionChanged(qint64 positionMs) override {
+    if (positionMs == atMs_) {
+      control_.seek(toMs_);
+    }
+  }
+
+private:
+  IPlayerControl &control_;
+  qint64 atMs_;
+  qint64 toMs_;
+};
+
+// The manager's entry for the plugin with this id; null if none.
+const PluginEntry *entryWithId(const PluginManager &manager,
+                               const QString &id) {
+  for (const PluginEntry &entry : manager.plugins()) {
+    if (entry.id == id) {
+      return &entry;
+    }
+  }
+  return nullptr;
+}
 } // namespace
 
 class TestPlugins : public QObject {
@@ -69,6 +98,8 @@ private slots:
   void cleanup();
 
   void playerHost_forwardsStartPositionAndStop();
+  void playerHost_seekRunsAfterTheDelivery();
+  void playerHost_dropsQueuedSeekWhenDestroyed();
   void manager_loadsLyricsPlugin();
   void lyricsSettings_loadSaveAndRestyleOpenPanels();
   void manager_skipsNonLibrariesAndDuplicateIds();
@@ -190,15 +221,54 @@ void TestPlugins::playerHost_forwardsStartPositionAndStop() {
   QVERIFY(listener.events.isEmpty());
 }
 
+void TestPlugins::playerHost_seekRunsAfterTheDelivery() {
+  addSong();
+  PluginPlayerHost host(*controller_);
+  // The first listener seeks inside the delivery of 10000; the second must
+  // still get 10000 first. The dummy player emits the position inside
+  // setPosition, so a seek run at once would deliver 30000 to the second
+  // listener before 10000.
+  SeekingListener seeking(host, 10000, 30000);
+  RecordingListener listener;
+  host.addListener(&seeking);
+  host.addListener(&listener);
+  controller_->play();
+  listener.events.clear();
+
+  player()->setPosition(10000);
+  QCOMPARE(listener.events, QStringList{"position 10000"});
+  QTRY_COMPARE(listener.events,
+               (QStringList{"position 10000", "position 30000"}));
+  host.removeListener(&listener);
+  host.removeListener(&seeking);
+}
+
+void TestPlugins::playerHost_dropsQueuedSeekWhenDestroyed() {
+  addSong();
+  PluginPlayerHost watching(*controller_);
+  RecordingListener listener;
+  watching.addListener(&listener);
+  controller_->play();
+  {
+    PluginPlayerHost host(*controller_);
+    host.seek(30000);
+  }
+  listener.events.clear();
+  // The destroyed host was the queued seek's context, so it never runs.
+  QTest::qWait(50);
+  QVERIFY(listener.events.isEmpty());
+  watching.removeListener(&listener);
+}
+
 void TestPlugins::manager_loadsLyricsPlugin() {
   addSong();
   PluginManager manager(*controller_,
                         QCoreApplication::applicationDirPath() + "/plugins");
   // Its id and name from the metadata embedded in the library.
-  QCOMPARE(manager.plugins().size(), 1);
-  const PluginEntry &entry = manager.plugins().front();
+  const PluginEntry *found = entryWithId(manager, "lyrics");
+  QVERIFY(found != nullptr);
+  const PluginEntry &entry = *found;
   QCOMPARE(entry.state, PluginEntry::State::Loaded);
-  QCOMPARE(entry.id, QString("lyrics"));
   QCOMPARE(entry.name, QString("Lyrics"));
   QVERIFY(entry.fileName.contains("lyricsplugin"));
   QObject *root = entry.root;
@@ -238,7 +308,9 @@ void TestPlugins::lyricsSettings_loadSaveAndRestyleOpenPanels() {
 
   PluginManager manager(*controller_,
                         QCoreApplication::applicationDirPath() + "/plugins");
-  QObject *root = manager.plugins().front().root;
+  const PluginEntry *entry = entryWithId(manager, "lyrics");
+  QVERIFY(entry != nullptr);
+  QObject *root = entry->root;
   // Destroyed before the manager, as the info panel is.
   QWidget parent;
   QWidget *panel = qobject_cast<IPanelProvider *>(root)->createPanel(&parent);
@@ -309,7 +381,7 @@ void TestPlugins::manager_skipsNonLibrariesAndDuplicateIds() {
   const QDir built(QCoreApplication::applicationDirPath() + "/plugins");
   QString plugin;
   for (const QString &name : built.entryList(QDir::Files)) {
-    if (QLibrary::isLibrary(name)) {
+    if (QLibrary::isLibrary(name) && name.contains("lyricsplugin")) {
       plugin = built.filePath(name);
     }
   }
@@ -335,11 +407,11 @@ void TestPlugins::manager_listsDisabledPluginWithoutLoadingIt() {
   // Its name comes from the metadata, without loading it. That its code is
   // not loaded is not checked: other test functions load it first, and Qt
   // never unloads it.
-  QCOMPARE(manager.plugins().size(), 1);
-  const PluginEntry &entry = manager.plugins().front();
-  QCOMPARE(entry.state, PluginEntry::State::Disabled);
-  QCOMPARE(entry.name, QString("Lyrics"));
-  QCOMPARE(entry.root, nullptr);
+  const PluginEntry *entry = entryWithId(manager, "lyrics");
+  QVERIFY(entry != nullptr);
+  QCOMPARE(entry->state, PluginEntry::State::Disabled);
+  QCOMPARE(entry->name, QString("Lyrics"));
+  QCOMPARE(entry->root, nullptr);
 }
 
 QTEST_MAIN(TestPlugins)

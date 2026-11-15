@@ -77,6 +77,8 @@ private:
   // Adds the plugins' panels to the info panel, restores and saves its
   // current tab, and handles the Properties tab's buttons.
   void setUpInfoTabs();
+  // Adds the plugins' menus to the Playback menu.
+  void setUpPluginMenus();
   void openLibrarySearchDialog();
   // Shows the Playlist Search dialog, creating it if none is open. It
   // follows the playlist shown.

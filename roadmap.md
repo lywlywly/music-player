@@ -9,7 +9,8 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
   - ✅ ReplayGain (GStreamer backend): Off, Track or Album, in Settings
   - ⬜ Event ordering: a synchronous core with queued edges; see
     `docs/event-ordering.md` (Plan: A synchronous core with queued edges)
-    - ⬜ The playback generation, with the slider drag fix
+    - ⬜ The playback generation, with the slider drag fix and the check on
+      plugin seeks
     - ⬜ GStreamer's bus messages in one queued hop (a sync handler)
 - ✅ Playback policy and queue
   - ✅ Sequential and Shuffle (tracks)
@@ -66,9 +67,12 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
   - ✅ Lyrics plugin (`src/plugins/lyrics/`, `lyricsplugin`)
   - ✅ Plugin management: id and name in metadata, disabling a plugin, a
     Plugins page in Settings
-  - ⬜ Playback commands for plugins, deferred and checked against the
-    playback generation; see `docs/event-ordering.md` (Plan: A synchronous
-    core with queued edges)
+  - ✅ A-B Repeat plugin (`src/plugins/abrepeat/`, `abrepeatplugin`): a
+    Playback submenu (`IMenuProvider`) and a deferred plugin `seek`
+    (`IPlayerControl`)
+  - ⬜ Playback commands for plugins checked against the playback
+    generation; see `docs/event-ordering.md` (Plan: A synchronous core with
+    queued edges)
   - See `docs/plugins.md`
 - ✅ Settings dialog navigation tree instead of tabs
   - See `docs/settings-dialog.md`
@@ -125,6 +129,9 @@ See `docs/architecture.md` (Design Principles).
   `docs/event-ordering.md` (Known races)
 - A seek slider drag held past the end of a song seeks the next song on
   release. See `docs/event-ordering.md` (Known races)
+- A plugin seek queued just before a song change seeks the next song: with
+  A-B Repeat and B in the last 100 ms of a song, the next song starts at A.
+  See `docs/event-ordering.md` (Known races)
 - Stopping the GLib loop (macOS, Windows) can hang the main thread:
   `PlaybackBackendManager::stopGlibLoop` quits only once the GLib thread
   has set `glibLoop_` and `glibRunning_`, and a `g_main_loop_quit` before

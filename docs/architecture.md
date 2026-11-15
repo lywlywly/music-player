@@ -137,8 +137,9 @@ The top-level window and what it owns.
   * Creates `PluginManager`, which lists the plugins and loads those not
     disabled, as a child after `PlaybackController`, so the plugins' panels
     (in the UI) are destroyed before it shuts the plugins down. It passes the
-    loaded plugins' panels to the info panel, and the manager's entries to
-    `SettingsDialog`. See [plugins.md](plugins.md).
+    loaded plugins' panels to the info panel, their menus to the Playback
+    menu, and the manager's entries to `SettingsDialog`. See
+    [plugins.md](plugins.md).
   * The info panel at the top left (`infoTabs`) has a tab per loaded plugin
     panel (Lyrics), then a Properties and a Spectrum tab; the current one is
     restored from `infopanel/current_tab` (the plugin's id, `properties` or
@@ -348,7 +349,8 @@ Each has its own doc; the classes are listed here with where they sit.
   `CoverArtPresenter` (frontend). The Spectrum tab (`SpectrumPresenter`,
   `SpectrumWidget`) is in [spectrum.md](spectrum.md); the Lyrics tab
   (`LyricsPanel`, `LyricsPresenter`, `LyricsLoader`, `LyricsManager`,
-  `LyricsSettingsPage`, in `src/plugins/lyrics/`) in [plugins.md](plugins.md).
+  `LyricsSettingsPage`, in `src/plugins/lyrics/`) in [plugins.md](plugins.md),
+  as is the A-B Repeat plugin (`ABRepeat`, in `src/plugins/abrepeat/`).
 * `SystemMediaPresenter`, `CoverArtPresenter` and `NowPlayingPresenter` do not
   know about each other; `MainWindow` drives them from `PlaybackController`'s
   signals.

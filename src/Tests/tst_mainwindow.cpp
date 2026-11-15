@@ -6,6 +6,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMainWindow>
+#include <QMenu>
 #include <QObject>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -155,7 +156,8 @@ private slots:
   void spectrum_tapGoesToThePlayerWhileShown();
   void splitters_startAtAQuarterAndRestoreDraggedSizes();
   void settings_pluginPageAppliesToItsPanelOnOk();
-  void plugins_disabledPluginHasNoTabOrPage();
+  void plugins_disabledPluginsHaveNoTabPageOrMenu();
+  void abRepeatMenu_loopsThePlayingSong();
 
 private:
   void recreateWindow();
@@ -1399,10 +1401,10 @@ void TestMainWindow::settings_pluginPageAppliesToItsPanelOnOk() {
   QCOMPARE(text->font().pointSize(), 30);
 }
 
-void TestMainWindow::plugins_disabledPluginHasNoTabOrPage() {
+void TestMainWindow::plugins_disabledPluginsHaveNoTabPageOrMenu() {
   {
     QSettings settings;
-    settings.setValue("plugins/disabled", QStringList{"lyrics"});
+    settings.setValue("plugins/disabled", QStringList{"lyrics", "abrepeat"});
     settings.setValue("infopanel/current_tab", "lyrics");
   }
   recreateWindow();
@@ -1425,6 +1427,67 @@ void TestMainWindow::plugins_disabledPluginHasNoTabOrPage() {
   QCOMPARE(plugins->text(0), QString("Plugins"));
   QCOMPARE(plugins->childCount(), 0);
   delete dialog;
+
+  // No A-B Repeat submenu, and no separator for it: Playback ends with the
+  // app's own items.
+  QCOMPARE(window_->findChild<QMenu *>("abRepeatMenu"), nullptr);
+  auto *playbackMenu = window_->findChild<QMenu *>("menuPlayback");
+  QCOMPARE(playbackMenu->actions().last()->objectName(),
+           QString("actionCursor_follows_playback"));
+}
+
+void TestMainWindow::abRepeatMenu_loopsThePlayingSong() {
+  // The plugin's submenu, from Tests/plugins, last in Playback.
+  auto *playbackMenu = window_->findChild<QMenu *>("menuPlayback");
+  QVERIFY(playbackMenu != nullptr);
+  QMenu *menu = playbackMenu->actions().last()->menu();
+  QVERIFY(menu != nullptr);
+  QCOMPARE(menu->title(), QString("A-B Repeat"));
+  auto *setA = menu->findChild<QAction *>("abRepeatSetA");
+  auto *setB = menu->findChild<QAction *>("abRepeatSetB");
+  auto *clear = menu->findChild<QAction *>("abRepeatClear");
+  QVERIFY(setA && setB && clear);
+
+  // With no song loaded, every item is disabled.
+  emit menu->aboutToShow();
+  QVERIFY(!setA->isEnabled());
+  QVERIFY(!setB->isEnabled());
+  QVERIFY(!clear->isEnabled());
+
+  auto *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
+  Playlist *playlist = tabs->currentPlaylist();
+  const QString wav = workDir_->filePath("loop.wav");
+  QVERIFY(writeSilentWav(wav));
+  playlist->addSong(makeSong("Loop", "Artist", wav));
+  playlist->setLastPlayed(playlist->getPkByIndex(0));
+  auto *player = qobject_cast<DummyAudioPlayer *>(
+      window_->findChild<PlaybackBackendManager *>()->player());
+  QVERIFY(player != nullptr);
+  player->setDurationForTest(125000);
+  auto *slider = window_->findChild<QSlider *>("horizontalSlider");
+  window_->findChild<QAction *>("actionPlay")->trigger();
+  QTRY_COMPARE(slider->maximum(), 125000);
+
+  // Each item is triggered from an opened menu, as by the user: a disabled
+  // action does not trigger.
+  player->setPosition(65000);
+  emit menu->aboutToShow();
+  QVERIFY(setA->isEnabled());
+  QVERIFY(!setB->isEnabled());
+  setA->trigger();
+  player->setPosition(70000);
+  emit menu->aboutToShow();
+  setB->trigger();
+  emit menu->aboutToShow();
+  QCOMPARE(setA->text(), QString("Set A (1:05)"));
+  QCOMPARE(setB->text(), QString("Set B (1:10)"));
+  QVERIFY(setA->isEnabled());
+  QVERIFY(setB->isEnabled());
+  QVERIFY(clear->isEnabled());
+
+  // Past B: the plugin's deferred seek takes playback back to A.
+  player->setPosition(70100);
+  QTRY_COMPARE(slider->value(), 65000);
 }
 
 void TestMainWindow::splitters_startAtAQuarterAndRestoreDraggedSizes() {

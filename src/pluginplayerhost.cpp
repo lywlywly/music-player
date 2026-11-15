@@ -23,7 +23,7 @@ TrackInfo toTrackInfo(
 
 PluginPlayerHost::PluginPlayerHost(PlaybackController &playback,
                                    QObject *parent)
-    : QObject(parent) {
+    : QObject(parent), playback_(playback) {
   connect(
       &playback, &PlaybackController::songStarted, this,
       [this](
@@ -57,4 +57,14 @@ void PluginPlayerHost::addListener(IPlayerListener *listener) {
 
 void PluginPlayerHost::removeListener(IPlayerListener *listener) {
   std::erase(listeners_, listener);
+}
+
+void PluginPlayerHost::seek(qint64 positionMs) {
+  // Queued, so a seek called inside a listener call runs after every listener
+  // has the current position, and a seek from another thread runs on the main
+  // thread. The host is the context: a seek still queued when it is destroyed
+  // is dropped (docs/event-ordering.md, "Plugin commands: the contract").
+  QMetaObject::invokeMethod(
+      this, [this, positionMs]() { playback_.seek(positionMs); },
+      Qt::QueuedConnection);
 }

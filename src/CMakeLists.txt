@@ -67,8 +67,31 @@ pkg_check_modules(GST IMPORTED_TARGET REQUIRED gstreamer-1.0)
 
 add_subdirectory(spectrum)
 add_subdirectory(pluginapi)
-# Its build files go outside plugins/, the folder the built plugins go in.
+
+# Builds a plugin into the folder the app loads plugins from (plugins/ next
+# to EXEC, the macOS bundle's PlugIns) and, with the tests, also copies it
+# into Tests/plugins, which the test executables load from.
+function(myplayer_deploy_plugin target)
+  if(APPLE)
+    set(plugin_dir "${CMAKE_BINARY_DIR}/EXEC.app/Contents/PlugIns")
+  else()
+    set(plugin_dir "${CMAKE_BINARY_DIR}/plugins")
+  endif()
+  set_target_properties(${target} PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "${plugin_dir}"
+  )
+  if(BUILD_TESTING)
+    add_custom_command(TARGET ${target} POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/Tests/plugins"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:${target}>" "${CMAKE_BINARY_DIR}/Tests/plugins"
+    )
+  endif()
+endfunction()
+
+# Their build files go outside plugins/, the folder the built plugins go in.
 add_subdirectory(plugins/lyrics lyrics-plugin-build)
+add_subdirectory(plugins/abrepeat abrepeat-plugin-build)
 
 if(WIN32)
   find_package(FFmpeg REQUIRED COMPONENTS avcodec avformat avutil)
@@ -310,7 +333,7 @@ endif()
 add_executable(EXEC main.cpp)
 target_link_libraries(EXEC MYLib)
 # The app loads the plugins at runtime; building it builds them.
-add_dependencies(EXEC lyricsplugin)
+add_dependencies(EXEC lyricsplugin abrepeatplugin)
 
 if(APPLE)
   set_target_properties(EXEC PROPERTIES

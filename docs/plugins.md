@@ -12,15 +12,17 @@ Status: implemented.
   the plugin's code, so a plugin that is not loaded is still listed by name.
 * A plugin can contribute several kinds of things, or none (a plugin with no
   UI that only follows playback). Each kind is a **capability**: an
-  interface the plugin implements and the host asks for. There are two: an
-  **info panel tab** and a **Settings dialog page**. Later kinds (context
-  menu actions, main menu commands) are added the same way, without changing
-  the existing interfaces or plugins.
+  interface the plugin implements and the host asks for. There are three:
+  an **info panel tab**, a **Settings dialog page** and a **Playback
+  submenu**. Later kinds (context menu actions) are added the same way,
+  without changing the existing interfaces or plugins.
+* A plugin follows playback through listener events and controls it
+  through **commands**, which the host defers.
 * The user can **disable** a plugin in Settings > Plugins; a disabled plugin
   is not loaded at the next startup. Enabling or disabling takes effect
   after a restart.
-* **Lyrics is the first and, for now, only plugin.** Properties and Spectrum
-  stay built in.
+* **The plugins are Lyrics and A-B Repeat.** Properties and Spectrum stay
+  built in.
 * Plugins are built in this repository, with the same Qt, compiler and build
   type as the app, and the build puts them next to it. Third-party plugins
   (a published SDK, a stable ABI, a package format with a binary per
@@ -71,17 +73,18 @@ plugin, two metaobjects for one class.
 * The host reads them from `QPluginLoader::metaData().value("MetaData")`,
   which parses the file without running any of its code. They are declared
   only there, not also in code (see "Rejected").
-* `panelTitle()` and `settingsPageTitle()` stay in code: they label a
-  capability, can differ from the plugin's name, and are translated with
-  `tr()`.
+* `panelTitle()`, `settingsPageTitle()` and a menu's title stay in code:
+  they label a capability, can differ from the plugin's name, and are
+  translated with `tr()`.
 
 ### Core: every plugin
 
 | Type | Implemented by | Role |
 |---|---|---|
 | `IPlugin` | plugin | `initialize(IPluginHost &)` (once, after loading), `shutdown()` (once, before the host goes) |
-| `IPluginHost` | host | The host services: `player()` returns the `IPlayerHost` |
+| `IPluginHost` | host | The host services: `player()` returns the `IPlayerHost`, `control()` the `IPlayerControl` |
 | `IPlayerHost` | host | `addListener(IPlayerListener *)`, `removeListener(IPlayerListener *)` |
+| `IPlayerControl` | host | Playback commands: `seek(qint64 ms)` |
 | `IPlayerListener` | plugin | `trackStarted(const TrackInfo &)`, `stopped()`, `positionChanged(qint64 ms)` |
 | `TrackInfo` | (plain data) | `fields` (column fields by id, e.g. `title`, `attr:lyrics`, as text); `tagFields` (tag fields with no column, from the refresh on play's `remainingFields`) |
 
@@ -108,14 +111,31 @@ work as usual: its `QObject`s live in the DLL only.
   object that owns the listener: a panel's presenter for the panel's
   lifetime (constructor, destructor), a plugin with no UI for the plugin's
   lifetime (`initialize`, `shutdown`).
-* A new event in an existing area is a new method on its listener, with a
-  core API version bump (see "Versions").
+* A new event in an existing area is a new method on its listener, a core
+  API change (see "Versions").
 * Delivery is synchronous, on the main thread, in the order the listeners
   were added. A listener must not add or remove listeners during a call:
   `PluginPlayerHost` delivers by looping over its `std::vector` of
   listeners, which adding (a reallocation) or removing (a shift) would
-  invalidate mid-loop. Re-entry and the planned playback commands are in
-  [event-ordering.md](event-ordering.md).
+  invalidate mid-loop. Re-entry is in [event-ordering.md](event-ordering.md).
+
+### Commands: `IPlayerControl`
+
+* `seek` is the only command; `play`, `pause` and others come with a plugin
+  that uses them.
+* Its header states the contract of [event-ordering.md](event-ordering.md)
+  ("Plugin commands: the contract"), except rule 6: deferred, in order,
+  allowed inside a listener call, callable from any thread, reported by
+  events, not merged, dropped at shutdown. `seek` is not yet bound to a
+  session: it applies to whatever plays when it runs, so a seek called just
+  before a song change lands in the next song (event-ordering.md, "Known
+  races"). The check against the playback generation comes with the
+  generation (event-ordering.md, "Plan: A synchronous core with queued
+  edges").
+* Its own interface, not methods on `IPlayerHost`: listeners and commands
+  follow different rules (synchronous calls into the plugin, deferred calls
+  into the host), and `IPlayerControl`'s header holds the command contract
+  alone.
 
 ### Capabilities: what a plugin contributes
 
@@ -124,14 +144,23 @@ work as usual: its `QObject`s live in the DLL only.
 | `IPanelProvider` | `panelTitle()` (tab text), `createPanel(QWidget *parent)` | the info panel (`MainWindow`) |
 | `ISettingsPageProvider` | `settingsPageTitle()`, `createSettingsPage(QWidget *parent)`, returning an `IPluginSettingsPage` | `SettingsDialog` |
 | `IPluginSettingsPage` | `widget()`, `apply()` (called on the Settings dialog's OK) | `SettingsDialog` |
+| `IMenuProvider` | `createMenu(QWidget *parent)`, a `QMenu` with its title set | the Playback menu (`MainWindow`) |
 
 * The plugin's root object implements `IPlugin` and any capabilities
   (`Q_INTERFACES(IPlugin IPanelProvider ...)`). The place in the app that
   uses a capability asks each loaded plugin for it with `qobject_cast`; a
   plugin without it is skipped there.
-* `createPanel` and `createSettingsPage` return widgets parented to
-  `parent`, so the tab widget and the Settings dialog own and delete them.
-  The plugin keeps its open panels, so `apply()` can restyle them.
+* `createPanel`, `createSettingsPage` and `createMenu` return widgets
+  parented to `parent`, so the tab widget, the Settings dialog and the
+  Playback menu own and delete them. The plugin keeps its open panels, so
+  `apply()` can restyle them.
+* A plugin's menu is a submenu, not actions added to Playback, so its items
+  show which plugin they come from and several plugins' items do not mix.
+  The plugin gets no access to Playback itself, so it cannot change or
+  remove the app's items. Only Playback takes plugin menus; another menu
+  comes with a plugin that needs it, as a new version of the capability.
+  Plugin menu items have no keyboard shortcuts: one could clash with the
+  app's or another plugin's, and nothing would arbitrate.
 * One panel per plugin, so the plugin's id names its tab in
   `infopanel/current_tab` (`lyrics` for the lyrics plugin).
 
@@ -144,7 +173,8 @@ work as usual: its `QObject`s live in the DLL only.
 * **A new host service** (for example the selected songs, for a context
   menu) is a new interface returned by a new `IPluginHost` method: a core
   API change.
-* The API holds only what its plugins use: it starts with what lyrics needs.
+* The API holds only what its plugins use: what lyrics and A-B Repeat
+  need.
 
 ### Versions
 
@@ -154,26 +184,34 @@ work as usual: its `QObject`s live in the DLL only.
   across the boundary. The host interfaces, the listeners and `TrackInfo` are
   plain classes passed by pointer or reference; nothing checks them, and an
   old plugin calling a changed one would use the wrong function table.
-* So `IPlugin`'s IID (`myplayer.IPlugin/2`) is the version of the **core
-  API**: `IPlugin`, `IPluginHost`, `IPlayerHost`, every listener,
-  `TrackInfo` and the metadata keys. Any change to one of them bumps it, and
-  a plugin built against another version is not loaded: a plugin with old
-  metadata keys is skipped as another API version, not as one with no id.
-  The log
-  names the plugin's IID, which `QPluginLoader::metaData()` reads without
-  creating the plugin.
+* So `IPlugin`'s IID (`myplayer.IPlugin/1`) is the version of the **core
+  API**: `IPlugin`, `IPluginHost`, `IPlayerHost`, `IPlayerControl`, every
+  listener, `TrackInfo` and the metadata keys. A plugin built against
+  another version is not loaded; the log names the plugin's IID, which
+  `QPluginLoader::metaData()` reads without creating the plugin.
 * Each capability's IID (`myplayer.IPanelProvider/1`, ...) is the version of
   that capability and the types only it uses (`IPluginSettingsPage` for
   `ISettingsPageProvider`). A plugin built against another version keeps
   loading, and the capability is not used. This is not logged:
   `qobject_cast` returns null for both "another version" and "not
   implemented", and the host cannot tell them apart.
-* Plugins are built with the app, so a bump means rebuilding them, with no
-  source change unless they use what changed.
+* **While the API is in development, every version stays at 1**, the core
+  API's and each capability's. Plugins are built in this repository with
+  the app, so a change reaches every plugin at the next build, and a version
+  would count changes no plugin outside the repository sees. Versions start
+  counting once plugins are built outside it.
+  * Rejected: bumping on every change. Each bump would only rename the IID
+    in the API header and the docs, for no plugin that could be refused.
+  * Cost: a stale plugin file, built against an older API and left in the
+    plugins folder (one the build no longer produces, or a copy from an
+    older build), is loaded. Calling an interface that changed uses the
+    wrong function table, which usually crashes. Deleting the file fixes
+    it.
 
 ### Rules
 
-* All calls are on the main thread.
+* All calls are on the main thread, except commands, which may come from
+  any thread.
 * The host has no "current track" query: plugins are initialized and panels
   created in the `MainWindow` constructor, before playback can start
   (`setReady` comes after the library load), so every listener sees each song
@@ -249,6 +287,11 @@ Frontend class. `MainWindow` creates it as a child `QObject` after
   listeners. The position comes from the controller, not the player: a
   backend switch replaces the player, and a direct connection would stay on
   the old one.
+* Implements `IPlayerControl` too, as it holds the `PlaybackController`;
+  `PluginManager::control()` returns it. `seek` queues
+  `PlaybackController::seek` with `QMetaObject::invokeMethod` and
+  `Qt::QueuedConnection`, with the host as the context, so a seek still
+  queued when the host is destroyed is dropped.
 
 ### Where the capabilities are used
 
@@ -265,6 +308,10 @@ The places using a capability go through the `Loaded` entries.
   gets a page under Plugins in the dialog's tree
   ([settings-dialog.md](settings-dialog.md)), in load order; OK calls each
   page's `apply()`.
+* **Playback menu** (`MainWindow::setUpPluginMenus`): each
+  `IMenuProvider`'s menu at the end of Playback, in load order, after one
+  separator; with no provider, neither. The menus are destroyed with the
+  menu bar, before the plugins are shut down.
 
 ### Plugins page (`PluginsPage`)
 
@@ -303,11 +350,12 @@ The places using a capability go through the `Loaded` entries.
 * `lyricsplugin`, a `MODULE` library linking `mylyrics`: the root object
   `LyricsPlugin`, implementing `IPlugin`, `IPanelProvider` and
   `ISettingsPageProvider`, and its metadata, `lyricsplugin.json`. The build
-  puts it where the app looks (`plugins/` next to `EXEC`, the bundle's
-  `Contents/PlugIns`) and in `Tests/plugins`, next to the test executables;
-  `EXEC` and the tests that load it depend on it, so building them builds
-  it. The root object is not in `mylyrics`: its `Q_PLUGIN_METADATA` would
-  make each test executable linking `mylyrics` a plugin too.
+  (`myplayer_deploy_plugin` in `src/CMakeLists.txt`) puts it where the app
+  looks (`plugins/` next to `EXEC`, the bundle's `Contents/PlugIns`) and in
+  `Tests/plugins`, next to the test executables; `EXEC` and the tests that
+  load it depend on it, so building them builds it. The root object is not
+  in `mylyrics`: its `Q_PLUGIN_METADATA` would make each test executable
+  linking `mylyrics` a plugin too.
 * `createPanel` creates a `LyricsPanel` (object name `lyricsPanel`) and its
   `LyricsPresenter`, a child of the panel. The presenter implements
   `IPlayerListener`, adds itself in its constructor and removes itself in its
@@ -366,6 +414,87 @@ The places using a capability go through the `Loaded` entries.
   application font's CJK fallback families ([ui-styling.md](ui-styling.md))
   still cover characters the chosen font lacks.
 
+## A-B Repeat plugin: `src/plugins/abrepeat/`
+
+Loops a section of the playing song: the user marks A and B in a submenu of
+Playback, and playback jumps back to A each time it reaches B.
+
+| Item | Does |
+| --- | --- |
+| Set A | Marks the current position as A and clears B |
+| Set B | Marks the current position as B; enabled once A is set. Playback then loops |
+| Clear | Removes A and B; enabled once A is set |
+
+* The items show the marked times ("Set A (1:23)"), so the loop's state is
+  visible without a widget of its own.
+* While A and B are set, a position at or past B seeks to A. A seek past B
+  (with the slider) jumps back to A at the next position; a seek before A
+  plays on until B.
+* Set B at or before A does nothing: B is marked while listening past A, so
+  this is rare. Swapping A and B instead would make a loop the user did not
+  mark.
+* A song start (the same song again too) and a stop clear A and B; they are
+  not saved. The items are disabled while no song is loaded: before the
+  first song starts and after a stop.
+* Three items, not one cycling through Set A, Set B and Clear: what that
+  item did next would depend on a state the menu has to spell out, and
+  marking A again in a set loop would take a Clear first.
+
+### Code
+
+* `myabrepeat`, a static library depending on Qt and `src/pluginapi/` only,
+  like `mylyrics`: `ABRepeat`, the loop and its `IPlayerListener`, no UI.
+  It holds A, B, the last position and whether a song is loaded. A position
+  at or past B calls `seek(A)`; `trackStarted` and `stopped` clear A and B.
+* `abrepeatplugin`, a `MODULE` library linking `myabrepeat`, built and
+  deployed like `lyricsplugin`: the root object `ABRepeatPlugin` (`IPlugin`,
+  `IMenuProvider`) and its metadata, `abrepeatplugin.json`
+  (`{ "id": "abrepeat", "name": "A-B Repeat" }`).
+* `initialize` creates the `ABRepeat` with the host's `IPlayerControl` and
+  adds it as a listener; `shutdown` removes and destroys it.
+* `createMenu` builds the submenu (object name `abRepeatMenu`). Its
+  `aboutToShow` sets the items' text and enabled state from the `ABRepeat`,
+  so the menu needs no notification from it.
+* Set A and Set B use the last position the listener received, as the host
+  has no position query; the error this adds is in "Precision".
+
+### Precision
+
+About 0.1 s with GStreamer, with a gap at each jump:
+
+* **Marks**: A and B are the last position received, up to one position
+  update (100 ms) before the click.
+* **Reaching B**: the loop seeks on the first position at or past B, so it
+  plays up to 100 ms past B. The position is the audio output's, and a
+  flushing seek drops the buffered audio, so the overshoot is what is heard.
+* **Landing at A**: `GstAudioPlayer::setPosition` seeks with
+  `GST_SEEK_FLAG_KEY_UNIT`, to the nearest point the format can resume
+  from: typically one frame (MP3, AAC, FLAC: about 20 to 100 ms), further
+  for a VBR MP3 without a seek index, whose position is estimated.
+* **The jump**: the flushing seek restarts the output, a short gap or click.
+* With Qt Multimedia, Qt's media backend sets how often the position
+  arrives, and seeks on macOS are inaccurate (roadmap.md Known Issues).
+* **Near the end of a song**: with B in the last position update (100 ms
+  with GStreamer), the end-of-stream can come before a position at or past
+  B, and the next song plays. Or the position reporting B and the
+  end-of-stream are pending in the same event-loop turn, and the queued
+  seek lands in the next song ([event-ordering.md](event-ordering.md),
+  "Known races").
+
+Options to tighten it, not planned:
+
+* **Accurate seeks**: `GST_SEEK_FLAG_ACCURATE` in `setPosition` lands at
+  the exact position, at the cost of decoding from the previous frame,
+  little for audio. It applies to every seek, the slider's too.
+* **A timer for B in the plugin**: a position within one update of B starts
+  a single-shot `Qt::PreciseTimer` for the rest, which seeks when it fires.
+  The overshoot drops to the timer's and the position's error, a few
+  milliseconds, with no API change.
+* **A gapless loop in the backend**: a segment seek from A to B, seeking
+  again on GStreamer's segment-done message, loops sample-exact without a
+  gap. It is a loop command for the backend, not a plugin `seek`, and Qt
+  Multimedia has no equivalent.
+
 ## Rejected
 
 * **Link MYLib into the plugin.** Two copies of the app's globals (see "The
@@ -376,8 +505,8 @@ The places using a capability go through the `Loaded` entries.
 * **One plugin interface with a method per kind of contribution** (a
   `createPanel` that may return null, a `contextMenuActions` that may be
   empty, ...). Each new kind would change the interface every plugin
-  implements, and bump its version for all of them. Capabilities change
-  nothing that exists.
+  implements, and, once versions count, bump its version for all of them.
+  Capabilities change nothing that exists.
 * **Signals in the API** (`Q_OBJECT` host class), or a small shared
   `pluginapi` DLL to hold its moc code once. The first gives two
   metaobjects; the second is one more library to build and deploy for what
@@ -386,8 +515,7 @@ The places using a capability go through the `Loaded` entries.
   adding events, the host asking each listener for the new version by its
   interface id). Old plugins would keep loading unchanged, which matters only
   for plugins not rebuilt with the app; ours always are, so changing the
-  listener and bumping the core version is simpler and keeps one listener
-  per area.
+  listener is simpler and keeps one listener per area.
 * **String-based `connect`** to a host `QObject *` (`SIGNAL(...)`). It needs
   no moc code in the API, since the lookup goes through the object's own
   metaobject, but a typo or a changed signature fails at runtime instead of
@@ -441,11 +569,15 @@ The places using a capability go through the `Loaded` entries.
   not load a Debug plugin into a Release app.
 * Listener registration is manual; a listener that is not removed leaves a
   dangling pointer in the host.
-* A plugin built against another capability version silently loses that
-  capability (see "Versions"); with plugins rebuilt with the app this
-  happens only with a stale plugin file in the folder.
+* While the API is in development, a stale plugin file in the folder, built
+  against an older API, is loaded and can crash (see "Versions").
 * One `TrackInfo` copy of the song's text fields per song start, and a
   virtual call per event: negligible.
+* A command takes effect one event-loop turn later, and a plugin seek can
+  land in the next song until the generation check ("Commands").
+* Plugin menu items have no shortcuts.
+* The A-B loop's precision is about 0.1 s, with a gap at each jump (A-B
+  Repeat plugin, "Precision").
 * Plugin tabs always come before the built-in ones until those are plugins
   too.
 * A plugin's name is not translatable: JSON has no `tr()`. A translated app
@@ -457,10 +589,20 @@ The places using a capability go through the `Loaded` entries.
 
 * `tst_lyrics`, `tst_lyricspanel`: link `mylyrics`; `resolveLyrics` cases
   take `TrackInfo`.
+* `tst_abrepeat`, linking `myabrepeat`, with an `IPlayerControl` made by the
+  test that records seeks: a position at or past B seeks to A, one before B
+  does not; Set B at or before A is ignored; Set A clears B; a song start
+  (the same song again too) and a stop clear the loop.
 * `tst_plugins`:
   * `PluginPlayerHost` forwards song start (with its tag fields), position
     (also from the player a backend switch creates) and stop, not pause, to
     a listener the test adds, and nothing after it is removed.
+  * A listener seeking inside `positionChanged`: the next listener gets the
+    old position first, and the new one once the event loop runs
+    (`QTRY_COMPARE`). The dummy player emits the position inside
+    `setPosition`, so a seek run at once would show as the new position
+    first.
+  * A seek queued by a host that is then destroyed never runs.
   * `PluginManager` lists the built lyrics plugin from `Tests/plugins` as
     `Loaded`, with the id `lyrics`, the name `Lyrics` and its file name, and
     with a panel and a settings page. The panel shows the tag lyrics of the
@@ -493,12 +635,20 @@ The places using a capability go through the `Loaded` entries.
     `LyricsPanel` metaobject is not the plugin's, so
     `findChild<LyricsPanel *>` (or `<LyricsManager *>`) finds nothing, and
     the panel's lines are checked in `tst_plugins` instead.
-  * `plugins_disabledPluginHasNoTabOrPage`: with `lyrics` in
-    `plugins/disabled` and `infopanel/current_tab` set to `lyrics`, no
-    Lyrics info tab, the first tab current and the key unchanged, and no
-    page under Plugins.
+  * `plugins_disabledPluginsHaveNoTabPageOrMenu`: with `lyrics` and
+    `abrepeat` in `plugins/disabled` and `infopanel/current_tab` set to
+    `lyrics`, no Lyrics info tab, the first tab current and the key
+    unchanged, no page under Plugins, and no A-B Repeat submenu or separator
+    in Playback.
+  * `abRepeatMenu_loopsThePlayingSong`: the A-B Repeat submenu is last in
+    Playback, its items disabled with no song; with a song playing, Set A
+    and Set B show their times, and a position past B seeks the player to
+    A. Items are triggered after the menu's `aboutToShow`, as when the user
+    opens it: a disabled action does not trigger.
 * The plugin's `QSettings` uses the tests' QSettings folder: the folder is
   set in QtCore, which the plugin shares.
 * By hand: the Plugins page's layout, the state column following the box,
   and that a plugin disabled on OK is gone after a restart and back after
-  enabling it and restarting.
+  enabling it and restarting. An A-B loop with GStreamer and with Qt
+  Multimedia; the submenu's text and enabled state in the macOS native menu
+  bar; B near a song's end.

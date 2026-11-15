@@ -75,8 +75,8 @@ pieces matter:
 
 | Piece | Where | What it does |
 | --- | --- | --- |
-| `Q_DECLARE_INTERFACE(IPlugin, "myplayer.IPlugin/2")` | after the interface, in the API header | Gives the interface its name, the **IID** (interface identifier). The part after `/` is its version. |
-| `Q_PLUGIN_METADATA(IID "myplayer.IPlugin/2" FILE "lyricsplugin.json")` | in the root class | Marks the library as a Qt plugin: writes a label into it saying what kind of plugin it is, with the JSON file's contents, and adds the entry point Qt calls to create the root object. |
+| `Q_DECLARE_INTERFACE(IPlugin, "myplayer.IPlugin/1")` | after the interface, in the API header | Gives the interface its name, the **IID** (interface identifier). The part after `/` is its version. |
+| `Q_PLUGIN_METADATA(IID "myplayer.IPlugin/1" FILE "lyricsplugin.json")` | in the root class | Marks the library as a Qt plugin: writes a label into it saying what kind of plugin it is, with the JSON file's contents, and adds the entry point Qt calls to create the root object. |
 | `Q_INTERFACES(IPlugin IPanelProvider ...)` | in the root class | Lists the interfaces the root object implements: its answer sheet for "can you do this?". |
 | `QPluginLoader` | in the app | `metaData()` reads the label without running any plugin code; `instance()` loads the library and creates the root object, returned as a `QObject *`. |
 | `qobject_cast<IPanelProvider *>(root)` | in the app | Asks the object for the interface with that IID. It answers from its `Q_INTERFACES` list: an `IPanelProvider *` if it has it, null if not. |
@@ -159,12 +159,14 @@ The interfaces in `src/pluginapi/` come in three groups.
 | Core | `IPlugin` | plugin (root object) | `initialize(host)` after loading; `shutdown()` before the host is destroyed (the id and name are in the JSON, not in code) |
 | Capabilities | `IPanelProvider` | plugin (root object) | Makes a tab for the info panel |
 | | `ISettingsPageProvider` | plugin (root object) | Makes a page for the Settings dialog, as an `IPluginSettingsPage` (`widget()`, `apply()` on OK) |
-| Host services | `IPluginHost` | app | What the app offers plugins: today only `player()` |
+| | `IMenuProvider` | plugin (root object) | Makes a submenu for the end of the Playback menu |
+| Host services | `IPluginHost` | app | What the app offers plugins: `player()` and `control()` |
 | | `IPlayerHost` | app | `addListener` / `removeListener` for playback events |
+| | `IPlayerControl` | app | Playback commands, deferred: today only `seek(ms)` |
 | | `IPlayerListener` | plugin | Receives `trackStarted(TrackInfo)`, `stopped()`, `positionChanged(ms)` |
 | | `TrackInfo` | (plain data) | The playing song's fields as text, copied from the app's song |
 
-Three ideas run through it:
+Four ideas run through it:
 
 * **Capabilities are optional.** A plugin implements only the ones it needs.
   Each place in the app that uses a capability asks every plugin for it, and
@@ -176,6 +178,11 @@ Three ideas run through it:
   plugin cannot use. The host listens to them and calls each listener's
   virtual method with plain data instead. No signal crosses into the plugin;
   inside it, Qt signals work as usual.
+* **Commands are deferred.** A plugin's `seek` returns at once; the host
+  runs it a moment later, from the event loop. So a plugin may seek while it
+  is being told about the position, and every other listener still hears
+  about that position first. Why, and what this does not solve, is in
+  [docs/event-ordering.md](../docs/event-ordering.md).
 
 ## The pieces in this repository
 
@@ -194,15 +201,21 @@ Three ideas run through it:
           both include the plugin API headers (src/pluginapi/)
 ```
 
+The A-B Repeat plugin (`abrepeatplugin.dll`) has the same shape: its root
+object makes a submenu of Playback, and its `ABRepeat` gets the events and
+calls `seek` to jump back to A.
+
 | Piece | Where | Role |
 | --- | --- | --- |
 | `pluginapi` | `src/pluginapi/` | The interfaces, header-only |
 | `PluginManager` | app | Lists the plugins and loads those not disabled, is their `IPluginHost`, shuts them down |
-| `PluginPlayerHost` | app | The `IPlayerHost`: turns `PlaybackController`'s signals into listener calls |
-| `MainWindow`, `SettingsDialog` | app | Use the capabilities: add the plugins' tabs and Settings pages |
+| `PluginPlayerHost` | app | The `IPlayerHost`: turns `PlaybackController`'s signals into listener calls; and the `IPlayerControl`: queues the plugins' seeks |
+| `MainWindow`, `SettingsDialog` | app | Use the capabilities: add the plugins' tabs, menus and Settings pages |
 | `PluginsPage` | app | Settings > Plugins: lists every plugin with its state, enables and disables them |
 | `mylyrics` | `src/plugins/lyrics/` | The lyrics code: panel, presenter, lyrics loading, settings page |
 | `lyricsplugin` | `src/plugins/lyrics/` | The DLL: only the root object, `LyricsPlugin`, linking `mylyrics` |
+| `myabrepeat` | `src/plugins/abrepeat/` | The A-B loop, with no UI |
+| `abrepeatplugin` | `src/plugins/abrepeat/` | The DLL: the root object, `ABRepeatPlugin`, and its menu, linking `myabrepeat` |
 
 ## How it builds
 
@@ -214,8 +227,9 @@ Three ideas run through it:
   only loaded at runtime, never linked. It holds just the root object: with
   `Q_PLUGIN_METADATA` inside `mylyrics`, every test linking `mylyrics` would
   become a plugin too.
-* The build writes the DLL into `plugins/` next to the app (`PlugIns` inside a
-  macOS app bundle) and copies it to `Tests/plugins/` for the tests.
+* The build (`myplayer_deploy_plugin` in `src/CMakeLists.txt`) writes each
+  plugin's DLL into `plugins/` next to the app (`PlugIns` inside a macOS app
+  bundle) and copies it to `Tests/plugins/` for the tests.
 * The app never links the plugin, but has a build dependency on it, so
   building the app builds the plugin.
 
@@ -226,8 +240,7 @@ Three ideas run through it:
    1. ignores it if it is not a library;
    2. reads its label and skips it if it is not a plugin Qt can load (another
       Qt version or build type) or does not have the IID
-      `myplayer.IPlugin/2`, so another program's plugin or an old version
-      never runs;
+      `myplayer.IPlugin/1`, so another program's plugin never runs;
    3. reads the id and name from the label, and skips it if either is
       missing or an earlier plugin, loaded or disabled, has the same id;
    4. leaves it unloaded if the user disabled its id;
@@ -241,13 +254,17 @@ Three ideas run through it:
    disabled list, which takes effect at the next startup.
 2. **Using the capabilities.** The info panel asks each loaded plugin for
    `IPanelProvider` and adds a tab for each one, before Properties and
-   Spectrum. Each time Preferences opens, the Settings dialog asks for
-   `ISettingsPageProvider` and adds a page for each one under Plugins in its
-   tree, and calls each page's `apply()` on OK.
-3. **Following playback.** The Lyrics tab's presenter adds itself as a
-   listener when it is created. When a song starts, playback stops or the
-   position moves, `PluginPlayerHost` calls `trackStarted`, `stopped` or
-   `positionChanged` on each listener.
+   Spectrum. The Playback menu asks for `IMenuProvider` and adds each menu
+   at its end, after a separator. Each time Preferences opens, the Settings
+   dialog asks for `ISettingsPageProvider` and adds a page for each one
+   under Plugins in its tree, and calls each page's `apply()` on OK.
+3. **Following and controlling playback.** The Lyrics tab's presenter adds
+   itself as a listener when it is created, A-B Repeat's loop when the
+   plugin is initialized. When a song starts, playback stops or the position
+   moves, `PluginPlayerHost` calls `trackStarted`, `stopped` or
+   `positionChanged` on each listener. When the loop sees a position past B,
+   it calls `seek(A)`, which the host queues and then runs through
+   `PlaybackController`.
 4. **Shutdown.** The window's widgets are destroyed first, with the plugins'
    tabs; their presenters remove themselves as listeners. Then the
    `PluginManager` calls `shutdown()` on each plugin. Libraries are never
@@ -258,12 +275,16 @@ Three ideas run through it:
 
 * **The core API's version** is `IPlugin`'s IID. It covers every core and host
   interface, `TrackInfo` and the JSON's keys, which have no IID of their own.
-  Any change to them bumps it (to `myplayer.IPlugin/3` next), and a plugin
-  built for the old version
-  is refused at the label check, before any of its code runs, instead of
-  calling functions that no longer match.
-* **Each capability has its own version.** A plugin built for an older
-  `IPanelProvider` still loads, but gets no tab.
+  Once versions count, a change to them bumps it, and a plugin built for the
+  old version is refused at the label check, before any of its code runs,
+  instead of calling functions that no longer match.
+* **Each capability has its own version.** Once versions count, a plugin
+  built for an older `IPanelProvider` still loads, but gets no tab.
+* **For now every version is 1.** While the API is in development, plugins
+  are built with the app in this repository, so each build brings them up
+  to date and nothing is bumped. The catch is an old plugin file left in the
+  folder: it has the same IID, loads, and can crash when it calls an
+  interface that has changed.
 * **Same Qt, same build type.** Our rule is stricter than Qt's own check (see
   "Qt's plugin machinery"):
   a plugin is built with the same Qt and the same Debug or Release build as
@@ -276,8 +297,8 @@ mismatch only happens with an old DLL left in the plugins folder.
 ## Adding a plugin
 
 1. Create `src/plugins/<name>/` with a `CMakeLists.txt` modeled on the lyrics
-   one: a `MODULE` library that links only Qt and `pluginapi`, written into
-   the plugins folder.
+   one: a `MODULE` library that links only Qt and `pluginapi`, deployed with
+   `myplayer_deploy_plugin`.
 2. Write a root class deriving from `QObject`, `IPlugin` and the capabilities
    it offers, with `Q_OBJECT`,
    `Q_PLUGIN_METADATA(IID IPlugin_iid FILE "<name>.json")` and
@@ -287,7 +308,8 @@ mismatch only happens with an old DLL left in the plugins folder.
    in the saved settings and its entry in the disabled list, and its own
    settings keys start with it (`<id>/...`).
 4. To follow playback, add a listener to `host.player()`, and remove it by the
-   time `shutdown()` returns.
+   time `shutdown()` returns. To control it, call `host.control()`'s
+   commands; their effect arrives later, as events.
 5. Register it in `src/CMakeLists.txt` (`add_subdirectory`, and a dependency
    of `EXEC`).
 

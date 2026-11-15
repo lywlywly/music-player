@@ -108,4 +108,6 @@ PluginManager::~PluginManager() {
 
 IPlayerHost &PluginManager::player() { return player_; }
 
+IPlayerControl &PluginManager::control() { return player_; }
+
 const QList<PluginEntry> &PluginManager::plugins() const { return plugins_; }

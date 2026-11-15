@@ -2,7 +2,9 @@
 # INTERFACE library, so a plugin linking it gets src/pluginapi/ on its include
 # path but not src/, and cannot include app headers.
 add_library(pluginapi INTERFACE
+  imenuprovider.h
   ipanelprovider.h
+  iplayercontrol.h
   iplayerhost.h
   iplayerlistener.h
   iplugin.h

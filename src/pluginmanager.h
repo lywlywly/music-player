@@ -52,6 +52,7 @@ public:
   ~PluginManager() override;
 
   IPlayerHost &player() override;
+  IPlayerControl &control() override;
 
   // An entry per library, in name order; the places using a capability
   // qobject_cast the Loaded entries' root objects to it.
