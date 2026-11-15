@@ -148,6 +148,13 @@ See `docs/architecture.md` (Design Principles).
   runs only once the loop runs. The planned sync handler removes the GLib
   thread, and this bug with it (`docs/playback.md`, Alternative: one hop
   through a sync handler)
+- Seeking ahead in a FLAC file without a seek table (GStreamer backend)
+  pauses the sound while the accurate seek reads forward from the last
+  known frame: near half a second near the end of a high-bitrate file.
+  Possible fixes: patch `flacparse` (skip one byte after an invalid
+  header), or build vcpkg's GStreamer with GLib's checks compiled in as
+  Homebrew does, and seek without `ACCURATE` again. See `docs/playback.md`
+  (Seeking)
 - A seek on Windows (GStreamer backend) can skip the song with
   `Failed to write to device` (`AUDCLNT_E_BUFFER_TOO_LARGE`): when the
   flushed ring buffer runs out partway through a write, `wasapi2sink` asks

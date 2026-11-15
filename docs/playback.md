@@ -195,29 +195,64 @@ fit the rest of the app is in [architecture.md](architecture.md).
   (`GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_ACCURATE`) with
   `gst_element_seek_simple`, on the main thread; so does the seek back to
   the old position after an output device change (`handleAudioOutputsChanged`).
-* An accurate seek starts from a known frame boundary (an index entry from
-  frames already parsed, the file's seek table, or byte 0) and parses
-  forward to the target on the streaming thread. The call returns at once,
-  and playback resumes at the exact sample.
-* Rejected: `GST_SEEK_FLAG_KEY_UNIT` (seek to the nearest frame start). In
-  a FLAC file without a seek table (GStreamer 1.28.7), it can freeze the
-  app for seconds, skip the song or crash it, depending on the target:
-  * Freeze: with no seek table or index entry for the target,
-    `gst_base_parse_handle_seek` searches the file for the target frame
-    (`gst_base_parse_locate_time`) in the thread that called seek, the UI
-    thread here, holding the parser's stream lock.
-  * Skip: if, after the jump, the parser finds no frame within 2 MiB
-    (`gst_base_parse_check_sync`), it posts `Failed to parse stream`, which
-    the app takes for an unplayable file ("Stopping and skipping").
-  * Crash: when the jump lands on a false sync code (`0xFFF8` inside the
-    audio data), `gst_flac_parse_frame_is_valid` finds the header invalid
-    and returns 0, which `gst_flac_parse_handle_frame` takes for a whole
-    frame of size 0 (`if (next == 0) ret = TRUE`). A Release GStreamer has
-    its checks compiled out and pushes the empty frame on, and the parser
-    thread reads the missing buffer.
-* Cost: without a seek table, the parser reads from the boundary to the
-  target before playback resumes, a fraction of a second on a high-bitrate
-  file (96 kHz, 24-bit, 3.2 Mbit/s).
+* In a FLAC file, a seek plays from the exact sample, accurate or not: the
+  parser (`GstBaseParse`, as `flacparse`) ignores `GST_SEEK_FLAG_KEY_UNIT` and
+  starts the segment at the target, drops the frames that end before it
+  undecoded, and the decoder trims the frame that holds it. The flags only
+  choose where the parser starts reading.
+* An accurate seek starts at the last known frame before the target (an
+  entry in the parser's index: the file's seek table, or a frame already
+  parsed), else at byte 0, and reads forward to the target on the
+  streaming thread. The call returns at once.
+* Rejected: a seek without `ACCURATE` (`GST_SEEK_FLAG_KEY_UNIT`). It
+  estimates the byte position from the bitrate and bisects
+  (`gst_base_parse_locate_time`) to a frame up to 20 s before the target
+  (`TARGET_DIFFERENCE`), then reads forward from there. With no index
+  entry near the target, `gst_base_parse_handle_seek` runs the bisection
+  in the thread that called seek, the UI thread here, holding the parser's
+  stream lock. In a FLAC file without a seek table, a step of it, or the
+  read after it, can land on a false sync code (`0xFFF8` inside the audio
+  data): `gst_flac_parse_frame_is_valid` finds the header invalid and
+  returns 0, which `gst_flac_parse_handle_frame` takes for a whole frame
+  of size 0 (`if (next == 0) ret = TRUE`, GStreamer 1.26.5 and 1.28.7). What
+  follows depends on how GLib and GStreamer were built:
+  * Checks compiled out (vcpkg's Release build: `-Dglib_checks=false`,
+    `-Dglib_assert=false`; the app on Windows): `gst_base_parse_finish_frame`
+    takes the empty frame. Depending on the target, the seek call freezes
+    the app for seconds (up to about a minute), the parser posts
+    `Failed to parse stream` (`gst_base_parse_check_sync`, no frame within
+    2 MiB), which the app takes for an unplayable file ("Stopping and
+    skipping"), or the parser thread reads the missing buffer and crashes.
+  * Checks compiled in (Homebrew's build on macOS, vcpkg's Debug build):
+    `gst_base_parse_finish_frame` rejects it
+    (`assertion 'size > 0 || frame->out_buffer' failed`, logged), the seek
+    call returns at once and playback resumes a fraction of a second late;
+    at a few targets the parser posts `Internal data stream error`, which
+    the app takes for an unplayable file.
+* Cost, a known issue: in a FLAC file without a seek table, a seek ahead
+  of the frames already parsed reads every byte from there, checking each
+  for a frame start (`gst_flac_parse_frame_is_valid`), before playback
+  resumes. The pause grows with the distance: near half a second near the
+  end of a 4-minute high-bitrate file (96 kHz, 24-bit, 3.2 Mbit/s).
+  libFLAC's seek (foobar2000, DeaDBeeF) has none: it estimates the byte
+  position, reads frame headers to correct it, and decodes part of one
+  frame. A seek table in the file removes it (the index then has an entry
+  every few seconds). Fixes, not built:
+  * Patch `flacparse` so an invalid header after a sync code skips one
+    byte (`*skipsize = 1`) instead of finishing a frame of size 0, and seek
+    without `ACCURATE` again. The freezes, skips and crashes all follow the
+    empty frame (with checks compiled in, only the skips remain), so the
+    bisection would resume about as fast as libFLAC, at the same exact
+    sample. Cost: a patched GStreamer, an overlay port of vcpkg's on
+    Windows, while macOS and Linux use their system's or Homebrew's, which
+    keep the bug until a release fixes it; and the bisection, a few small
+    reads, still runs on the UI thread.
+  * Build vcpkg's GStreamer with GLib's checks compiled in, as Homebrew
+    does, and seek without `ACCURATE` again: no source patch, only build
+    options in an overlay port. Cost: the rejected frames still log a
+    critical warning, playback resumes late after them, a few targets
+    still skip the song (`Internal data stream error`), and every check
+    runs in the release build.
 * Known issue (Windows, `wasapi2sink`, GStreamer 1.28.7): a seek can skip
   the song with `Failed to write to device` (`AUDCLNT_E_BUFFER_TOO_LARGE`).
   A flushing seek empties the sink's ring buffer. When the device asks for
