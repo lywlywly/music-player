@@ -171,3 +171,16 @@ See `docs/architecture.md` (Design Principles).
   Display settings are already saved, then it shows a warning and returns
   before saving Cloud Sync and Fields. Fix: validate before accepting
   (override `accept`) and keep the dialog open
+- A re-tagged song's play stats depend on when the app restarts. A change
+  of title, artist or album, once the file is re-read, moves the song to
+  the new identity (`SongLibrary::syncBuiltInFieldsBySongId`), but its
+  in-memory `play_count` and `last_played_timestamp` stay the old
+  identity's until a restart or the next count. If the new identity has no
+  `song_play_stats` row, playing the song before the next restart copies
+  the old count to it (`markSongPlayedAtStart` inserts the row from the
+  in-memory count), and a restart first loses it (no row to load); a
+  rebase also pushes the old count under the new key. If the new identity
+  has a row, its count wins at the next count or restart. Either way the
+  old identity's row stays. Fix: in that function, when the identity
+  changes, set the song's stats from the new identity's row (none: no
+  stats)
