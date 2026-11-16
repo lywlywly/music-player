@@ -21,7 +21,8 @@ A cross-platform desktop music player focused on local-library playback, lyrics,
 * ReplayGain (GStreamer backend): track or album gain, or off (Settings >
   Playback)
 * Lyrics display, a plugin (embedded tag lyrics on play, with `.lrc`
-  fallback)
+  fallback); click a line to play from it, also while paused. Scrolling the
+  lyrics stops them following playback for 3 s
 * A-B Repeat, a plugin (Playback > A-B Repeat): loops a section of the
   playing song between two marked points, to about 0.1 s
 * Properties tab next to Lyrics: the selected song's file name, folder, path,

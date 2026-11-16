@@ -167,6 +167,10 @@ All of it is safe:
   | Main | The end-of-stream, pending in the same turn: `EndOfMedia` → `next()` |
   | Main | The queued seek runs on the next song, which starts at A |
 
+  A click on a Lyrics line just before the song ends is the same: its seek
+  runs on the next song. As the last song of the playlist ends, its `play`
+  runs after the stop and starts the shown playlist.
+
 * **Cause**: the seek was meant for the session it was called in, and
   `seek` is not bound to one.
 * **Fix, not built**: the generation check on plugin seeks ("Plugin
@@ -174,8 +178,8 @@ All of it is safe:
 
 ## Plan: A synchronous core with queued edges
 
-Status: partly implemented. Built: plugin commands, `seek` only, not yet
-checked against the generation
+Status: partly implemented. Built: plugin commands, `seek` and `play`, not
+yet checked against the generation
 ([plugins/plugin-system.md](plugins/plugin-system.md), "Commands:
 `IPlayerControl`"). Planned: the playback generation, with the slider fix
 ("A slider drag across the end of a song seeks the next song") and the
@@ -262,8 +266,8 @@ another thread.
 
 ### Plugin commands: the contract
 
-`IPlayerControl`, reached through `IPluginHost::control()`; `seek` is
-built, `play` and `pause` come with a plugin that uses them. Its header
+`IPlayerControl`, reached through `IPluginHost::control()`; `seek` and
+`play` are built, `pause` comes with a plugin that uses it. Its header
 states all but rule 6, which comes with the generation:
 
 1. **Deferred.** A command returns at once; the host queues it

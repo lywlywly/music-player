@@ -20,6 +20,8 @@ const std::map<int, std::string> &LyricsManager::getCurrentLyricsMap() const {
   return lyricsMap;
 }
 
+qint64 LyricsManager::lineStartMs(int index) const { return keys.at(index); }
+
 void LyricsManager::onPlayerProgressChange(qint64 progress) {
   auto it0 = std::find_if(keys.rbegin(), keys.rend(), [progress](int num) {
     return num <= static_cast<int>(progress);

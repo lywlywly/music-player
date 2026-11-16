@@ -162,7 +162,7 @@ The interfaces in `src/pluginapi/` come in three groups.
 | | `IMenuProvider` | plugin (root object) | Makes a submenu for the end of the Playback menu |
 | Host services | `IPluginHost` | app | What the app offers plugins: `player()` and `control()` |
 | | `IPlayerHost` | app | `addListener` / `removeListener` for playback events |
-| | `IPlayerControl` | app | Playback commands, deferred: today only `seek(ms)` |
+| | `IPlayerControl` | app | Playback commands, deferred: today `seek(ms)` and `play()` |
 | | `IPlayerListener` | plugin | Receives `trackStarted(TrackInfo)`, `stopped()`, `positionChanged(ms)` |
 | | `TrackInfo` | (plain data) | The playing song's fields as text, copied from the app's song |
 
@@ -194,7 +194,7 @@ Four ideas run through it:
  │        ▼                  │            │   and its Settings page   │
  │ PluginPlayerHost ─────────┼── events ──┼─▶ LyricsPresenter         │
  │ PluginManager: loads,     │            │   (the tab's presenter)   │
- │   hosts, shuts down       │            │   gets the events         │
+ │   hosts, shuts down       │            │   gets the events, seeks  │
  │ MainWindow, SettingsDialog│            │                           │
  │   add the tab and page    │            │                           │
  └───────────────────────────┘            └───────────────────────────┘
@@ -264,7 +264,8 @@ calls `seek` to jump back to A.
    moves, `PluginPlayerHost` calls `trackStarted`, `stopped` or
    `positionChanged` on each listener. When the loop sees a position past B,
    it calls `seek(A)`, which the host queues and then runs through
-   `PlaybackController`.
+   `PlaybackController`. A click on a lyrics line seeks the same way, to the
+   line's timestamp, then calls `play()`, so a paused song resumes there.
 4. **Shutdown.** The window's widgets are destroyed first, with the plugins'
    tabs; their presenters remove themselves as listeners. Then the
    `PluginManager` calls `shutdown()` on each plugin. Libraries are never

@@ -20,6 +20,10 @@ public:
   // whatever plays when it runs, so a seek called just before a song change
   // lands in the next song.
   virtual void seek(qint64 positionMs) = 0;
+  // Plays, as the app's Play button: resumes a paused song, and with nothing
+  // playing starts the shown playlist. Not bound to a song: it applies to
+  // whatever plays when it runs.
+  virtual void play() = 0;
 };
 
 #endif // IPLAYERCONTROL_H

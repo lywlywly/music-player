@@ -141,8 +141,12 @@ work as usual: its `QObject`s live in the DLL only.
 
 ### Commands: `IPlayerControl`
 
-* `seek` is the only command; `play`, `pause` and others come with a plugin
-  that uses them.
+* `seek` and `play` are the commands; `pause` and others come with a plugin
+  that uses them. `play` is the app's Play button (`PlaybackController::play`):
+  it resumes a paused song, and with nothing playing starts the shown
+  playlist. The host reports no pause, so a plugin that wants playback
+  running calls `play` without knowing whether it is paused; while playing
+  it changes nothing.
 * Its header states the contract of [event-ordering.md](../event-ordering.md)
   ("Plugin commands: the contract"), except rule 6: deferred, in order,
   allowed inside a listener call, callable from any thread, reported by
@@ -308,10 +312,11 @@ Frontend class. `MainWindow` creates it as a child `QObject` after
   backend switch replaces the player, and a direct connection would stay on
   the old one.
 * Implements `IPlayerControl` too, as it holds the `PlaybackController`;
-  `PluginManager::control()` returns it. `seek` queues
-  `PlaybackController::seek` with `QMetaObject::invokeMethod` and
-  `Qt::QueuedConnection`, with the host as the context, so a seek still
-  queued when the host is destroyed is dropped.
+  `PluginManager::control()` returns it. `seek` and `play` queue
+  `PlaybackController::seek` and `play` with `QMetaObject::invokeMethod` and
+  `Qt::QueuedConnection`, with the host as the context, so a command still
+  queued when the host is destroyed is dropped. Both go through the one
+  queue, so they run in the order they were called.
 
 ### Where the capabilities are used
 
@@ -462,6 +467,8 @@ through the built plugins in `Tests/plugins`.
     `setPosition`, so a seek run at once would show as the new position
     first.
   * A seek queued by a host that is then destroyed never runs.
+  * `play` on a paused song: still paused right after the call, playing
+    once the event loop runs.
   * `PluginManager` lists the built lyrics plugin from `Tests/plugins` as
     `Loaded`, with the id `lyrics`, the name `Lyrics` and its file name, and
     with a panel and a settings page.

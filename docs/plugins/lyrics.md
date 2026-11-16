@@ -1,12 +1,11 @@
 # Plan: Lyrics plugin
 
-Status: implemented. Planned: "Plan: Seeking from a line, hover and the
-scroll hold".
+Status: implemented.
 
 The Lyrics info panel tab: the playing song's lyrics, with the line for the
-play position highlighted and centered, and a Settings page for the font
-and highlight color. The plugin system it is built on is in
-[plugin-system.md](plugin-system.md); the info panel's tabs in
+play position highlighted and centered, a click on a line to play from it, and
+a Settings page for the font and highlight color. The plugin system it is
+built on is in [plugin-system.md](plugin-system.md); the info panel's tabs in
 [info-panel.md](../info-panel.md).
 
 ## Code: `src/plugins/lyrics/`
@@ -22,18 +21,22 @@ Built and deployed as every plugin is ([plugin-system.md](plugin-system.md),
   `IPanelProvider` and `ISettingsPageProvider`, and its metadata,
   `lyricsplugin.json` (`{ "id": "lyrics", "name": "Lyrics" }`).
 * `createPanel` creates a `LyricsPanel` (object name `lyricsPanel`) and its
-  `LyricsPresenter`, a child of the panel. The presenter implements
-  `IPlayerListener`, adds itself in its constructor and removes itself in its
-  destructor, so it listens for the panel's lifetime, while the host exists.
-  The plugin keeps the presenters (`QPointer`s, as the panels are deleted by
-  the tab widget).
+  `LyricsPresenter`, a child of the panel, with the host's `IPlayerHost` and
+  `IPlayerControl`. The presenter implements `IPlayerListener`, adds itself
+  in its constructor and removes itself in its destructor, so it listens for
+  the panel's lifetime, while the host exists. The plugin keeps the
+  presenters (`QPointer`s, as the panels are deleted by the tab widget).
 * `LyricsPresenter` owns the `LyricsManager`, shows the playing song's lyrics
-  in its `LyricsPanel` and applies the style settings to it. `LyricsManager`
-  holds the lyrics and moves the current line with the play position.
+  in its `LyricsPanel`, plays from a clicked line, and applies the style
+  settings to the panel. `LyricsManager` holds the lyrics, moves the current
+  line with the play position, and gives a line's timestamp
+  (`lineStartMs`).
 * `LyricsPanel` keeps the index of its current line and re-centers on it,
   without animation, in `showEvent` and `resizeEvent`: the tab keeps getting
   positions while hidden, but a `QTabWidget` sizes only its current page, so
   the hidden panel can be resized later ([info-panel.md](../info-panel.md)).
+  It handles the hover, the click and the scroll hold ("Seeking from a line,
+  hover and the scroll hold").
 
 ## Where lyrics come from (`LyricsLoader`)
 
@@ -79,33 +82,34 @@ Built and deployed as every plugin is ([plugin-system.md](plugin-system.md),
   application font's CJK fallback families ([ui-styling.md](../ui-styling.md))
   still cover characters the chosen font lacks.
 
-## Plan: Seeking from a line, hover and the scroll hold
+## Seeking from a line, hover and the scroll hold
 
-Status: planned.
+The lyrics panel is a list of lines that can be clicked:
 
-The lyrics panel becomes a list of lines that can be clicked:
-
-* **Hover**: the line under the pointer is highlighted in the selection
-  colors, and the pointer is a pointing hand over a line.
-* **Click**: a single click on a line seeks to its timestamp.
+* **Hover**: the line under the pointer is highlighted as the current line
+  is, and the pointer is a pointing hand over a line.
+* **Click**: a single click on a line plays from its timestamp: it seeks
+  there, and a paused song resumes.
 * **Scroll hold**: scrolling the panel with the wheel or touchpad stops it
   following playback, so the view is not pulled back while the user looks
   for a line. Following resumes after a seek from a line, with new lyrics,
   or 3 s after the user last scrolled or moved the pointer over the panel.
 
-No API change: `IPluginHost::control()` already gives the `IPlayerControl`
-whose `seek` A-B Repeat uses ([plugin-system.md](plugin-system.md),
-"Commands: `IPlayerControl`").
+The click calls `IPlayerControl::seek`, the command A-B Repeat uses, then
+`IPlayerControl::play` ([plugin-system.md](plugin-system.md), "Commands:
+`IPlayerControl`").
 
 ### Classes
 
-| Class | Change |
-| --- | --- |
-| `LyricsPanel` | An event filter on the text edit's viewport handles press, release, mouse move, leave and wheel; it sends `lineClicked(int index)`. It holds the hovered line, the pressed line, the pointer's last position over the viewport, and the scroll hold (a flag and a single-shot `QTimer`). One method sets the extra selections from the current and hovered lines, for the line change, the hover and `setHighlightTextColor` |
-| `LyricsManager` | `qint64 lineStartMs(int index) const`: the timestamp of line `index`, from `keys` |
-| `LyricsPresenter` | Takes the `IPlayerControl &` beside the `IPlayerHost &`; connects `lineClicked` to `seek(lyricsManager_.lineStartMs(index))` |
-| `LyricsPlugin` | `createPanel` passes `host_->control()` to the presenter |
-
+* `LyricsPanel` installs an event filter on its text edit's viewport, which
+  handles press, double click, release, mouse move, leave and wheel, and
+  sends `lineClicked(int index)`. It holds the hovered line, the pressed
+  line, the pointer's last position over the viewport, and the scroll hold
+  (a flag and a single-shot `QTimer`). `updateSelections` sets the extra
+  selections from the current and hovered lines, for a line change, the
+  hover and `setHighlightTextColor`.
+* `LyricsPresenter` connects `lineClicked` to
+  `seek(lyricsManager_.lineStartMs(index))`, then `play()`.
 * The panel sends a line number, not a time: it holds only the text, and
   the timestamps stay in `LyricsManager`. The presenter joins them, as it
   does for the highlight.
@@ -116,75 +120,86 @@ whose `seek` A-B Repeat uses ([plugin-system.md](plugin-system.md),
 
 ### Click
 
-* **On release, on the line that was pressed.** The press notes the line
-  under the pointer; the release seeks only if it is over the same line.
-  Moving off the line before releasing cancels, as with a button. Lines are
-  compared by index, so a line change that scrolls another line under the
-  pointer between press and release cancels too; the scroll lasts 300 ms
-  every few seconds, so this is rare.
+* **On release, on the line that was pressed**, with the left button. The
+  press notes the line under the pointer; the release seeks only if it is
+  over the same line. Moving off the line before releasing cancels, as with
+  a button. Lines are compared by index, so a line change that scrolls
+  another line under the pointer between press and release cancels too; the
+  scroll lasts 300 ms every few seconds, so this is rare. The second press
+  of a double click arrives as a double-click event, which counts as a
+  press, so two quick clicks on different lines both seek.
 * **Only on a line.** The point's y, plus the scroll value, must lie in the
   line's block rectangle (`blockBoundingRect`, in document coordinates):
   `cursorForPosition` alone returns the nearest block, so a click below the
-  last line, or on an empty panel, would seek to the last line. The x is
-  not checked: the rectangle spans the document's width, as the hover
-  highlight does, so a click beside a short centered line counts.
+  last line would seek to the last line. An empty panel still has one empty
+  block, so the panel also keeps the number of lyrics lines, and a block
+  past it is not a line. The x is not checked: the rectangle spans the
+  document's width, as the hover highlight does, so a click beside a short
+  centered line counts.
 * **Blank timestamped lines are lines**: in LRC they mark instrumental
   breaks, so they are places in the song worth seeking to.
-* **No text interaction and no focus** on the text edit
-  (`Qt::NoTextInteraction`, `Qt::NoFocus`): a single click cannot both
-  select text and seek, and the panel is a list of lines. Without focus,
-  the keyboard does not scroll it either, so the wheel is the only way the
-  user scrolls it.
-  * `setTextInteractionFlags(Qt::NoTextInteraction)` replaces the
-    constructor's `setReadOnly(true)`: a text edit is read-only when its
-    flags lack `TextEditable`, and `setReadOnly(true)` sets
-    `TextSelectableByMouse`, so calling it after would bring selection
-    back.
-  * The filter consumes press, release and mouse move (returns `true`):
-    with no text interaction the text edit has nothing to do with them,
-    and consuming them leaves the viewport's cursor to the panel alone.
-    It does not consume wheel or leave.
+* **No text interaction, no focus and no context menu** on the text edit
+  (`Qt::NoTextInteraction`, `Qt::NoFocus`, `Qt::NoContextMenu`): a single
+  click cannot both select text and seek, and the panel is a list of lines.
+  Without focus, the keyboard does not scroll it either, so the wheel is the
+  only way the user scrolls it. With no text interaction the text edit's
+  context menu would be empty.
+  * `setTextInteractionFlags(Qt::NoTextInteraction)` instead of
+    `setReadOnly(true)`: a text edit is read-only when its flags lack
+    `TextEditable`, and `setReadOnly(true)` sets `TextSelectableByMouse`.
+  * The filter consumes press, double click, release and mouse move
+    (returns `true`): with no text interaction the text edit has nothing to
+    do with them, and consuming them leaves the viewport's cursor to the
+    panel alone. It does not consume wheel or leave.
   * Rejected: keeping selection and seeking only on a click without a drag.
     It needs a drag threshold to tell the two apart, and one gesture would
     then do two different things.
   * Cost: lyrics cannot be selected or copied from the panel.
+* **A click while paused plays from the line.** Clicking a line asks to
+  hear it; seeking alone would leave the song paused at a line the user
+  cannot hear, and the highlight still on the old line, as GStreamer sends
+  no positions while paused (`GstAudioPlayer::updatePosition` returns
+  before emitting unless playing).
+  * `play` is the Play button's command, so it is called on every click:
+    while playing it changes nothing, and the plugin need not know whether
+    the song is paused (the host reports no pause). A line can be clicked
+    only while a song is loaded, as a stop clears the lyrics, so `play`
+    starts the shown playlist only in the race below, as the last song
+    ends.
+  * The seek comes first, and commands run in order: the song resumes at
+    the line, not for a moment where it was paused.
+  * Rejected: seeking only, leaving the paused state. Seeking to a line
+    and pressing Play would take two actions for what one click means.
 * **The highlight is not moved on click.** It follows the next position,
   as every command's effect comes through the listener events
   ([event-ordering.md](../event-ordering.md), "Plugin commands: the
-  contract"), so the highlight moves only with positions, as it does
-  today. That is the queued seek's event-loop turn plus up to one position
-  update (100 ms with GStreamer, `GstAudioPlayer`'s position timer). While
-  paused, GStreamer sends no positions (`GstAudioPlayer::updatePosition`
-  returns before emitting unless playing), so the highlight moves when
-  playback resumes. Qt Multimedia's position reporting while paused is
-  Qt's, checked by hand.
+  contract"), so the highlight moves only with positions. That is the
+  queued seek's event-loop turn plus up to one position update (100 ms with
+  GStreamer, `GstAudioPlayer`'s position timer).
 * **A click just before a song change seeks the next song**: the known race
   of plugin seeks ([event-ordering.md](../event-ordering.md), "A plugin seek
-  lands in the next song"), closed by the playback generation.
+  lands in the next song"), closed by the playback generation. Likewise, a
+  click as the last song of the playlist ends runs its `play` after the
+  stop, which starts the shown playlist as the Play button would; the
+  generation check would drop both commands.
 
 ### Hover
 
-* Mouse tracking on the viewport. The hovered line gets a full-width extra
-  selection with the palette's `Highlight` background and `HighlightedText`
-  text, the colors of selected text, so it follows the light and dark
-  theme ([ui-styling.md](../ui-styling.md), "Display theme"). Not the
-  playlist tables' gray band (`TableSelectionStyle`): that is a Windows fix
-  for table rows, painted by a style, which a text edit's extra selection
-  cannot use.
-* The extra selections are the current line's, then the hovered line's: the
-  later one draws over the earlier, so a hovered current line looks like
-  the other hovered lines, and its highlight color comes back once the
-  pointer leaves it. Drawn the other way, the highlight color would be on the
-  `Highlight` background, which can be the same blue.
+* Mouse tracking on the viewport. The hovered line gets the current line's
+  highlight: a full-width extra selection in the highlight color
+  (`lyrics/highlight_color`). One highlight style for the panel, set in one
+  place; the pointing hand tells a hovered line from the current one.
+* Rejected: the selection colors (the palette's `Highlight` background and
+  `HighlightedText` text). A second style beside the highlight color, and a
+  hovered current line would need an order between the two.
 * The hovered line follows the content, not only the pointer: on the scroll
-  bar's `valueChanged`, while the pointer is over the viewport, it is found
-  again from the pointer's last position. Auto-follow and the wheel move
-  lines under a pointer that does not move, which sends no mouse move. The
-  position is the one the last mouse move gave, not `QCursor::pos()`: the
-  events already carry it in viewport coordinates, and a test's mouse moves
-  do not move the system cursor.
-* Leaving the viewport, new lyrics and a stop clear it; the next mouse move
-  finds the line again.
+  bar's `valueChanged` and on new lyrics, while the pointer is over the
+  viewport, it is found again from the pointer's last position. Auto-follow
+  and the wheel move lines under a pointer that does not move, which sends
+  no mouse move. The position is the one the last mouse move gave, not
+  `QCursor::pos()`: the events already carry it in viewport coordinates, and
+  a test's mouse moves do not move the system cursor.
+* Leaving the viewport clears it and forgets the position.
 * The cursor is `Qt::PointingHandCursor` over a line, the arrow elsewhere.
 
 ### Scroll hold
@@ -195,8 +210,8 @@ whose `seek` A-B Repeat uses ([plugin-system.md](plugin-system.md),
 * **While held**, a line change moves the current line's color but does not
   scroll, and `showEvent` and `resizeEvent` do not re-center (the re-center
   of [info-panel.md](../info-panel.md), "Lyrics while hidden").
-* A Ctrl+wheel zooms the text, as a read-only `QTextEdit` does today; it is
-  a wheel event, so it holds following too.
+* A Ctrl+wheel zooms the text, as a `QTextEdit` without `TextEditable` does;
+  it is a wheel event, so it holds following too.
 * **The hold ends**:
   * when the timer fires, 3 s (`kScrollHoldMs`) after the last wheel event
     or mouse move over the viewport. While held, mouse moves restart it
@@ -204,50 +219,30 @@ whose `seek` A-B Repeat uses ([plugin-system.md](plugin-system.md),
     scrolls back to the current line with the usual animation;
   * on a click that seeks, without scrolling: the seek's line change
     scrolls to the clicked line. Scrolling back to the old line first would
-    move the view away and back. While paused with GStreamer, that line
-    change waits for playback to resume, so the view stays as the user left
-    it;
+    move the view away and back;
   * on new lyrics (`setLyricsPanel`, which a stop calls too), whose view
     starts at the first line.
 * 3 s is a constant, not a setting: nothing asks to change it.
 * Rejected: holding until the pointer leaves the panel. A pointer left
   resting over the panel would stop it following for the rest of the song.
 
-### Tests for the plan
-
-* `tst_lyricspanel`:
-  * A press and release on line N sends `lineClicked(N)`; a release on
-    another line, a click below the last line, and a click on an empty panel
-    send nothing.
-  * A mouse move over line N gives it the hover selection, with the
-    `Highlight` background, after the current line's; a `QEvent::Leave`
-    sent to the viewport clears it.
-  * After a wheel event (a `QWheelEvent` sent to the viewport with
-    `QApplication::sendEvent`), a line change does not scroll; once the
-    hold ends (`QTRY_COMPARE`, within its 5 s default) the current line is
-    centered. A click ends the hold at once: the next line change scrolls.
-  * The presenter, with an `IPlayerHost` and an `IPlayerControl` made by
-    the test (the control records seeks, as `RecordingControl` in
-    `tst_abrepeat`): after a `trackStarted` with timestamped lyrics, a click
-    on a line seeks to its timestamp. It covers `lineStartMs`. In
-    `tst_lyricspanel`, which already links `mylyrics` and runs offscreen.
-* By hand: a click seeks, playing and paused, with GStreamer and Qt
-  Multimedia; the hover colors in the light and dark theme and on the
-  current line; touchpad scrolling on macOS and Windows, the hold, and the
-  return after 3 s.
-
-### Docs once built
-
-* This section: rewritten as the design in use, under the code sections,
-  and "Status: implemented".
-* [info-panel.md](../info-panel.md), "Lyrics while hidden": no re-center
-  while the scroll hold is on.
-* README.md: clicking a line seeks. roadmap.md: the item checked.
-
 ## Tests
 
 * `tst_lyrics`, `tst_lyricspanel`: link `mylyrics`; `resolveLyrics` cases
   take `TrackInfo`.
+* `tst_lyricspanel`, besides the re-center ([info-panel.md](../info-panel.md)):
+  * A click on line N sends `lineClicked(N)`; a release on another line, a
+    click below the last line, and a click on an empty panel send nothing.
+  * A mouse move over line N gives it a selection in the highlight color,
+    beside the current line's, and the pointing hand; a `QEvent::Leave`
+    sent to the viewport clears both.
+  * After a wheel event sent to the viewport, a line change does not
+    scroll; once the hold ends the current line is centered. A click ends
+    the hold at once: the next line change scrolls.
+  * The presenter, with an `IPlayerHost` and an `IPlayerControl` made by
+    the test (the control records commands): after a `trackStarted` with
+    timestamped lyrics, a click on a line seeks to its timestamp, then
+    plays.
 * `tst_plugins`, through the built plugin in `Tests/plugins`:
   * The panel shows the tag lyrics of the song that starts and clears on
     stop.
@@ -258,3 +253,7 @@ whose `seek` A-B Repeat uses ([plugin-system.md](plugin-system.md),
     restyles the open panel. Which font the combo selects for a stored
     family is Qt's substitution, checked by hand: the offscreen platform has
     no fonts.
+* By hand: a click plays from the line, playing and paused, with GStreamer
+  and Qt Multimedia, with no moment of the paused position heard; the hover
+  highlight; touchpad scrolling on macOS and Windows, the hold, and the
+  return after 3 s.

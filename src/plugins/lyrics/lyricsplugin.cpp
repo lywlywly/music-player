@@ -19,7 +19,8 @@ QString LyricsPlugin::panelTitle() const { return tr("Lyrics"); }
 QWidget *LyricsPlugin::createPanel(QWidget *parent) {
   auto *panel = new LyricsPanel(parent);
   panel->setObjectName("lyricsPanel");
-  auto *presenter = new LyricsPresenter(panel, host_->player());
+  auto *presenter =
+      new LyricsPresenter(panel, host_->player(), host_->control());
   presenter->applySettings();
   presenters_.append(presenter);
   return panel;

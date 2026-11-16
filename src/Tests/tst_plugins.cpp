@@ -100,6 +100,7 @@ private slots:
   void playerHost_forwardsStartPositionAndStop();
   void playerHost_seekRunsAfterTheDelivery();
   void playerHost_dropsQueuedSeekWhenDestroyed();
+  void playerHost_playResumesAfterTheCall();
   void manager_loadsLyricsPlugin();
   void lyricsSettings_loadSaveAndRestyleOpenPanels();
   void manager_skipsNonLibrariesAndDuplicateIds();
@@ -258,6 +259,20 @@ void TestPlugins::playerHost_dropsQueuedSeekWhenDestroyed() {
   QTest::qWait(50);
   QVERIFY(listener.events.isEmpty());
   watching.removeListener(&listener);
+}
+
+void TestPlugins::playerHost_playResumesAfterTheCall() {
+  addSong();
+  PluginPlayerHost host(*controller_);
+  controller_->play();
+  controller_->pause();
+
+  host.play();
+  // Deferred: still paused right after the call.
+  QCOMPARE(controller_->manager().getStatus(),
+           PlaybackQueue::PlaybackStatus::Paused);
+  QTRY_COMPARE(controller_->manager().getStatus(),
+               PlaybackQueue::PlaybackStatus::Playing);
 }
 
 void TestPlugins::manager_loadsLyricsPlugin() {

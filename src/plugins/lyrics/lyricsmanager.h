@@ -11,6 +11,8 @@ public:
   void setLyrics(std::map<int, std::string> &&);
   const std::map<int, std::string> &getCurrentLyricsMap() const;
   void onPlayerProgressChange(qint64 progress);
+  // The timestamp of line index, in the order of the lyrics map.
+  qint64 lineStartMs(int index) const;
 signals:
   void newLyricsLineIndex(int newIndex);
 

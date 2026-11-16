@@ -98,7 +98,9 @@ So `LyricsPanel` keeps the index of its current line (`currentLine_`, set by
 `scrollToIndexCenter`, reset by `setLyricsPanel`) and re-centers on it without
 animation in `showEvent` and `resizeEvent`, stopping a scroll animation
 started while hidden. This also keeps the line centered when the shown panel
-is resized.
+is resized. Not while the user holds following by scrolling
+([plugins/lyrics.md](plugins/lyrics.md), "Scroll hold"): the view stays where
+they scrolled it.
 
 ### Properties tab contents
 
@@ -300,7 +302,9 @@ have, is left out, and so is a section with no rows.
   and not on one that keeps it first, on removing selected rows and not on
   removing an unselected one, and on an autoplaylist reset.
 * `tst_lyricspanel`: the current line is centered after a line change and a
-  resize while hidden, then show; new lyrics forget the current line.
+  resize while hidden, then show; new lyrics forget the current line. Its
+  click, hover and scroll hold tests are in
+  [plugins/lyrics.md](plugins/lyrics.md).
 * `tst_mainwindow`: the Lyrics (from the plugin in `Tests/plugins`),
   Properties and Spectrum tabs exist, the saved tab is restored, the
   Properties tab shows the selected song in the real window, and Edit

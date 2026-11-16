@@ -26,6 +26,7 @@ public:
   void removeListener(IPlayerListener *listener) override;
 
   void seek(qint64 positionMs) override;
+  void play() override;
 
 private:
   PlaybackController &playback_;

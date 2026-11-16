@@ -10,6 +10,8 @@ namespace {
 class RecordingControl : public IPlayerControl {
 public:
   void seek(qint64 positionMs) override { seeks << positionMs; }
+  // A-B Repeat only seeks.
+  void play() override {}
 
   QList<qint64> seeks;
 };

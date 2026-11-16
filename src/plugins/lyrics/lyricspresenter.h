@@ -7,18 +7,21 @@
 #include <QObject>
 #include <QString>
 
+class IPlayerControl;
 class IPlayerHost;
 class LyricsPanel;
 
 // Shows the playing song's lyrics in a lyrics panel, highlights the line for
-// the playback position, and applies the lyrics font and highlight color.
-// A child of its panel: it listens to the player host for the panel's
-// lifetime, and the panel is destroyed before the host.
+// the playback position, plays from a clicked line's timestamp, and applies the
+// lyrics font and highlight color. A child of its panel: it listens to the
+// player host for the panel's lifetime, and the panel is destroyed before the
+// host.
 class LyricsPresenter : public QObject, public IPlayerListener {
   Q_OBJECT
 
 public:
-  LyricsPresenter(LyricsPanel *lyricsPanel, IPlayerHost &player);
+  LyricsPresenter(LyricsPanel *lyricsPanel, IPlayerHost &player,
+                  IPlayerControl &control);
   ~LyricsPresenter() override;
 
   // Loads the song's lyrics (see LyricsLoader::resolveLyrics).
@@ -37,6 +40,7 @@ private:
   void setHighlightColor(const QColor &color);
   LyricsPanel *lyricsPanel_;
   IPlayerHost &player_;
+  IPlayerControl &control_;
   LyricsManager lyricsManager_;
 };
 

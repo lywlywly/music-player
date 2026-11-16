@@ -37,9 +37,10 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
   - ✅ Multi-value tag edit input using `;` separator
 - ✅ Lyrics
   - ✅ Embedded tag lyrics on play, with `.lrc` fallback
-  - 🟡 Lyrics panel polish
-    - ⬜ Click a line to seek, hover highlight, scroll hold; see
-      `docs/plugins/lyrics.md` (Plan: Seeking from a line, hover and the scroll
+  - ✅ Lyrics panel polish
+    - ✅ Click a line to play from it (plugin `play` command), hover
+      highlight, scroll hold; see
+      `docs/plugins/lyrics.md` (Seeking from a line, hover and the scroll
       hold)
 - ✅ Info panel: Lyrics and Properties tabs (top left)
   - ✅ Lyrics panel moved into a tab

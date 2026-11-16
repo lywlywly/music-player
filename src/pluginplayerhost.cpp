@@ -68,3 +68,9 @@ void PluginPlayerHost::seek(qint64 positionMs) {
       this, [this, positionMs]() { playback_.seek(positionMs); },
       Qt::QueuedConnection);
 }
+
+void PluginPlayerHost::play() {
+  // Queued as seek is, so the two run in the order they were called.
+  QMetaObject::invokeMethod(
+      this, [this]() { playback_.play(); }, Qt::QueuedConnection);
+}
