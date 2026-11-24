@@ -1,7 +1,7 @@
 #include <QObject>
 #include <QTest>
 
-#include "../cloudplaystatssyncservice.h"
+#include "../plugins/playstats/cloudplaystatssyncservice.h"
 
 class TestCloudPlayStatsSync : public QObject {
   Q_OBJECT

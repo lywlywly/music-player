@@ -73,7 +73,7 @@ private slots:
   void create_fillsMatchingMonitoredSongsInFilepathOrder();
   void loadAll_restoresAutoPlaylists();
   void scanChanges_updateRowsBeforeRelease();
-  void notifySongChanged_reevaluatesPlayStats();
+  void providedValuesRefresh_reevaluatesAutoPlaylists();
   void refreshPlaylistMetadata_updatesAutoPlaylists();
   void invalidExpression_hasNoRowsAndKeepsText();
   void reloadAutoPlaylistExpressions_resolvesNewFields();
@@ -370,15 +370,33 @@ void TestAutoPlaylist::scanChanges_updateRowsBeforeRelease() {
   QCOMPARE(order, (QStringList{"row removed", "song deleted"}));
 }
 
-void TestAutoPlaylist::notifySongChanged_reevaluatesPlayStats() {
+void TestAutoPlaylist::providedValuesRefresh_reevaluatesAutoPlaylists() {
+  // A plugin's field (play stats), keyed by title.
+  registry_->addPluginField({.id = "play_count", .title = "Play Count"},
+                            {.id = "play_count",
+                             .source = ColumnSource::Plugin,
+                             .valueType = ValueType::Number,
+                             .writable = false});
+  ProvidedValuesByKey counts;
+  library_->addProvidedSource(
+      {.sourceId = "test",
+       .fields = {{.id = "play_count", .type = ValueType::Number}},
+       .keyFields = {"title"},
+       .songKey = [](const QStringList &values) { return values.at(0); },
+       .values = [&counts](const QStringList &) { return counts; },
+       .allValues = [&counts]() { return counts; }});
   QVERIFY(writeFile(root() + "/a.mp3", "A;jazz"));
   watchRoot();
   const int a = pkOf("a.mp3");
+  collection_->notifySongsChanged(library_->refreshStale());
   const int id = collection_->createAutoPlaylist("Played", "play_count > 0");
   QVERIFY(collection_->playlist(id)->empty());
 
-  QVERIFY(library_->incrementPlayCount(a));
-  collection_->notifySongChanged(a);
+  const QString key =
+      QString::fromStdString(library_->getSongByPK(a).at("title").text);
+  counts.insert(key, {1});
+  library_->markStale("test", {key});
+  collection_->notifySongsChanged(library_->refreshStale());
 
   QCOMPARE(rows(*collection_->playlist(id)), std::vector<int>{a});
 }

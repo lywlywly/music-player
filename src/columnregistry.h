@@ -26,7 +26,19 @@ public:
   static QString computedFieldId(QStringView idOrKey);
   static QString computedKeyFromFieldId(QStringView fieldId);
   bool isBuiltInSongAttributeKey(const QString &id) const;
+  // Whether a computed field with this key would clash with a field: a
+  // computed one of that key, or a plugin field of that id (both would take
+  // the same expression symbol).
   bool isReservedComputedFieldKey(const QString &key) const;
+  bool isPluginFieldId(const QString &id) const;
+  // The plugin fields' ids, in registration order.
+  QList<QString> pluginFieldIds() const;
+  // Whether a field, a column or an expression symbol has this name.
+  bool isNameInUse(const QString &name) const;
+  // A field a plugin provides (ColumnSource::Plugin), after the built-ins.
+  // The caller checks isNameInUse first. Kept by loadDynamicColumns.
+  void addPluginField(const ColumnDefinition &column,
+                      const FieldDefinition &field);
   QList<ColumnDefinition> definitions() const;
   QList<FieldDefinition> fieldDefinitions() const;
   std::vector<ExprSymbolInfo> expressionSymbols() const;

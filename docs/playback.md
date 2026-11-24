@@ -1,7 +1,7 @@
 # Playback
 
-What plays and in which order, how unplayable songs are skipped, how plays
-are counted, the audio backends, ReplayGain, the GStreamer setup on Windows,
+What plays and in which order, how unplayable songs are skipped, the audio
+backends, ReplayGain, the GStreamer setup on Windows,
 and the OS media controls. The classes are backend unless marked; how they
 fit the rest of the app is in [architecture.md](architecture.md).
 
@@ -42,7 +42,8 @@ fit the rest of the app is in [architecture.md](architecture.md).
   * Signals: `songAboutToStart` (before the source is set, since the backend
     may report duration and position during `setSource`), `songStarted`,
     `playbackStateChanged` (resume, pause, stop), `movedToRow` (Next, Prev,
-    Random), `playbackFailed`, `playCounted`, and the backend's position,
+    Random), `seeking` (before the backend is told), `songFinished` (before
+    Next), `playbackFailed`, and the backend's position,
     duration and bitrate. The backend's signals reach the window and the
     presenters only through it, so a backend switch needs no reconnecting.
     `SystemMediaPresenter` connects to the state, seek, position and duration
@@ -160,7 +161,7 @@ fit the rest of the app is in [architecture.md](architecture.md).
   (`PlaylistCollection::songsRemovedFromLibrary`) stops playback if it is
   playing or paused, and resets `currentSongPk()` to -1.
 * A song that cannot be played is skipped with `next()`: its file is missing
-  (checked in `playSong` before the play stats are updated), or the backend
+  (checked in `playSong` before `songStarted`), or the backend
   reports `InvalidMedia` (`GstAudioPlayer` reports bus errors that way too).
   * The previous song's audio stops at once, so its position updates cannot
     reset the failure count and its `EndOfMedia` cannot start a second skip.
@@ -289,18 +290,13 @@ fit the rest of the app is in [architecture.md](architecture.md).
 
 ## Play statistics
 
-* `last_played_timestamp` is set when playback starts.
-* `play_count` goes up once per play session. `PlayCompletionTracker`
-  decides when: the song reached `min(90%, end - 5 s)` and two thirds of its
-  duration were listened to while playing; a seek adds no listened time. It
-  keeps the duration across sessions, since the backend may not report an
-  unchanged duration again (replaying the same song).
-* `PlaybackController` checks it on position updates and `EndOfMedia`, then
-  calls `SongLibrary::incrementPlayCount`, `markCounted()` and
-  `PlaylistCollection::notifySongChanged`, and emits `playCounted(songPk)`,
-  which `MainWindow` connects to the cloud push ([cloud-sync.md](cloud-sync.md)).
-* Stats belong to the song's identity (normalized `title|artist|album`), so
-  files with the same identity share them.
+`PlaybackController` does not count plays: the Play Stats plugin does, from
+the listener events `PluginPlayerHost` forwards (start, pause, resume,
+position, duration, seek, end); see
+[plugins/playstats.md](plugins/playstats.md), "Counting plays". It keeps
+the duration across sessions, since the backend may not report an unchanged
+duration again (replaying the same song). `playSong` repaints the started
+song's rows after its tag refresh (`notifySongChanged`).
 
 ## System media controls
 

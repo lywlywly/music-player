@@ -19,8 +19,6 @@ MSong makeSong(const std::string &title, const std::string &path) {
   MSong song;
   song.insert_or_assign("title", FieldValue(title, "title"));
   song.insert_or_assign("filepath", FieldValue(path, "filepath"));
-  song.insert_or_assign("song_identity_key",
-                        FieldValue(title, "song_identity_key"));
   return song;
 }
 } // namespace

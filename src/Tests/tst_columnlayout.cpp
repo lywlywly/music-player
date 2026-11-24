@@ -16,6 +16,7 @@ private slots:
   void persistsOrderVisibilityAndWidth();
   void refreshFromRegistry_addsNewColumnWithDefaultVisibility();
   void refreshFromRegistry_removesUnknownIdsAndKeepsVisibleColumn();
+  void refreshFromRegistry_keepsSavedWidthOfLaterColumn();
 
 private:
   QString orgName_;
@@ -92,6 +93,25 @@ void TestColumnLayout::
 
   QVERIFY(!manager.allOrderedColumnIds().contains("attr:ghost"));
   QVERIFY(!manager.visibleColumnIds().isEmpty());
+}
+
+void TestColumnLayout::refreshFromRegistry_keepsSavedWidthOfLaterColumn() {
+  // A custom field (or a plugin's) is registered after the layout loads, as
+  // in the window: its saved width is read when the registry has it, and kept
+  // when another width is saved.
+  QSettings().setValue("playlist/columns/width/attr:rating", 333);
+  ColumnRegistry registry;
+  GlobalColumnLayoutManager manager(registry);
+  registry.addOrUpdateDynamicColumn({.id = "attr:rating", .title = "Rating"},
+                                    {.id = "attr:rating",
+                                     .source = ColumnSource::SongAttribute,
+                                     .valueType = ValueType::Number});
+  manager.refreshFromRegistry();
+  QCOMPARE(manager.columnWidth("attr:rating"), 333);
+
+  manager.setColumnWidth("artist", 222);
+  QCOMPARE(QSettings().value("playlist/columns/width/attr:rating").toInt(),
+           333);
 }
 
 QTEST_MAIN(TestColumnLayout)

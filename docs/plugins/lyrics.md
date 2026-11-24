@@ -162,7 +162,7 @@ The click calls `IPlayerControl::seek`, the command A-B Repeat uses, then
   before emitting unless playing).
   * `play` is the Play button's command, so it is called on every click:
     while playing it changes nothing, and the plugin need not know whether
-    the song is paused (the host reports no pause). A line can be clicked
+    the song is paused. A line can be clicked
     only while a song is loaded, as a stop clears the lyrics, so `play`
     starts the shown playlist only in the race below, as the last song
     ends.

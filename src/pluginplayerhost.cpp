@@ -34,13 +34,22 @@ PluginPlayerHost::PluginPlayerHost(PlaybackController &playback,
           listener->trackStarted(track);
         }
       });
+  // A song start sends songStarted, not playbackStateChanged, so resumed()
+  // is only a paused song playing again.
   connect(&playback, &PlaybackController::playbackStateChanged, this,
           [this](PlaybackQueue::PlaybackStatus status) {
-            if (status != PlaybackQueue::PlaybackStatus::None) {
-              return;
-            }
             for (IPlayerListener *listener : listeners_) {
-              listener->stopped();
+              switch (status) {
+              case PlaybackQueue::PlaybackStatus::None:
+                listener->stopped();
+                break;
+              case PlaybackQueue::PlaybackStatus::Paused:
+                listener->paused();
+                break;
+              case PlaybackQueue::PlaybackStatus::Playing:
+                listener->resumed();
+                break;
+              }
             }
           });
   connect(&playback, &PlaybackController::positionChanged, this,
@@ -49,6 +58,23 @@ PluginPlayerHost::PluginPlayerHost(PlaybackController &playback,
               listener->positionChanged(positionMs);
             }
           });
+  connect(&playback, &PlaybackController::durationChanged, this,
+          [this](qint64 durationMs) {
+            for (IPlayerListener *listener : listeners_) {
+              listener->durationChanged(durationMs);
+            }
+          });
+  connect(&playback, &PlaybackController::seeking, this,
+          [this](qint64 positionMs) {
+            for (IPlayerListener *listener : listeners_) {
+              listener->seeked(positionMs);
+            }
+          });
+  connect(&playback, &PlaybackController::songFinished, this, [this]() {
+    for (IPlayerListener *listener : listeners_) {
+      listener->finished();
+    }
+  });
 }
 
 void PluginPlayerHost::addListener(IPlayerListener *listener) {

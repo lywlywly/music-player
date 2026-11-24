@@ -31,7 +31,7 @@ Each page's contents are described in its feature's doc (see "Pages").
   change of the dialog's width goes to the pages.
 * The dialog opens on Playback.
 * OK (`accepted`) runs `applySettings`, which applies Playback, the plugin
-  pages, the Plugins page, Display, Cloud Sync and Fields. Library's
+  pages, the Plugins page, Display and Fields. Library's
   actions apply at once, not on OK.
 
 ## Pages
@@ -42,8 +42,7 @@ Each page's contents are described in its feature's doc (see "Pages").
 | Library | `LibraryFoldersPage` | [monitored-library.md](monitored-library.md) |
 | Fields | Custom tag and computed fields (`.ui`) | [architecture.md](architecture.md), "Column and layout metadata" |
 | Display | Theme, status bar and window title expressions (built in code) | [expressions.md](expressions.md), [ui-styling.md](ui-styling.md) |
-| Cloud Sync | User UUID (`.ui`) | [cloud-sync.md](cloud-sync.md) |
-| Plugins | `PluginsPage`; a child per loaded plugin with a settings page, in load order, titled with its `settingsPageTitle()`; expanded | [plugins/plugin-system.md](plugins/plugin-system.md) |
+| Plugins | `PluginsPage`; a child per loaded plugin with a settings page, in load order, titled with its `settingsPageTitle()` (Lyrics, Play Stats with the cloud sync UUID); expanded | [plugins/plugin-system.md](plugins/plugin-system.md), [cloud-sync.md](cloud-sync.md) |
 
 * A new built-in page is a new top-level item, before Plugins.
 

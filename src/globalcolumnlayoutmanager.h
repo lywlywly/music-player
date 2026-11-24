@@ -24,8 +24,9 @@ public:
   void setOrder(const QList<QString> &orderedIds);
   // Used at startup after the registry is loaded from DB. It normalizes the
   // persisted layout against current columns (drop unknown ids, append new
-  // ids, apply defaults for new columns, keep at least one visible), then
-  // persists and emits layoutChanged() only if order/visibility changed.
+  // ids, apply defaults for new columns, keep at least one visible), reads
+  // the saved widths of new columns, then persists and emits layoutChanged()
+  // only if order/visibility changed.
   void refreshFromRegistry();
   const ColumnRegistry &registry() const;
 
@@ -34,6 +35,8 @@ signals:
 
 private:
   void load();
+  // Reads the saved width of each registry column that has none yet.
+  void loadSavedWidths();
   void persist() const;
   QList<QString> normalizeOrder(const QList<QString> &orderedIds) const;
 

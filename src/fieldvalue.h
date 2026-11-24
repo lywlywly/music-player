@@ -22,7 +22,12 @@ struct FieldValue {
   } typed{.numberInt = 0};
 
   FieldValue() = delete;
+  // Typed by the field's definition in FieldTypePool.
   FieldValue(const std::string &textValue, std::string fieldIdValue);
+  // Typed by valueType, for a field the pool may not have: a provided field
+  // built on the library load's worker (docs/plugins/playstats.md).
+  FieldValue(const std::string &textValue, std::string fieldIdValue,
+             ValueType valueType);
 
   void assign(const std::string &textValue, std::string fieldIdValue);
   ValueType valueType() const;
@@ -33,6 +38,9 @@ struct FieldValue {
   QString display() const;
   bool operator==(const FieldValue &other) const;
   operator const std::string &() const { return text; }
+
+private:
+  void parseTyped(ValueType valueType);
 };
 
 #endif // FIELDVALUE_H

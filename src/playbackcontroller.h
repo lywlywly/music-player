@@ -4,7 +4,6 @@
 #include "playbackbackendmanager.h"
 #include "playbackmanager.h"
 #include "playbackqueue.h"
-#include "playcompletiontracker.h"
 #include "songlibrary.h"
 #include <QObject>
 #include <QString>
@@ -18,9 +17,8 @@ class PcmTap;
 class PlaylistCollection;
 
 // Runs playback: the transport commands, starting a song on the audio
-// backend, skipping songs that cannot be played, and counting completed
-// plays. Backend class: it reports what happens through signals, and the
-// window shows it.
+// backend, and skipping songs that cannot be played. Backend class: it
+// reports what happens through signals, and the window shows it.
 //
 // Owns the PlaybackQueue, the PlaybackManager on top of it, and the
 // PlaybackBackendManager, which the first setBackend() creates. Transport
@@ -96,8 +94,6 @@ signals:
   void seeking(qint64 positionMs);
   // The backend reached the end of the song, before Next.
   void songFinished();
-  // The current song's play was counted (PlayCompletionTracker).
-  void playCounted(int songPk);
   // Playback stopped because as many consecutive songs as the shown playlist
   // has could not be played; filepath is the last one.
   void playbackFailed(const QString &filepath);
@@ -117,10 +113,8 @@ private:
   // InvalidMedia). Skips to the next song, or stops and emits playbackFailed
   // once as many consecutive songs as the shown playlist holds have failed.
   void handlePlaybackFailure(const QString &filepath);
-  void maybeCountCompletedPlay();
   void onMediaStatusChanged(QMediaPlayer::MediaStatus status);
   void onPositionChanged(qint64 positionMs);
-  void onDurationChanged(qint64 durationMs);
 
   SongLibrary &library_;
   PlaylistCollection &playlists_;
@@ -128,7 +122,6 @@ private:
   PlaybackManager manager_{queue_};
   // Child QObject; nullptr until the first setBackend().
   PlaybackBackendManager *backendManager_ = nullptr;
-  PlayCompletionTracker completionTracker_;
   std::function<Playlist *()> shownPlaylist_;
   std::function<int()> preferredNextRow_;
   bool ready_ = false;

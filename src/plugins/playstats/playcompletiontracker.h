@@ -11,7 +11,7 @@
 // listened to while playing. Seeking does not add listened time.
 //
 // Only the listening session is kept here. The caller owns which song is
-// playing, counts the play (SongLibrary::incrementPlayCount) and then calls
+// playing, counts the play (PlayStats) and then calls
 // markCounted(), so a session is counted at most once.
 class PlayCompletionTracker {
 public:

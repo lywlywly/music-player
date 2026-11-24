@@ -8,7 +8,9 @@
 #include <QLibrary>
 #include <QObject>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QSettings>
+#include <QSignalSpy>
 #include <QSpinBox>
 #include <QSqlDatabase>
 #include <QTemporaryDir>
@@ -39,10 +41,6 @@ MSong makeSong(const QString &title, const std::string &filepath) {
   song.insert_or_assign("artist", FieldValue("Artist", "artist"));
   song.insert_or_assign("album", FieldValue("Album", "album"));
   song.insert_or_assign("filepath", FieldValue(filepath, "filepath"));
-  song.insert_or_assign(
-      "song_identity_key",
-      FieldValue(title.toLower().toStdString() + "|artist|album",
-                 "song_identity_key"));
   return song;
 }
 
@@ -54,9 +52,18 @@ public:
                   track.tagFields.value("lyrics");
   }
   void stopped() override { events << "stopped"; }
+  void paused() override { events << "paused"; }
+  void resumed() override { events << "resumed"; }
   void positionChanged(qint64 positionMs) override {
     events << "position " + QString::number(positionMs);
   }
+  void durationChanged(qint64 durationMs) override {
+    events << "duration " + QString::number(durationMs);
+  }
+  void seeked(qint64 positionMs) override {
+    events << "seeked " + QString::number(positionMs);
+  }
+  void finished() override { events << "finished"; }
 
   QStringList events;
 };
@@ -98,6 +105,7 @@ private slots:
   void cleanup();
 
   void playerHost_forwardsStartPositionAndStop();
+  void playerHost_forwardsPauseResumeDurationSeekAndFinish();
   void playerHost_seekRunsAfterTheDelivery();
   void playerHost_dropsQueuedSeekWhenDestroyed();
   void playerHost_playResumesAfterTheCall();
@@ -105,11 +113,16 @@ private slots:
   void lyricsSettings_loadSaveAndRestyleOpenPanels();
   void manager_skipsNonLibrariesAndDuplicateIds();
   void manager_listsDisabledPluginWithoutLoadingIt();
+  void manager_registersSongFieldsAndRefusesClashes();
+  void playStats_valuesChangedIsDeferredAndDataStaysInTheDataRoot();
 
 private:
   DummyAudioPlayer *player() const;
   // Adds a song to the playlist and makes it the one Play starts.
   void addSong();
+  // Plugins from Tests/plugins, keeping their data in dir_.
+  QString pluginFolder() const;
+  QString dataRoot() const;
 
   QTemporaryDir *dir_ = nullptr;
   ColumnRegistry *registry_ = nullptr;
@@ -124,6 +137,8 @@ private:
 
 void TestPlugins::init() {
   qputenv("MYPLAYER_USE_DUMMY_AUDIO_PLAYER", "1");
+  // The play stats plugin's cloud sync reaches no network.
+  qputenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC", "1");
   // No plugin disabled, also when a test that disables one failed.
   saveDisabledPluginIds({});
   dir_ = new QTemporaryDir();
@@ -175,6 +190,7 @@ void TestPlugins::cleanup() {
   delete dir_;
   dir_ = nullptr;
   qunsetenv("MYPLAYER_USE_DUMMY_AUDIO_PLAYER");
+  qunsetenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC");
 }
 
 DummyAudioPlayer *TestPlugins::player() const {
@@ -187,6 +203,42 @@ void TestPlugins::addSong() {
   QVERIFY(writeSilentWav(path));
   playlist_->addSong(makeSong("Song", path.toStdString()));
   playlist_->setLastPlayed(playlist_->getPkByIndex(0));
+}
+
+QString TestPlugins::pluginFolder() const {
+  return QCoreApplication::applicationDirPath() + "/plugins";
+}
+
+QString TestPlugins::dataRoot() const { return dir_->filePath("plugin-data"); }
+
+void TestPlugins::playerHost_forwardsPauseResumeDurationSeekAndFinish() {
+  addSong();
+  PluginPlayerHost host(*controller_);
+  RecordingListener listener;
+  host.addListener(&listener);
+  controller_->play();
+  listener.events.clear();
+
+  controller_->pause();
+  controller_->play();
+  QCOMPARE(listener.events, (QStringList{"paused", "resumed"}));
+  listener.events.clear();
+
+  // The seek is reported before the backend is told (which reports the
+  // position).
+  controller_->seek(4000);
+  QCOMPARE(listener.events.value(0), QString("seeked 4000"));
+  listener.events.clear();
+
+  DummyAudioPlayer *audio = player();
+  emit audio->durationChanged(90000);
+  QCOMPARE(listener.events, QStringList{"duration 90000"});
+  listener.events.clear();
+
+  // The end, before playback moves on.
+  emit audio->mediaStatusChanged(QMediaPlayer::EndOfMedia);
+  QCOMPARE(listener.events.value(0), QString("finished"));
+  host.removeListener(&listener);
 }
 
 void TestPlugins::playerHost_forwardsStartPositionAndStop() {
@@ -238,8 +290,8 @@ void TestPlugins::playerHost_seekRunsAfterTheDelivery() {
 
   player()->setPosition(10000);
   QCOMPARE(listener.events, QStringList{"position 10000"});
-  QTRY_COMPARE(listener.events,
-               (QStringList{"position 10000", "position 30000"}));
+  QTRY_COMPARE(listener.events, (QStringList{"position 10000", "seeked 30000",
+                                             "position 30000"}));
   host.removeListener(&listener);
   host.removeListener(&seeking);
 }
@@ -277,8 +329,7 @@ void TestPlugins::playerHost_playResumesAfterTheCall() {
 
 void TestPlugins::manager_loadsLyricsPlugin() {
   addSong();
-  PluginManager manager(*controller_,
-                        QCoreApplication::applicationDirPath() + "/plugins");
+  PluginManager manager(*controller_, pluginFolder(), dataRoot());
   // Its id and name from the metadata embedded in the library.
   const PluginEntry *found = entryWithId(manager, "lyrics");
   QVERIFY(found != nullptr);
@@ -321,8 +372,7 @@ void TestPlugins::lyricsSettings_loadSaveAndRestyleOpenPanels() {
     settings.setValue("lyrics/highlight_color", "#ff0000");
   }
 
-  PluginManager manager(*controller_,
-                        QCoreApplication::applicationDirPath() + "/plugins");
+  PluginManager manager(*controller_, pluginFolder(), dataRoot());
   const PluginEntry *entry = entryWithId(manager, "lyrics");
   QVERIFY(entry != nullptr);
   QObject *root = entry->root;
@@ -386,7 +436,7 @@ void TestPlugins::manager_skipsNonLibrariesAndDuplicateIds() {
   notes.close();
   {
     // Not listed.
-    PluginManager manager(*controller_, folder.path());
+    PluginManager manager(*controller_, folder.path(), dataRoot());
     QVERIFY(manager.plugins().isEmpty());
   }
 
@@ -404,7 +454,7 @@ void TestPlugins::manager_skipsNonLibrariesAndDuplicateIds() {
   const QString suffix = QFileInfo(plugin).suffix();
   QVERIFY(QFile::copy(plugin, folder.filePath("a." + suffix)));
   QVERIFY(QFile::copy(plugin, folder.filePath("b." + suffix)));
-  PluginManager manager(*controller_, folder.path());
+  PluginManager manager(*controller_, folder.path(), dataRoot());
   QCOMPARE(manager.plugins().size(), 2);
   const PluginEntry &first = manager.plugins().at(0);
   const PluginEntry &second = manager.plugins().at(1);
@@ -417,8 +467,7 @@ void TestPlugins::manager_skipsNonLibrariesAndDuplicateIds() {
 
 void TestPlugins::manager_listsDisabledPluginWithoutLoadingIt() {
   saveDisabledPluginIds({"lyrics"});
-  PluginManager manager(*controller_,
-                        QCoreApplication::applicationDirPath() + "/plugins");
+  PluginManager manager(*controller_, pluginFolder(), dataRoot());
   // Its name comes from the metadata, without loading it. That its code is
   // not loaded is not checked: other test functions load it first, and Qt
   // never unloads it.
@@ -427,6 +476,60 @@ void TestPlugins::manager_listsDisabledPluginWithoutLoadingIt() {
   QCOMPARE(entry->state, PluginEntry::State::Disabled);
   QCOMPARE(entry->name, QString("Lyrics"));
   QCOMPARE(entry->root, nullptr);
+}
+
+void TestPlugins::manager_registersSongFieldsAndRefusesClashes() {
+  {
+    PluginManager manager(*controller_, pluginFolder(), dataRoot());
+    ColumnRegistry registry;
+    SongLibrary library(registry, *databaseManager_);
+    manager.registerSongFields(registry, library);
+    QCOMPARE(library.providedSources().size(), size_t{1});
+    QCOMPARE(library.providedSources().front().sourceId, QString("playstats"));
+    QCOMPARE(registry.pluginFieldIds(),
+             (QList<QString>{"play_count", "last_played_timestamp"}));
+    const FieldDefinition *lastPlayed =
+        registry.findField("last_played_timestamp");
+    QCOMPARE(lastPlayed->valueType, ValueType::DateTime);
+    QCOMPARE(lastPlayed->displayKind, DisplayKind::EpochSecondsDateTime);
+    QVERIFY(!lastPlayed->writable);
+    QVERIFY(!registry.findColumn("last_played_timestamp")->visibleByDefault);
+  }
+  {
+    // A field of that name exists: the provider is refused as a whole.
+    PluginManager manager(*controller_, pluginFolder(), dataRoot());
+    ColumnRegistry registry;
+    registry.addPluginField({.id = "last_played_timestamp", .title = "Other"},
+                            {.id = "last_played_timestamp",
+                             .source = ColumnSource::Plugin,
+                             .valueType = ValueType::Number,
+                             .writable = false});
+    QTest::ignoreMessage(QtWarningMsg,
+                         QRegularExpression("Plugin song fields refused: "
+                                            "playstats .*already used"));
+    SongLibrary library(registry, *databaseManager_);
+    manager.registerSongFields(registry, library);
+    QVERIFY(!registry.hasField("play_count"));
+    QVERIFY(library.providedSources().empty());
+  }
+}
+
+void TestPlugins::playStats_valuesChangedIsDeferredAndDataStaysInTheDataRoot() {
+  addSong();
+  PluginManager manager(*controller_, pluginFolder(), dataRoot());
+  // Loading the plugins created no file.
+  QVERIFY(!QFileInfo::exists(dataRoot()));
+  QSignalSpy changedSpy(&manager, &PluginManager::providedValuesChanged);
+
+  controller_->play();
+  // Reported inside the song start, run from the event loop.
+  QCOMPARE(changedSpy.count(), 0);
+  QTRY_COMPARE(changedSpy.count(), 1);
+  QCOMPARE(changedSpy.at(0).at(0).toString(), QString("playstats"));
+  QCOMPARE(changedSpy.at(0).at(1).toStringList(),
+           QStringList{"song|artist|album"});
+  // The plugin's file, in its folder under the data root.
+  QVERIFY(QFileInfo::exists(dataRoot() + "/playstats/playstats.db"));
 }
 
 QTEST_MAIN(TestPlugins)

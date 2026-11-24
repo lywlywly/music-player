@@ -3,7 +3,9 @@
 
 #include <QString>
 
-enum class ColumnSource { SongAttribute, Computed };
+// Plugin: a field a plugin provides (ISongFieldProvider); not a `songs`
+// column, not writable, kept by ColumnRegistry::loadDynamicColumns.
+enum class ColumnSource { SongAttribute, Computed, Plugin };
 
 enum class ValueType { Text, Number, DateTime, Boolean };
 

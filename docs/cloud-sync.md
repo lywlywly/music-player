@@ -1,8 +1,10 @@
 # Cloud Play-Count Sync
 
 Optional sync of `play_count` per user UUID through AWS Lambda
-(`infra/aws/lambda/play_stats_handler.py`) and DynamoDB. See
-[architecture.md](architecture.md) for the rest of the app.
+(`infra/aws/lambda/play_stats_handler.py`) and DynamoDB. The client is part
+of the Play Stats plugin ([plugins/playstats.md](plugins/playstats.md)), in
+`src/plugins/playstats/`; its local side is the plugin's file
+(`PlayStatsStore`).
 
 ## Client classes
 
@@ -12,33 +14,42 @@ Optional sync of `play_count` per user UUID through AWS Lambda
     UI thread.
 * `CloudPlayStatsSyncCoordinator`
   * Sync policy layer: startup incremental/rebase pull, `max(local, cloud)`
-    merge, rebase delta push, and affected-song UI notifications.
+    merge (`PlayStatsStore::mergeCloudCounts`, one transaction per page),
+    rebase delta push, and the changed keys reported to the host
+    (`ISongFieldHost::valuesChanged`), which refreshes the songs.
   * Owns a dedicated `QThread` plus a generic worker `QObject`; cloud tasks are
     posted to that worker with `Qt::QueuedConnection` so UI calls return
     immediately and cloud operations run serially.
-  * Marshals results that touch `SongLibrary`, settings cursors, or UI-facing
-    signals back to the main thread.
-  * Startup sync starts only after playlist/library hydration completes.
+  * Marshals results that touch the store, settings cursors or the host back
+    to the main thread.
+  * Created in the plugin's `initialize` and destroyed in its `shutdown`,
+    which stops the thread. Startup sync is queued with a zero-delay timer
+    and runs at the event loop's first turn; it does not wait for the
+    library load, as it writes only the plugin's file.
 * Cloud pull inter-page waits and rebase-push chunking are paced by `QTimer`.
 
 ## Cursor and Rebase
 
-* `last_synced_at` is stored in `QSettings` at key `cloud_sync/last_synced_at`.
+* `last_synced_at` is stored in `QSettings` at key `playstats/last_synced_at`.
 * Incremental pull uses `updated_after = max(0, last_synced_at - 60)`.
 * After successful incremental pull, `last_synced_at` advances to
   `max(maxUpdatedAtFromPages, now)`.
-* The UUID is stored at `cloud_sync/user_uuid`; sync runs only with a valid
-  UUID.
-* On Settings `OK`, a changed UUID (or a changed
-  `cloud_sync/disabled_by_user`) sets `rebase_pending=true` and resets
-  `last_synced_at=0`; clearing the UUID sets `rebase_pending=false`.
-* On UUID change, `MainWindow` also triggers manual rebase immediately after
-  settings apply, so rebase starts right away (not only next startup).
-* Main window startup runs sync immediately:
+* The UUID is stored at `playstats/user_uuid`; sync runs only with a valid
+  UUID. The keys and the UUID check are in `CloudSyncSettings`
+  (`cloudsyncsettings.h`), shared by the coordinator and the Settings page,
+  so the page does not depend on the coordinator.
+* On Settings `OK` (the Play Stats page, `PlayStatsSettingsPage`), a changed
+  UUID (or a changed `playstats/disabled_by_user`) sets
+  `rebase_pending=true` and resets `last_synced_at=0`; clearing the UUID
+  sets `rebase_pending=false`.
+* On UUID change, the plugin also triggers a rebase as the page applies, so
+  it starts right away (not only next startup).
+* Startup runs sync at once:
   * if `rebase_pending=true`, it runs rebase first
   * otherwise it runs incremental pull
-* Manual menu action (`Library -> Manual cloud rebase`) triggers rebase when a
-  valid UUID is set.
+* The menu item (`Playback -> Play Stats -> Manual Cloud Rebase`) triggers
+  rebase; it is enabled while a valid UUID is set.
+* The rebase's local counts are every row of the plugin's file.
 * Rebase success clears `rebase_pending` and sets `last_synced_at=now`.
 * If a pending rebase fails (pull or push), `rebase_pending` stays `true` and
   startup will retry later. Manual rebase does not set this flag by itself.

@@ -1,4 +1,6 @@
 target_compile_definitions(MYLib PUBLIC MYPLAYER_TESTING)
+# The dummy cloud, also in the plugin tst_mainwindow loads.
+target_compile_definitions(myplaystats PUBLIC MYPLAYER_TESTING)
 
 function(SETUP_TESTS)
     foreach(_testname ${ARGN})
@@ -55,6 +57,7 @@ set(TEST_NAMES
     audiotaps
     gstaudioplayer
     replaygain
+    playstats
 )
 
 SETUP_TESTS(${TEST_NAMES})
@@ -64,9 +67,16 @@ target_link_libraries(lyrics mylyrics)
 target_link_libraries(lyricspanel mylyrics)
 # The A-B loop, tested directly too.
 target_link_libraries(abrepeat myabrepeat)
+# The play stats plugin's code, tested directly; tst_playstats also loads the
+# plugin from Tests/plugins.
+foreach(_test playstats playcompletiontracker cloudplaystatssyncservice
+    cloudplaystatssynccoordinator)
+  target_link_libraries(${_test} myplaystats)
+endforeach()
+add_dependencies(playstats playstatsplugin)
 # These load the plugins from Tests/plugins.
-add_dependencies(mainwindow lyricsplugin abrepeatplugin)
-add_dependencies(plugins lyricsplugin abrepeatplugin)
+add_dependencies(mainwindow lyricsplugin abrepeatplugin playstatsplugin)
+add_dependencies(plugins lyricsplugin abrepeatplugin playstatsplugin)
 
 set_tests_properties(mainwindow PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"

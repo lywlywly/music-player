@@ -12,17 +12,20 @@ Status: implemented.
   the plugin's code, so a plugin that is not loaded is still listed by name.
 * A plugin can contribute several kinds of things, or none (a plugin with no
   UI that only follows playback). Each kind is a **capability**: an
-  interface the plugin implements and the host asks for. There are three:
-  an **info panel tab**, a **Settings dialog page** and a **Playback
-  submenu**. Later kinds (context menu actions) are added the same way,
-  without changing the existing interfaces or plugins.
+  interface the plugin implements and the host asks for. There are four:
+  an **info panel tab**, a **Settings dialog page**, a **Playback
+  submenu** and **song fields** (columns whose values the plugin keeps).
+  Later kinds (context menu actions) are added the same way, without
+  changing the existing interfaces or plugins.
 * A plugin follows playback through listener events and controls it
   through **commands**, which the host defers.
+* Each plugin gets **its own host object**, with a data folder of its own.
 * The user can **disable** a plugin in Settings > Plugins; a disabled plugin
   is not loaded at the next startup. Enabling or disabling takes effect
   after a restart.
-* **The plugins are Lyrics ([lyrics.md](lyrics.md)) and A-B Repeat
-  ([abrepeat.md](abrepeat.md)),** each designed in its own doc in this
+* **The plugins are Lyrics ([lyrics.md](lyrics.md)), A-B Repeat
+  ([abrepeat.md](abrepeat.md)) and Play Stats
+  ([playstats.md](playstats.md)),** each designed in its own doc in this
   folder; this doc is the plugin system they share. Properties and Spectrum
   stay built in.
 * Plugins are built in this repository, with the same Qt, compiler and build
@@ -58,12 +61,13 @@ fails to compile.
 
 * Two targets per plugin, added in `src/CMakeLists.txt`
   (`add_subdirectory`):
-  * `my<name>` (`mylyrics`, `myabrepeat`): a static library with the
-    plugin's code, linking Qt and `pluginapi` only. Built
+  * `my<name>` (`mylyrics`, `myabrepeat`, `myplaystats`): a static library
+    with the plugin's code, linking Qt and `pluginapi` only. Built
     position-independent, as it is linked into a shared library; the tests
     link it directly.
-  * `<name>plugin` (`lyricsplugin`, `abrepeatplugin`): a `MODULE` library
-    linking it, with the root object and its metadata JSON. The root object
+  * `<name>plugin` (`lyricsplugin`, `abrepeatplugin`, `playstatsplugin`): a
+    `MODULE` library linking it, with the root object and its metadata
+    JSON. The root object
     is not in the static library: its `Q_PLUGIN_METADATA` would make each
     test executable linking that library a plugin too.
 * `myplayer_deploy_plugin` (`src/CMakeLists.txt`) puts the module where the
@@ -102,16 +106,31 @@ plugin, two metaobjects for one class.
 | Type | Implemented by | Role |
 |---|---|---|
 | `IPlugin` | plugin | `initialize(IPluginHost &)` (once, after loading), `shutdown()` (once, before the host goes) |
-| `IPluginHost` | host | The host services: `player()` returns the `IPlayerHost`, `control()` the `IPlayerControl` |
+| `IPluginHost` | host | The host services, one object per plugin: `player()` returns the `IPlayerHost`, `control()` the `IPlayerControl`, `dataFolder()` the plugin's data folder, `songFieldHost()` the `ISongFieldHost` |
 | `IPlayerHost` | host | `addListener(IPlayerListener *)`, `removeListener(IPlayerListener *)` |
-| `IPlayerControl` | host | Playback commands: `seek(qint64 ms)` |
-| `IPlayerListener` | plugin | `trackStarted(const TrackInfo &)`, `stopped()`, `positionChanged(qint64 ms)` |
+| `IPlayerControl` | host | Playback commands: `seek(qint64 ms)`, `play()` |
+| `IPlayerListener` | plugin | `trackStarted(const TrackInfo &)`, `stopped()`, `paused()`, `resumed()`, `positionChanged(qint64 ms)`, `durationChanged(qint64 ms)`, `seeked(qint64 ms)`, `finished()` |
+| `ISongFieldHost` | host | `valuesChanged(keys)`: the values of a provider's keys changed (see "Provided song fields") |
 | `TrackInfo` | (plain data) | `fields` (column fields by id, e.g. `title`, `attr:lyrics`, as text); `tagFields` (tag fields with no column, from the refresh on play's `remainingFields`) |
 
 A plugin gets the host in `initialize`, not from a capability, so a plugin
 with no UI can follow playback too; it keeps the host for its capabilities
 (a lyrics panel's presenter adds itself to `player()`). After `shutdown` it
 must not use the host, and by then it has removed every listener it added.
+
+**One host object per plugin.** The data folder and the fields' changes
+belong to one plugin each, and a host shared by every plugin could not tell
+which plugin calls. So `PluginManager` gives each loaded plugin its own
+`PluginHost` (in `pluginmanager.cpp`), which knows the plugin's id; its
+`player()` and `control()` are the manager's shared `PluginPlayerHost`.
+Rejected: passing the plugin's id to each call: a plugin could pass
+another's, and every call would repeat what the host knows.
+
+**`dataFolder()`** is `<data root>/<id>/`. `MainWindow` passes the data root
+to `PluginManager`: `<AppDataLocation>/plugins`, beside `myplayer.db`; the
+tests pass a temporary folder (`MainWindow`'s test constructor and
+`tst_plugins`), so no plugin touches the developer's data. The host returns
+the path only; the plugin creates the folder on its first write.
 
 ### Events: subscription
 
@@ -144,9 +163,8 @@ work as usual: its `QObject`s live in the DLL only.
 * `seek` and `play` are the commands; `pause` and others come with a plugin
   that uses them. `play` is the app's Play button (`PlaybackController::play`):
   it resumes a paused song, and with nothing playing starts the shown
-  playlist. The host reports no pause, so a plugin that wants playback
-  running calls `play` without knowing whether it is paused; while playing
-  it changes nothing.
+  playlist; while playing it changes nothing, so a plugin that wants
+  playback running can call it without tracking `paused` and `resumed`.
 * Its header states the contract of [event-ordering.md](../event-ordering.md)
   ("Plugin commands: the contract"), except rule 6: deferred, in order,
   allowed inside a listener call, callable from any thread, reported by
@@ -169,6 +187,7 @@ work as usual: its `QObject`s live in the DLL only.
 | `ISettingsPageProvider` | `settingsPageTitle()`, `createSettingsPage(QWidget *parent)`, returning an `IPluginSettingsPage` | `SettingsDialog` |
 | `IPluginSettingsPage` | `widget()`, `apply()` (called on the Settings dialog's OK) | `SettingsDialog` |
 | `IMenuProvider` | `createMenu(QWidget *parent)`, a `QMenu` with its title set | the Playback menu (`MainWindow`) |
+| `ISongFieldProvider` | `songFields()`, `keyFields()`, `songKey(...)`, `values(keys)`, `allValues()` | `ColumnRegistry` and `SongLibrary`, through `PluginManager::registerSongFields` |
 
 * The plugin's root object implements `IPlugin` and any capabilities
   (`Q_INTERFACES(IPlugin IPanelProvider ...)`). The place in the app that
@@ -188,6 +207,20 @@ work as usual: its `QObject`s live in the DLL only.
 * One panel per plugin, so the plugin's id names its tab in
   `infopanel/current_tab` (`lyrics` for the lyrics plugin).
 
+### Provided song fields
+
+A plugin's `ISongFieldProvider` declares fields (id, title, `Number` or
+`DateTime`, default width and visibility) and the built-in tag fields a key
+is computed from. Songs with the same key share values; the key's rule is
+the plugin's (`songKey`). The host registers the fields as columns and
+expression symbols (`ColumnSource::Plugin`), keeps a copy of the values on
+each song, so sorting, filtering and autoplaylists work as for any field,
+and reads them again for the keys the plugin reports through
+`ISongFieldHost::valuesChanged`, which the host defers. `allValues` serves
+the startup load, on the load's workers; `values` serves every refresh
+after it. The design, with the Play Stats plugin that uses it, is in
+[playstats.md](playstats.md) ("Fields in the host").
+
 ### Extending the API
 
 * **A new kind of contribution** (for example `IContextMenuProvider`) is a
@@ -197,8 +230,8 @@ work as usual: its `QObject`s live in the DLL only.
 * **A new host service** (for example the selected songs, for a context
   menu) is a new interface returned by a new `IPluginHost` method: a core
   API change.
-* The API holds only what its plugins use: what lyrics and A-B Repeat
-  need.
+* The API holds only what its plugins use: what Lyrics, A-B Repeat and Play
+  Stats need.
 
 ### Versions
 
@@ -209,8 +242,8 @@ work as usual: its `QObject`s live in the DLL only.
   plain classes passed by pointer or reference; nothing checks them, and an
   old plugin calling a changed one would use the wrong function table.
 * So `IPlugin`'s IID (`myplayer.IPlugin/1`) is the version of the **core
-  API**: `IPlugin`, `IPluginHost`, `IPlayerHost`, `IPlayerControl`, every
-  listener, `TrackInfo` and the metadata keys. A plugin built against
+  API**: `IPlugin`, `IPluginHost`, `IPlayerHost`, `IPlayerControl`,
+  `ISongFieldHost`, every listener, `TrackInfo` and the metadata keys. A plugin built against
   another version is not loaded; the log names the plugin's IID, which
   `QPluginLoader::metaData()` reads without creating the plugin.
 * Each capability's IID (`myplayer.IPanelProvider/1`, ...) is the version of
@@ -234,8 +267,22 @@ work as usual: its `QObject`s live in the DLL only.
 
 ### Rules
 
-* All calls are on the main thread, except commands, which may come from
-  any thread.
+* All calls are on the main thread, except commands and `valuesChanged`,
+  which may come from any thread, and a song field provider's `songKey`,
+  `values` and `allValues`, which the host may call on the library load's
+  workers (the plugin reads off the main thread with connections of its
+  own).
+* Every host call to a plugin happens between its `initialize` and its
+  `shutdown`: `~MainWindow` waits for a running library load before the
+  manager shuts the plugins down ([playstats.md](playstats.md),
+  "Lifetime").
+* **No I/O while plugins load.** `initialize`, `shutdown` and the capability
+  calls made while the window is built (`createPanel`, `createMenu`,
+  `songFields`, `keyFields`) do no file, database or network I/O; reading
+  `QSettings` is allowed. Work that needs I/O starts later: on a listener
+  event, from the event loop, on the plugin's own thread, or in a
+  provider's reads, which the host makes from the load's workers or the
+  event loop.
 * The host has no "current track" query: plugins are initialized and panels
   created in the `MainWindow` constructor, before playback can start
   (`setReady` comes after the library load), so every listener sees each song
@@ -252,6 +299,7 @@ work as usual: its `QObject`s live in the DLL only.
 Frontend class. `MainWindow` creates it as a child `QObject` after
 `ui->setupUi(...)` and `PlaybackController`.
 
+* Takes the plugin folder and the data root (see "`dataFolder()`").
 * Lists every library in one folder, in name order. `MainWindow` passes the
   folder: `../PlugIns` when the executable is in a macOS app bundle
   (`.app/Contents/MacOS`), else `plugins/` next to the executable (Windows,
@@ -284,7 +332,7 @@ Frontend class. `MainWindow` creates it as a child `QObject` after
      The root object does not implement `IPlugin` (missing from its
      `Q_INTERFACES`): skipped, "not a plugin for this app", "does not
      implement IPlugin".
-  7. Otherwise `initialize`: `Loaded`.
+  7. Otherwise `initialize`, with the plugin's own `PluginHost`: `Loaded`.
 * Steps 1 to 5 read only the metadata, before the plugin's code is loaded,
   so a disabled plugin's code never runs.
 * `plugins/disabled` is a list of ids. `loadDisabledPluginIds()` and
@@ -295,10 +343,18 @@ Frontend class. `MainWindow` creates it as a child `QObject` after
   returns the same object for the same file), so one manager exists at a
   time: the tests create a `MainWindow` after deleting the previous one, and
   each `initialize` follows the previous `shutdown`.
-* Implements `IPluginHost`; owns the `PluginPlayerHost` (a member).
+* Owns the `PluginPlayerHost` and the plugins' `PluginHost`s (members).
+  A `PluginHost`'s `valuesChanged` queues its keys with
+  `QMetaObject::invokeMethod` and `Qt::QueuedConnection`, the host as the
+  context, and the manager then emits `providedValuesChanged(pluginId,
+  keys)` on the main thread.
+* `registerSongFields(registry, library)`: each loaded `ISongFieldProvider`'s
+  fields into the `ColumnRegistry` and its source into `SongLibrary`
+  ([playstats.md](playstats.md), "Registration").
 * Its destructor calls `shutdown` on each loaded plugin; the
-  `PluginPlayerHost` member is destroyed after that, so a plugin's listeners
-  are gone before their host. Children are destroyed in creation order, so
+  `PluginPlayerHost` and `PluginHost` members are destroyed after that, so a
+  plugin's listeners are gone before their host, and a `valuesChanged`
+  still queued is dropped. Children are destroyed in creation order, so
   the info panel and the plugin panels in it are destroyed before the
   manager.
 * Never unloads a plugin: its code must stay mapped while its objects live.
@@ -307,8 +363,11 @@ Frontend class. `MainWindow` creates it as a child `QObject` after
 
 * Implements `IPlayerHost`: forwards `PlaybackController::songStarted` (as a
   `TrackInfo` built from the `MSong` and its `remainingFields`),
-  `playbackStateChanged(None)` (stop) and `positionChanged` to the
-  listeners. The position comes from the controller, not the player: a
+  `playbackStateChanged` (`None`: stop, `Paused`: pause, `Playing`: resume;
+  a song start sends `songStarted` instead), `positionChanged`,
+  `durationChanged`, `seeking` (before the backend is told) and
+  `songFinished` (before Next) to the listeners. The position comes from
+  the controller, not the player: a
   backend switch replaces the player, and a direct connection would stay on
   the old one.
 * Implements `IPlayerControl` too, as it holds the `PlaybackController`;
@@ -337,6 +396,10 @@ The places using a capability go through the `Loaded` entries.
   `IMenuProvider`'s menu at the end of Playback, in load order, after one
   separator; with no provider, neither. The menus are destroyed with the
   menu bar, before the plugins are shut down.
+* **Song fields** (`MainWindow` constructor): `registerSongFields` right
+  after the manager is created, before the display expressions are parsed
+  and the library loads; `providedValuesChanged` goes to
+  `SongLibrary::markStale`.
 
 ### Plugins page (`PluginsPage`)
 
@@ -459,8 +522,9 @@ through the built plugins in `Tests/plugins`.
 
 * `tst_plugins`:
   * `PluginPlayerHost` forwards song start (with its tag fields), position
-    (also from the player a backend switch creates) and stop, not pause, to
-    a listener the test adds, and nothing after it is removed.
+    (also from the player a backend switch creates) and stop to a listener
+    the test adds, and nothing after it is removed; and pause, resume,
+    seek, duration and the song's end.
   * A listener seeking inside `positionChanged`: the next listener gets the
     old position first, and the new one once the event loop runs
     (`QTRY_COMPARE`). The dummy player emits the position inside
@@ -478,6 +542,11 @@ through the built plugins in `Tests/plugins`.
   * With `lyrics` in `plugins/disabled`, its entry is `Disabled` with its
     name and no root object. That its code is not loaded is not checked:
     other test functions load it first, and Qt never unloads it.
+  * `registerSongFields` registers the Play Stats plugin's fields and
+    source, and refuses the provider when a field of its id exists.
+  * A `valuesChanged` the Play Stats plugin calls at a song start reaches
+    `providedValuesChanged` only from the event loop, and its file is under
+    the data root the test gives, not created while loading.
 * `tst_settingsdialog_ui::pluginsPage_stateFollowsBoxAndOkSavesDisabledIds`,
   with entries made by the test (no DLL, so skipped rows are covered too):
   the state column follows the box; OK writes the unchecked ids and keeps
@@ -493,11 +562,11 @@ through the built plugins in `Tests/plugins`.
     `LyricsPanel` metaobject is not the plugin's, so
     `findChild<LyricsPanel *>` (or `<LyricsManager *>`) finds nothing, and
     the panel's lines are checked in `tst_plugins` instead.
-  * `plugins_disabledPluginsHaveNoTabPageOrMenu`: with `lyrics` and
-    `abrepeat` in `plugins/disabled` and `infopanel/current_tab` set to
+  * `plugins_disabledPluginsHaveNoTabPageOrMenu`: with `lyrics`, `abrepeat`
+    and `playstats` in `plugins/disabled` and `infopanel/current_tab` set to
     `lyrics`, no Lyrics info tab, the first tab current and the key
-    unchanged, no page under Plugins, and no A-B Repeat submenu or separator
-    in Playback.
+    unchanged, no page under Plugins, and no plugin submenu or separator in
+    Playback.
 * The plugin's `QSettings` uses the tests' QSettings folder: the folder is
   set in QtCore, which the plugin shares.
 * By hand: the Plugins page's layout, the state column following the box,

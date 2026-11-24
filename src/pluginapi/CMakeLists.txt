@@ -11,6 +11,8 @@ add_library(pluginapi INTERFACE
   iplugin.h
   ipluginhost.h
   isettingspageprovider.h
+  isongfieldhost.h
+  isongfieldprovider.h
   trackinfo.h
 )
 target_include_directories(pluginapi INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})

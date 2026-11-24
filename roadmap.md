@@ -51,11 +51,12 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
   - ✅ 20 log-spaced bands, 0 to -60 dB, peak hold, own FFT
   - ✅ GStreamer backend; Qt backend only with Qt's FFmpeg media backend
   - See `docs/spectrum.md`
-- ✅ Playback statistics
+- ✅ Playback statistics, in the Play Stats plugin with its own database
   - ✅ `play_count` with completion/listen gating
   - ✅ `last_played_timestamp`
   - ✅ Identity-based aggregation (normalized title/artist/album)
   - ✅ UUID-scoped cloud sync (incremental pull + rebase flow)
+  - See `docs/plugins/playstats.md` and `docs/cloud-sync.md`
 - ✅ System media integration
   - ✅ macOS (`MediaPlayer`)
   - ✅ Linux (`MPRIS`)
@@ -74,11 +75,15 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
   - ✅ A-B Repeat plugin (`src/plugins/abrepeat/`, `abrepeatplugin`): a
     Playback submenu (`IMenuProvider`) and a deferred plugin `seek`
     (`IPlayerControl`)
+  - ✅ Play Stats plugin (`src/plugins/playstats/`, `playstatsplugin`): song
+    fields provided by a plugin (`ISongFieldProvider`), one host object per
+    plugin with a data folder, pause/resume/duration/seek/end events, its
+    own SQLite file, cloud sync, a Settings page and a Playback submenu
   - ⬜ Playback commands for plugins checked against the playback
     generation; see `docs/event-ordering.md` (Plan: A synchronous core with
     queued edges)
-  - See `docs/plugins/plugin-system.md`, `docs/plugins/lyrics.md` and
-    `docs/plugins/abrepeat.md`
+  - See `docs/plugins/plugin-system.md`, `docs/plugins/lyrics.md`,
+    `docs/plugins/abrepeat.md` and `docs/plugins/playstats.md`
 - ✅ Settings dialog navigation tree instead of tabs
   - See `docs/settings-dialog.md`
 - ⬜ CLI tool and headless mode
@@ -166,21 +171,13 @@ See `docs/architecture.md` (Design Principles).
   WASAPI for more silence than fits. Clicking around the seek slider hits
   it after many seeks. The fix is GStreamer's (to report). See
   `docs/playback.md` (Seeking)
-- Settings OK with an invalid cloud UUID loses changes: `applySettings`
-  runs after the dialog is accepted, so it has closed; Playback, plugin and
-  Display settings are already saved, then it shows a warning and returns
-  before saving Cloud Sync and Fields. Fix: validate before accepting
-  (override `accept`) and keep the dialog open
-- A re-tagged song's play stats depend on when the app restarts. A change
-  of title, artist or album, once the file is re-read, moves the song to
-  the new identity (`SongLibrary::syncBuiltInFieldsBySongId`), but its
-  in-memory `play_count` and `last_played_timestamp` stay the old
-  identity's until a restart or the next count. If the new identity has no
-  `song_play_stats` row, playing the song before the next restart copies
-  the old count to it (`markSongPlayedAtStart` inserts the row from the
-  in-memory count), and a restart first loses it (no row to load); a
-  rebase also pushes the old count under the new key. If the new identity
-  has a row, its count wins at the next count or restart. Either way the
-  old identity's row stays. Fix: in that function, when the identity
-  changes, set the song's stats from the new identity's row (none: no
-  stats)
+- The play stats identity key (normalized `title|artist|album`) has limits
+  that stay while the cloud stores those keys: a `|` inside a tag can make
+  two songs share a key ("A|B" by "C" and "A" by "B|C", no album), and
+  `QString::toLower` follows Qt's Unicode tables, so a Qt upgrade can change
+  a few keys. Changing the rule needs a re-key of the plugin's file and of
+  the cloud; see `docs/plugins/playstats.md` (The identity key)
+- `FieldTypePool` is a plain map used from two threads at startup: the
+  library load's worker registry upserts into the process-wide pool while
+  the main thread may read it (for example Settings opened during the load,
+  whose Fields page reloads the columns)

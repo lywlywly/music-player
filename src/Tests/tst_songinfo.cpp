@@ -306,22 +306,43 @@ void TestSongInfo::presenter_showsSelectedSongAfterDebounce() {
 }
 
 void TestSongInfo::presenter_rebuildsOnlyForItsRow() {
+  // A plugin's field (play stats), shown in the Library section; keyed by
+  // the file's title.
+  registry_->addPluginField({.id = "play_count", .title = "Play Count"},
+                            {.id = "play_count",
+                             .source = ColumnSource::Plugin,
+                             .valueType = ValueType::Number,
+                             .writable = false});
+  ProvidedValuesByKey counts;
+  library_->addProvidedSource(
+      {.sourceId = "test",
+       .fields = {{.id = "play_count", .type = ValueType::Number}},
+       .keyFields = {"title"},
+       .songKey = [](const QStringList &values) { return values.at(0); },
+       .values = [&counts](const QStringList &) { return counts; },
+       .allValues = [&counts]() { return counts; }});
   QVERIFY(writeFile(root() + "/a.mp3", "a"));
   QVERIFY(writeFile(root() + "/b.mp3", "b"));
   const int a = addManual(root() + "/a.mp3");
   const int b = addManual(root() + "/b.mp3");
+  collection_->notifySongsChanged(library_->refreshStale());
   SongInfoPanel panel;
   SongInfoPresenter presenter(&panel, *library_, *monitored_, *registry_);
   presenter.showSong(playlist_, a);
   QTRY_COMPARE(panel.info().songPk, a);
   QCOMPARE(findRow(panel.info(), "Play Count"), nullptr);
 
-  QVERIFY(library_->incrementPlayCount(b));
-  collection_->notifySongChanged(b);
+  const auto count = [&](int songPk) {
+    const QString key =
+        QString::fromStdString(library_->getSongByPK(songPk).at("title").text);
+    counts.insert(key, {1});
+    library_->markStale("test", {key});
+    collection_->notifySongsChanged(library_->refreshStale());
+  };
+  count(b);
   QVERIFY(!rebuildTimer(presenter)->isActive());
 
-  QVERIFY(library_->incrementPlayCount(a));
-  collection_->notifySongChanged(a);
+  count(a);
   QVERIFY(rebuildTimer(presenter)->isActive());
   QTRY_COMPARE(valueOf(panel.info(), "Play Count"), QString("1"));
 }

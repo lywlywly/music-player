@@ -85,6 +85,7 @@ QList<QString> LibrarySearchResultsModel::visibleSongColumnIds() const {
     }
     const bool isSongColumn =
         fieldDefinition->source == ColumnSource::SongAttribute ||
+        fieldDefinition->source == ColumnSource::Plugin ||
         (fieldDefinition->source == ColumnSource::Computed &&
          !fieldDefinition->expression.trimmed().isEmpty());
     if (!isSongColumn) {

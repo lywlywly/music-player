@@ -34,8 +34,8 @@ A cross-platform desktop music player focused on local-library playback, lyrics,
 * Customizable display expressions (status bar + window title)
 * Display theme mode: system default / light / dark
 * System media integration
-* Play stats: `play_count`, `last_played_timestamp`
-* Optional UUID-scoped cloud sync for `play_count`
+* Play Stats, a plugin: `play_count`, `last_played_timestamp`, with optional
+  UUID-scoped cloud sync for `play_count`
 
 ## Build and Run
 
@@ -201,20 +201,26 @@ date IN [2024-01-01..2025-12-31]
 
 ## Play Stats and Cloud Sync
 
+Play stats come from the Play Stats plugin, which keeps them in its own file
+(`playstats.db` in the app's data folder, under `plugins/playstats/`). With
+the plugin disabled (Settings > Plugins), nothing is counted or synced, the
+Play Count and Last Played columns are gone, and expressions using them show
+an error until it is enabled again; the stats are kept.
+
 Local playback stats:
 
 * `play_count` increments once per play session only after near-end threshold is reached and listened time reaches at least `2/3` of track duration.
 * `last_played_timestamp` is updated when playback starts.
-* Stats are identity-based (normalized `title|artist|album`), so same-identity songs share counters.
+* Stats are identity-based (normalized `title|artist|album`), so same-identity songs share counters. A re-tagged song shows the stats of its new tags (none if no song had them), and gets its old ones back if tagged back.
 
 Cloud sync:
 
 * Sync target is `play_count` (UUID-scoped user data).
 * Merge rule is `max(local, cloud)` per song identity.
-* On local completed-play increment, app pushes `delta=1` asynchronously (best effort).
-* On startup, app runs cloud sync immediately (rebase first if `rebase_pending=true`; otherwise incremental pull).
-* If UUID changes and is saved with `OK`, app triggers rebase sync.
-* Manual cloud rebase is available from the Library menu.
+* On local completed-play increment, the plugin pushes `delta=1` asynchronously (best effort).
+* On startup, the plugin runs cloud sync right after the window shows (rebase first if `rebase_pending=true`; otherwise incremental pull).
+* The UUID is set in Settings > Plugins > Play Stats; a changed UUID saved with `OK` triggers a rebase.
+* Manual cloud rebase is in Playback > Play Stats.
 
 ## Implementation Notes
 

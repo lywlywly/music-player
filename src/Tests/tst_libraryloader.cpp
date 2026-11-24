@@ -2,6 +2,7 @@
 #include <QSqlDatabase>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QThread>
 #include <QUuid>
 
 #include "../columnregistry.h"
@@ -35,11 +36,23 @@ int seedSongWithCustomField(DatabaseManager &databaseManager) {
   song.insert_or_assign("artist", FieldValue("Artist", "artist"));
   song.insert_or_assign("album", FieldValue("Album", "album"));
   song.insert_or_assign("filepath", FieldValue("/tmp/loader.wav", "filepath"));
-  song.insert_or_assign("song_identity_key",
-                        FieldValue("song|artist|album", "song_identity_key"));
   song.insert_or_assign("attr:mood", FieldValue("happy", "attr:mood"));
   SongLibrary library(registry, databaseManager);
   return library.addTolibrary(std::move(song));
+}
+
+// A provided source keyed by title, whose allValues records its thread.
+ProvidedFields titleSource(QThread **allValuesThread) {
+  return {.sourceId = "test",
+          .fields = {{.id = "plays", .type = ValueType::Number}},
+          .keyFields = {"title"},
+          .songKey = [](const QStringList &values) { return values.at(0); },
+          .values = [](const QStringList &) { return ProvidedValuesByKey{}; },
+          .allValues =
+              [allValuesThread]() {
+                *allValuesThread = QThread::currentThread();
+                return ProvidedValuesByKey{{"Song", {4}}};
+              }};
 }
 } // namespace
 
@@ -72,18 +85,26 @@ void TestLibraryLoader::fileDatabase_loadsColumnsAndSongsFromEventLoop() {
     ColumnRegistry registry;
     DatabaseManager databaseManager(registry, dbPath, connection);
     SongLibrary library(registry, databaseManager);
+    QThread *allValuesThread = nullptr;
+    library.addProvidedSource(titleSource(&allValuesThread));
     QObject context;
     int loadedCount = 0;
 
-    loadLibrary(registry, databaseManager, library, &context,
-                [&loadedCount]() { ++loadedCount; });
+    const QFuture<void> load =
+        loadLibrary(registry, databaseManager, library, &context,
+                    [&loadedCount]() { ++loadedCount; });
     // Loads on the worker thread: nothing is applied yet.
     QCOMPARE(loadedCount, 0);
     QVERIFY(!registry.hasField("attr:mood"));
 
     QTRY_COMPARE(loadedCount, 1);
+    QVERIFY(load.isFinished());
     QVERIFY(registry.hasField("attr:mood"));
     QCOMPARE(library.getSongByPK(songPk).at("attr:mood").text, "happy");
+    // The provided values, read off the main thread.
+    QCOMPARE(library.getSongByPK(songPk).at("plays").text, "4");
+    QVERIFY(allValuesThread != nullptr);
+    QVERIFY(allValuesThread != QThread::currentThread());
   }
   QSqlDatabase::removeDatabase(connection);
 }
@@ -97,14 +118,19 @@ void TestLibraryLoader::memoryDatabase_loadsBeforeReturning() {
     const int songPk = seedSongWithCustomField(databaseManager);
     QVERIFY(songPk >= 0);
     SongLibrary library(registry, databaseManager);
+    QThread *allValuesThread = nullptr;
+    library.addProvidedSource(titleSource(&allValuesThread));
     QObject context;
     int loadedCount = 0;
 
-    loadLibrary(registry, databaseManager, library, &context,
-                [&loadedCount]() { ++loadedCount; });
+    const QFuture<void> load =
+        loadLibrary(registry, databaseManager, library, &context,
+                    [&loadedCount]() { ++loadedCount; });
     QCOMPARE(loadedCount, 1);
+    QVERIFY(load.isFinished());
     QVERIFY(registry.hasField("attr:mood"));
     QCOMPARE(library.getSongByPK(songPk).at("attr:mood").text, "happy");
+    QCOMPARE(library.getSongByPK(songPk).at("plays").text, "4");
   }
   QSqlDatabase::removeDatabase(connection);
 }

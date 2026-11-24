@@ -1,36 +1,41 @@
 #include <QObject>
 #include <QSettings>
-#include <QSignalSpy>
+#include <QTemporaryDir>
 #include <QTest>
 #include <QUuid>
+#include <set>
+#include <string>
 
-#include "../cloudplaystatssynccoordinator.h"
-#include "../columnregistry.h"
-#include "../databasemanager.h"
-#include "../songlibrary.h"
-#include "../utils.h"
+#include "../plugins/playstats/cloudplaystatssynccoordinator.h"
+#include "../plugins/playstats/cloudsyncsettings.h"
+#include "../plugins/playstats/playstatsstore.h"
 
 namespace {
-MSong makeSong(const QString &title, const QString &artist, const QString &path,
-               const QString &album = QStringLiteral("Album")) {
-  MSong song;
-  song.insert_or_assign("title", FieldValue(title.toStdString(), "title"));
-  song.insert_or_assign("artist", FieldValue(artist.toStdString(), "artist"));
-  song.insert_or_assign("album", FieldValue(album.toStdString(), "album"));
-  song.insert_or_assign("discnumber", FieldValue("1", "discnumber"));
-  song.insert_or_assign("tracknumber", FieldValue("1", "tracknumber"));
-  song.insert_or_assign("date", FieldValue("2024-01-01", "date"));
-  song.insert_or_assign("genre", FieldValue("genre", "genre"));
-  song.insert_or_assign("filepath", FieldValue(path.toStdString(), "filepath"));
-  const std::string identity = util::normalizedText(title).toStdString() + "|" +
-                               util::normalizedText(artist).toStdString() +
-                               "|" + util::normalizedText(album).toStdString();
-  song.insert_or_assign("song_identity_key",
-                        FieldValue(identity, "song_identity_key"));
-  return song;
+constexpr const char *kKey = "song|artist|album";
+
+// The store's play_count of kKey, or -1 without a row.
+int playCount(const PlayStatsStore &store) {
+  const SongFieldValuesByKey values = store.values({kKey});
+  return values.contains(kKey)
+             ? values.value(kKey).at(PlayStatsStore::PlayCount).toInt()
+             : -1;
+}
+
+// More keys than one rebase chunk (10) holds: two chunks.
+constexpr int kTwoChunksOfKeys = 12;
+
+// One play each of kTwoChunksOfKeys keys.
+void countTwoChunksOfKeys(PlayStatsStore &store) {
+  for (int i = 0; i < kTwoChunksOfKeys; ++i) {
+    store.countPlay(QStringLiteral("song %1|artist|album").arg(i));
+  }
+}
+
+void setUuid(QSettings &settings) {
+  settings.setValue(CloudSyncSettings::kUserUuid,
+                    "11111111-1111-1111-1111-111111111111");
 }
 } // namespace
-
 class TestCloudPlayStatsSyncCoordinator : public QObject {
   Q_OBJECT
 
@@ -38,18 +43,19 @@ private slots:
   void init();
   void cleanup();
 
-  void incrementalSync_appliesCloudCount_updatesCursor_andEmitsSongChange();
-  void pushIncrementForSongPk_pushesWhenUuidIsValid();
+  void incrementalSync_mergesCloudCount_updatesCursor_andReportsKeys();
+  void pushIncrement_pushesWhenUuidIsValid();
   void rebase_cloudHigher_noPush_andClearsPending();
   void rebase_localHigher_pushesDelta_andClearsPending();
-  void rebase_pushFailure_keepsPending();
+  void rebase_manyDeltas_pushesEveryChunk_andClearsPending();
+  void rebase_pushFailure_stopsAndKeepsPending();
 
 private:
-  ColumnRegistry *registry_ = nullptr;
-  DatabaseManager *databaseManager_ = nullptr;
-  SongLibrary *library_ = nullptr;
+  QTemporaryDir *dir_ = nullptr;
+  PlayStatsStore *store_ = nullptr;
   CloudPlayStatsSyncCoordinator *coordinator_ = nullptr;
-  QString connectionName_;
+  // The keys of each report of changed values.
+  QList<QStringList> changedKeys_;
 };
 
 void TestCloudPlayStatsSyncCoordinator::init() {
@@ -68,25 +74,22 @@ void TestCloudPlayStatsSyncCoordinator::init() {
   QSettings settings;
   settings.clear();
 
-  connectionName_ =
-      QStringLiteral("test_cloudsync_coordinator_%1")
-          .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
-  registry_ = new ColumnRegistry();
-  databaseManager_ =
-      new DatabaseManager(*registry_, ":memory:", connectionName_);
-  library_ = new SongLibrary(*registry_, *databaseManager_);
-  coordinator_ = new CloudPlayStatsSyncCoordinator(*library_);
+  dir_ = new QTemporaryDir();
+  QVERIFY(dir_->isValid());
+  store_ = new PlayStatsStore(dir_->filePath("playstats.db"));
+  changedKeys_.clear();
+  coordinator_ = new CloudPlayStatsSyncCoordinator(
+      *store_,
+      [this](const QStringList &keys) { changedKeys_.push_back(keys); });
 }
 
 void TestCloudPlayStatsSyncCoordinator::cleanup() {
   delete coordinator_;
   coordinator_ = nullptr;
-  delete library_;
-  library_ = nullptr;
-  delete databaseManager_;
-  databaseManager_ = nullptr;
-  delete registry_;
-  registry_ = nullptr;
+  delete store_;
+  store_ = nullptr;
+  delete dir_;
+  dir_ = nullptr;
 
   CloudPlayStatsSync::clearDummyPullPages();
   CloudPlayStatsSync::clearDummyPushCalls();
@@ -94,143 +97,135 @@ void TestCloudPlayStatsSyncCoordinator::cleanup() {
 }
 
 void TestCloudPlayStatsSyncCoordinator::
-    incrementalSync_appliesCloudCount_updatesCursor_andEmitsSongChange() {
-  const int songPk =
-      library_->addTolibrary(makeSong("Song", "Artist", "/tmp/cloud-a.mp3"));
+    incrementalSync_mergesCloudCount_updatesCursor_andReportsKeys() {
+  store_->countPlay(kKey);
 
   QSettings settings;
-  settings.setValue("cloud_sync/user_uuid",
-                    "11111111-1111-1111-1111-111111111111");
-  settings.setValue("cloud_sync/last_synced_at", 1000);
-  settings.setValue("cloud_sync/rebase_pending", false);
+  setUuid(settings);
+  settings.setValue(CloudSyncSettings::kLastSyncedAt, 1000);
+  settings.setValue(CloudSyncSettings::kRebasePending, false);
 
-  CloudPlayStatItem item{.songIdentityKey = "song|artist|album",
-                         .playCount = 7,
-                         .updatedAt = 2000};
+  CloudPlayStatItem item{
+      .songIdentityKey = kKey, .playCount = 7, .updatedAt = 2000};
   CloudPlayStatsSync::setDummyPullPages({{item}}, true, 2000);
 
-  QSignalSpy spy(coordinator_, &CloudPlayStatsSyncCoordinator::songDataChanged);
   coordinator_->startSync();
 
-  QTRY_COMPARE(spy.size(), 1);
-  QCOMPARE(spy.at(0).at(0).toInt(), songPk);
-  QCOMPARE(library_->getSongByPK(songPk).at("play_count").text,
-           std::string("7"));
-
+  QTRY_COMPARE(changedKeys_.size(), 1);
+  QCOMPARE(changedKeys_.front(), QStringList{kKey});
+  QCOMPARE(playCount(*store_), 7);
   const qint64 syncedAt =
-      settings.value("cloud_sync/last_synced_at", 0).toLongLong();
+      settings.value(CloudSyncSettings::kLastSyncedAt, 0).toLongLong();
   QVERIFY(syncedAt >= 2000);
 }
 
-void TestCloudPlayStatsSyncCoordinator::
-    pushIncrementForSongPk_pushesWhenUuidIsValid() {
-  const int songPk =
-      library_->addTolibrary(makeSong("Song", "Artist", "/tmp/cloud-b.mp3"));
-
+void TestCloudPlayStatsSyncCoordinator::pushIncrement_pushesWhenUuidIsValid() {
+  // Without a UUID, nothing.
+  coordinator_->pushIncrement(kKey);
   QSettings settings;
-  settings.setValue("cloud_sync/user_uuid",
-                    "11111111-1111-1111-1111-111111111111");
-
-  CloudPlayStatsSync::clearDummyPushCalls();
-  coordinator_->pushIncrementForSongPk(songPk);
+  setUuid(settings);
+  coordinator_->pushIncrement(kKey);
 
   QTRY_COMPARE(CloudPlayStatsSync::dummyPushCalls().size(), size_t(1));
   const auto calls = CloudPlayStatsSync::dummyPushCalls();
-  QCOMPARE(calls[0].songIdentityKey, std::string("song|artist|album"));
+  QCOMPARE(calls[0].songIdentityKey, std::string(kKey));
   QCOMPARE(calls[0].delta, 1);
 }
 
 void TestCloudPlayStatsSyncCoordinator::
     rebase_cloudHigher_noPush_andClearsPending() {
-  const int songPk =
-      library_->addTolibrary(makeSong("Song", "Artist", "/tmp/cloud-c.mp3"));
-  QVERIFY(library_->markSongPlayedAtStart(songPk, 100));
-  QVERIFY(library_->incrementPlayCount(songPk));
-  QVERIFY(library_->incrementPlayCount(songPk));
-  QVERIFY(library_->incrementPlayCount(songPk)); // local = 3
+  for (int i = 0; i < 3; ++i) {
+    store_->countPlay(kKey);
+  }
 
   QSettings settings;
-  settings.setValue("cloud_sync/user_uuid",
-                    "11111111-1111-1111-1111-111111111111");
-  settings.setValue("cloud_sync/rebase_pending", true);
-  settings.setValue("cloud_sync/last_synced_at", 0);
+  setUuid(settings);
+  settings.setValue(CloudSyncSettings::kRebasePending, true);
+  settings.setValue(CloudSyncSettings::kLastSyncedAt, 0);
 
-  CloudPlayStatsSync::clearDummyPushCalls();
   CloudPlayStatsSync::setDummyPushResults({});
-  CloudPlayStatItem item{.songIdentityKey = "song|artist|album",
-                         .playCount = 10,
-                         .updatedAt = 3000};
+  CloudPlayStatItem item{
+      .songIdentityKey = kKey, .playCount = 10, .updatedAt = 3000};
   CloudPlayStatsSync::setDummyPullPages({{item}}, true, 3000);
 
   coordinator_->startSync();
 
-  QTRY_VERIFY(!settings.value("cloud_sync/rebase_pending").toBool());
+  QTRY_VERIFY(!settings.value(CloudSyncSettings::kRebasePending).toBool());
   QCOMPARE(CloudPlayStatsSync::dummyPushCalls().size(), size_t(0));
-  QCOMPARE(library_->getSongByPK(songPk).at("play_count").text,
-           std::string("10"));
+  QCOMPARE(playCount(*store_), 10);
 }
 
 void TestCloudPlayStatsSyncCoordinator::
     rebase_localHigher_pushesDelta_andClearsPending() {
-  const int songPk =
-      library_->addTolibrary(makeSong("Song", "Artist", "/tmp/cloud-d.mp3"));
-  QVERIFY(library_->markSongPlayedAtStart(songPk, 100));
   for (int i = 0; i < 8; ++i) {
-    QVERIFY(library_->incrementPlayCount(songPk));
+    store_->countPlay(kKey);
   }
 
   QSettings settings;
-  settings.setValue("cloud_sync/user_uuid",
-                    "11111111-1111-1111-1111-111111111111");
-  settings.setValue("cloud_sync/rebase_pending", true);
-  settings.setValue("cloud_sync/last_synced_at", 0);
+  setUuid(settings);
+  settings.setValue(CloudSyncSettings::kRebasePending, true);
+  settings.setValue(CloudSyncSettings::kLastSyncedAt, 0);
 
-  CloudPlayStatsSync::clearDummyPushCalls();
   CloudPlayStatsSync::setDummyPushResults({true});
-  CloudPlayStatItem item{.songIdentityKey = "song|artist|album",
-                         .playCount = 3,
-                         .updatedAt = 3001};
+  CloudPlayStatItem item{
+      .songIdentityKey = kKey, .playCount = 3, .updatedAt = 3001};
   CloudPlayStatsSync::setDummyPullPages({{item}}, true, 3001);
 
   coordinator_->startSync();
 
-  QTRY_VERIFY(!settings.value("cloud_sync/rebase_pending").toBool());
+  QTRY_VERIFY(!settings.value(CloudSyncSettings::kRebasePending).toBool());
   const auto calls = CloudPlayStatsSync::dummyPushCalls();
   QCOMPARE(calls.size(), size_t(1));
-  QCOMPARE(calls.front().songIdentityKey, std::string("song|artist|album"));
+  QCOMPARE(calls.front().songIdentityKey, std::string(kKey));
   QCOMPARE(calls.front().delta, 5);
-  QCOMPARE(library_->getSongByPK(songPk).at("play_count").text,
-           std::string("8"));
+  // The merge keeps the larger count.
+  QCOMPARE(playCount(*store_), 8);
 }
 
-void TestCloudPlayStatsSyncCoordinator::rebase_pushFailure_keepsPending() {
-  const int songPk =
-      library_->addTolibrary(makeSong("Song", "Artist", "/tmp/cloud-e.mp3"));
-  QVERIFY(library_->markSongPlayedAtStart(songPk, 100));
-  for (int i = 0; i < 8; ++i) {
-    QVERIFY(library_->incrementPlayCount(songPk));
-  }
+void TestCloudPlayStatsSyncCoordinator::
+    rebase_manyDeltas_pushesEveryChunk_andClearsPending() {
+  countTwoChunksOfKeys(*store_);
 
   QSettings settings;
-  settings.setValue("cloud_sync/user_uuid",
-                    "11111111-1111-1111-1111-111111111111");
-  settings.setValue("cloud_sync/rebase_pending", true);
-  settings.setValue("cloud_sync/last_synced_at", 0);
-
-  CloudPlayStatsSync::clearDummyPushCalls();
-  CloudPlayStatsSync::setDummyPushResults({false});
-  CloudPlayStatItem item{.songIdentityKey = "song|artist|album",
-                         .playCount = 3,
-                         .updatedAt = 3002};
-  CloudPlayStatsSync::setDummyPullPages({{item}}, true, 3002);
+  setUuid(settings);
+  settings.setValue(CloudSyncSettings::kRebasePending, true);
+  settings.setValue(CloudSyncSettings::kLastSyncedAt, 0);
+  CloudPlayStatsSync::setDummyPushResults({true, true});
+  CloudPlayStatsSync::setDummyPullPages({}, true, 0);
 
   coordinator_->startSync();
 
-  QTRY_COMPARE(CloudPlayStatsSync::dummyPushCalls().size(), size_t(1));
-  QVERIFY(settings.value("cloud_sync/rebase_pending").toBool());
+  // The second chunk follows the first after the gap.
+  QTRY_VERIFY(!settings.value(CloudSyncSettings::kRebasePending).toBool());
   const auto calls = CloudPlayStatsSync::dummyPushCalls();
-  QCOMPARE(calls.front().delta, 5);
+  QCOMPARE(calls.size(), size_t(kTwoChunksOfKeys));
+  std::set<std::string> pushed;
+  for (const auto &call : calls) {
+    QCOMPARE(call.delta, 1);
+    pushed.insert(call.songIdentityKey);
+  }
+  QCOMPARE(pushed.size(), size_t(kTwoChunksOfKeys));
 }
 
+void TestCloudPlayStatsSyncCoordinator::
+    rebase_pushFailure_stopsAndKeepsPending() {
+  countTwoChunksOfKeys(*store_);
+
+  QSettings settings;
+  setUuid(settings);
+  settings.setValue(CloudSyncSettings::kRebasePending, true);
+  settings.setValue(CloudSyncSettings::kLastSyncedAt, 0);
+  CloudPlayStatsSync::setDummyPushResults({false});
+  CloudPlayStatsSync::setDummyPullPages({}, true, 0);
+
+  coordinator_->startSync();
+
+  // The first chunk's 10 updates, then nothing: no second chunk after the
+  // gap.
+  QTRY_COMPARE(CloudPlayStatsSync::dummyPushCalls().size(), size_t(10));
+  QTest::qWait(1500);
+  QCOMPARE(CloudPlayStatsSync::dummyPushCalls().size(), size_t(10));
+  QVERIFY(settings.value(CloudSyncSettings::kRebasePending).toBool());
+}
 QTEST_MAIN(TestCloudPlayStatsSyncCoordinator)
 #include "tst_cloudplaystatssynccoordinator.moc"

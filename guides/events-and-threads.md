@@ -238,8 +238,8 @@ The two compared:
 
 ### A moved object: the cloud sync worker
 
-`CloudPlayStatsSyncCoordinator` owns a worker and a `QThread`, and moves
-the worker to that thread when it is created:
+`CloudPlayStatsSyncCoordinator` (in the Play Stats plugin) owns a worker and a
+`QThread`, and moves the worker to that thread when it is created:
 
 ```cpp
 syncWorker_.moveToThread(&syncThread_);

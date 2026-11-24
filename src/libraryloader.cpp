@@ -12,7 +12,9 @@
 
 namespace {
 // Runs on the worker thread.
-SongLibrary::Snapshot loadSongLibrarySnapshot(const QString &databaseName) {
+SongLibrary::Snapshot
+loadSongLibrarySnapshot(const QString &databaseName,
+                        const std::vector<ProvidedFields> &sources) {
   // TODO: Extract DB-only library loading so startup does not need to construct
   // temporary full ColumnRegistry/SongLibrary instances on the worker thread.
 #ifdef MYPLAYER_TESTING
@@ -22,6 +24,15 @@ SongLibrary::Snapshot loadSongLibrarySnapshot(const QString &databaseName) {
     QThread::msleep(static_cast<unsigned long>(delayMs));
   }
 #endif
+  // Each source's values are read beside the songs, as they need nothing
+  // from them (docs/plugins/playstats.md, "Startup"). waitForFinished runs a
+  // task not started yet in this thread, so a pool with one thread cannot
+  // deadlock.
+  std::vector<QFuture<ProvidedValuesByKey>> reads;
+  reads.reserve(sources.size());
+  for (const ProvidedFields &source : sources) {
+    reads.push_back(QtConcurrent::run(source.allValues));
+  }
   ColumnRegistry registry;
   DatabaseManager databaseManager(
       registry, databaseName,
@@ -31,24 +42,36 @@ SongLibrary::Snapshot loadSongLibrarySnapshot(const QString &databaseName) {
     qFatal("loadSongLibrarySnapshot: failed to load dynamic columns");
   }
   SongLibrary library(registry, databaseManager);
+  for (const ProvidedFields &source : sources) {
+    library.addProvidedSource(source);
+  }
   library.loadFromDatabase();
-  return library.snapshot();
+  for (size_t i = 0; i < sources.size(); ++i) {
+    reads[i].waitForFinished();
+    library.fillProvidedValues(sources[i].sourceId, reads[i].result());
+  }
+  return library.takeSnapshot();
 }
 } // namespace
 
-void loadLibrary(ColumnRegistry &columnRegistry,
-                 DatabaseManager &databaseManager, SongLibrary &library,
-                 QObject *context, std::function<void()> onLoaded) {
+QFuture<void> loadLibrary(ColumnRegistry &columnRegistry,
+                          DatabaseManager &databaseManager,
+                          SongLibrary &library, QObject *context,
+                          std::function<void()> onLoaded) {
   QSqlDatabase &db = databaseManager.db();
   if (db.databaseName() == QStringLiteral(":memory:")) {
     if (!columnRegistry.loadDynamicColumns(db)) {
       qFatal("loadLibrary: failed to load dynamic columns");
     }
     library.loadFromDatabase();
+    for (const ProvidedFields &source : library.providedSources()) {
+      library.fillProvidedValues(source.sourceId, source.allValues());
+    }
     onLoaded();
-    return;
+    return {};
   }
 
+  library.beginLoad();
   // A child of context, so it is destroyed with it.
   auto *watcher = new QFutureWatcher<SongLibrary::Snapshot>(context);
   QObject::connect(
@@ -60,10 +83,12 @@ void loadLibrary(ColumnRegistry &columnRegistry,
         if (!columnRegistry.loadDynamicColumns(databaseManager.db())) {
           qFatal("loadLibrary: failed to load dynamic columns");
         }
-        library.replaceWithSnapshot(watcher->result());
+        library.replaceWithSnapshot(watcher->future().takeResult());
         watcher->deleteLater();
         onLoaded();
       });
-  watcher->setFuture(
-      QtConcurrent::run(loadSongLibrarySnapshot, db.databaseName()));
+  QFuture<SongLibrary::Snapshot> future = QtConcurrent::run(
+      loadSongLibrarySnapshot, db.databaseName(), library.providedSources());
+  watcher->setFuture(future);
+  return QFuture<void>(future);
 }

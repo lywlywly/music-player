@@ -1,14 +1,14 @@
 #include "cloudplaystatssynccoordinator.h"
+#include "cloudsyncsettings.h"
+#include "playstatsstore.h"
 #include <QDateTime>
 #include <QDebug>
 #include <QMetaObject>
 #include <QPointer>
 #include <QSettings>
 #include <QTimer>
-#include <QUuid>
 #include <algorithm>
 #include <memory>
-#include <unordered_set>
 
 namespace {
 constexpr int kPullPageLimit = 100;
@@ -17,8 +17,11 @@ constexpr int kRebaseBulkChunkGapMs = 1000;
 } // namespace
 
 CloudPlayStatsSyncCoordinator::CloudPlayStatsSyncCoordinator(
-    SongLibrary &songLibrary, QObject *parent)
-    : QObject(parent), songLibrary_(songLibrary) {
+    PlayStatsStore &store,
+    std::function<void(const QStringList &keys)> onValuesChanged,
+    QObject *parent)
+    : QObject(parent), store_(store),
+      onValuesChanged_(std::move(onValuesChanged)) {
   syncWorker_.moveToThread(&syncThread_);
   syncThread_.start();
 }
@@ -44,7 +47,7 @@ void CloudPlayStatsSyncCoordinator::startSync() {
 
   QSettings settings;
   const bool rebasePending =
-      settings.value("cloud_sync/rebase_pending", false).toBool();
+      settings.value(CloudSyncSettings::kRebasePending, false).toBool();
   qDebug() << "CloudSync start:" << "rebasePending=" << rebasePending;
   if (rebasePending) {
     runRebaseSync(uuid);
@@ -63,16 +66,13 @@ void CloudPlayStatsSyncCoordinator::triggerManualRebase() {
   runRebaseSync(uuid);
 }
 
-void CloudPlayStatsSyncCoordinator::pushIncrementForSongPk(int songPk) {
+void CloudPlayStatsSyncCoordinator::pushIncrement(
+    const QString &songIdentityKey) {
   const QString uuid = currentValidUuid();
   if (uuid.isEmpty()) {
     return;
   }
-  const std::string identityKey = songLibrary_.songIdentityKeyBySongPk(songPk);
-  if (identityKey.empty()) {
-    return;
-  }
-  pushIncrementOnWorker(uuid, identityKey, 1);
+  pushIncrementOnWorker(uuid, songIdentityKey.toStdString(), 1);
 }
 
 bool CloudPlayStatsSyncCoordinator::hasValidUuid() const {
@@ -82,7 +82,7 @@ bool CloudPlayStatsSyncCoordinator::hasValidUuid() const {
 void CloudPlayStatsSyncCoordinator::runIncrementalSync(const QString &uuid) {
   QSettings settings;
   const qint64 lastSyncedAt =
-      settings.value("cloud_sync/last_synced_at", 0).toLongLong();
+      settings.value(CloudSyncSettings::kLastSyncedAt, 0).toLongLong();
   const qint64 updatedAfter = std::max<qint64>(0, lastSyncedAt - 60);
   qDebug() << "CloudSync incremental begin:" << "lastSyncedAt=" << lastSyncedAt
            << "updatedAfter=" << updatedAfter;
@@ -99,7 +99,7 @@ void CloudPlayStatsSyncCoordinator::runIncrementalSync(const QString &uuid) {
         }
         QSettings settings;
         const qint64 nextCursor = std::max(maxUpdatedAt, unixNowSeconds());
-        settings.setValue("cloud_sync/last_synced_at", nextCursor);
+        settings.setValue(CloudSyncSettings::kLastSyncedAt, nextCursor);
         qDebug() << "CloudSync incremental done:" << "maxUpdatedAt="
                  << maxUpdatedAt << "nextCursor=" << nextCursor;
       });
@@ -130,34 +130,41 @@ void CloudPlayStatsSyncCoordinator::runRebaseSync(const QString &uuid) {
         }
 
         qDebug() << "CloudSync rebase push deltas:" << deltas.size();
-        pushRebaseDeltasSequentially(uuid, std::move(deltas));
+        pushRebaseChunk(
+            uuid,
+            std::make_shared<const std::vector<std::pair<std::string, int>>>(
+                std::move(deltas)),
+            0);
       });
 }
 
 void CloudPlayStatsSyncCoordinator::applyCloudPullPage(
     const std::vector<CloudPlayStatItem> &items,
     std::unordered_map<std::string, int> *cloudCounts, const char *logTag) {
-  std::unordered_set<int> affected;
+  std::vector<std::pair<QString, int>> counts;
+  QStringList keys;
+  counts.reserve(items.size());
   for (const CloudPlayStatItem &item : items) {
     if (cloudCounts) {
       (*cloudCounts)[item.songIdentityKey] = item.playCount;
     }
-    const std::vector<int> pks = songLibrary_.applyCloudPlayCount(
-        item.songIdentityKey, item.playCount, item.updatedAt);
-    affected.insert(pks.begin(), pks.end());
+    if (item.songIdentityKey.empty() || item.playCount < 0) {
+      continue;
+    }
+    const QString key = QString::fromStdString(item.songIdentityKey);
+    counts.emplace_back(key, item.playCount);
+    keys.push_back(key);
   }
-  for (int pk : affected) {
-    emit songDataChanged(pk);
-  }
-  qDebug() << logTag << "items=" << items.size()
-           << "affectedSongs=" << affected.size();
+  store_.mergeCloudCounts(counts);
+  onValuesChanged_(keys);
+  qDebug() << logTag << "items=" << items.size();
 }
 
 std::vector<std::pair<std::string, int>>
 CloudPlayStatsSyncCoordinator::buildRebaseDeltas(
     const std::unordered_map<std::string, int> &cloudCounts) const {
   std::vector<std::pair<std::string, int>> deltas;
-  const auto localCounts = songLibrary_.identityPlayCounts();
+  const auto localCounts = store_.playCounts();
   deltas.reserve(localCounts.size());
   for (const auto &[identityKey, localCount] : localCounts) {
     const auto cloudIt = cloudCounts.find(identityKey);
@@ -172,54 +179,40 @@ CloudPlayStatsSyncCoordinator::buildRebaseDeltas(
 
 void CloudPlayStatsSyncCoordinator::finishRebaseSuccess() {
   QSettings settings;
-  settings.setValue("cloud_sync/rebase_pending", false);
-  settings.setValue("cloud_sync/last_synced_at", unixNowSeconds());
+  settings.setValue(CloudSyncSettings::kRebasePending, false);
+  settings.setValue(CloudSyncSettings::kLastSyncedAt, unixNowSeconds());
 }
 
-void CloudPlayStatsSyncCoordinator::pushRebaseDeltasSequentially(
-    const QString &uuid, std::vector<std::pair<std::string, int>> deltas) {
-  auto sharedDeltas =
-      std::make_shared<std::vector<std::pair<std::string, int>>>(
-          std::move(deltas));
-  auto index = std::make_shared<int>(0);
-  auto allOk = std::make_shared<bool>(true);
-  auto pushNext = std::make_shared<std::function<void()>>();
-  *pushNext = [this, uuid, sharedDeltas, index, allOk, pushNext]() {
-    if (*index >= static_cast<int>(sharedDeltas->size())) {
-      if (*allOk) {
-        finishRebaseSuccess();
-        qDebug() << "CloudSync rebase done: all delta pushes succeeded";
-      } else {
-        qWarning() << "CloudSync rebase incomplete: some delta pushes failed";
-      }
-      return;
-    }
-
-    const int begin = *index;
-    const int end = std::min(begin + static_cast<int>(kRebaseBulkChunkSize),
-                             static_cast<int>(sharedDeltas->size()));
-    std::vector<std::pair<std::string, int>> chunk;
-    chunk.reserve(static_cast<size_t>(end - begin));
-    for (int i = begin; i < end; ++i) {
-      chunk.push_back(sharedDeltas->at(i));
-    }
-    qDebug() << "CloudSync rebase bulk push:" << "begin=" << begin
-             << "end=" << end << "count=" << chunk.size();
-
-    pushBulkIncrementOnWorker(
-        uuid, chunk, [this, index, end, allOk, pushNext](bool ok) {
-          if (!ok) {
-            *allOk = false;
-            qWarning() << "CloudSync rebase bulk push failed at index"
-                       << *index;
-            return;
-          }
-          *index = end;
-          QTimer::singleShot(kRebaseBulkChunkGapMs, this,
-                             [pushNext]() { (*pushNext)(); });
-        });
-  };
-  (*pushNext)();
+void CloudPlayStatsSyncCoordinator::pushRebaseChunk(
+    const QString &uuid,
+    std::shared_ptr<const std::vector<std::pair<std::string, int>>> deltas,
+    size_t begin) {
+  const size_t end = std::min(begin + kRebaseBulkChunkSize, deltas->size());
+  const std::vector<std::pair<std::string, int>> chunk(
+      deltas->begin() + static_cast<std::ptrdiff_t>(begin),
+      deltas->begin() + static_cast<std::ptrdiff_t>(end));
+  qDebug() << "CloudSync rebase bulk push:" << "begin=" << begin
+           << "end=" << end;
+  // Only the pending callback or timer holds deltas, so they are freed after
+  // the last chunk, a failure, or the coordinator's destruction (which drops
+  // the queued callback and the timer).
+  pushBulkIncrementOnWorker(
+      uuid, chunk, [this, uuid, deltas, begin, end](bool ok) {
+        if (!ok) {
+          qWarning() << "CloudSync rebase bulk push failed at index" << begin
+                     << "; keep rebase_pending=true";
+          return;
+        }
+        if (end == deltas->size()) {
+          finishRebaseSuccess();
+          qDebug() << "CloudSync rebase done: all delta pushes succeeded";
+          return;
+        }
+        QTimer::singleShot(kRebaseBulkChunkGapMs, this,
+                           [this, uuid, deltas, end]() {
+                             pushRebaseChunk(uuid, deltas, end);
+                           });
+      });
 }
 
 void CloudPlayStatsSyncCoordinator::pushIncrementOnWorker(
@@ -286,20 +279,16 @@ void CloudPlayStatsSyncCoordinator::pullDeltaPagedOnWorker(
       Qt::QueuedConnection);
 }
 
-bool CloudPlayStatsSyncCoordinator::isValidUuid(const QString &uuid) {
-  return !uuid.trimmed().isEmpty() && !QUuid(uuid.trimmed()).isNull();
-}
-
 qint64 CloudPlayStatsSyncCoordinator::unixNowSeconds() {
   return QDateTime::currentSecsSinceEpoch();
 }
 
 QString CloudPlayStatsSyncCoordinator::currentUuid() const {
   QSettings settings;
-  return settings.value("cloud_sync/user_uuid").toString().trimmed();
+  return settings.value(CloudSyncSettings::kUserUuid).toString().trimmed();
 }
 
 QString CloudPlayStatsSyncCoordinator::currentValidUuid() const {
   const QString uuid = currentUuid();
-  return isValidUuid(uuid) ? uuid : QString{};
+  return CloudSyncSettings::isValidUuid(uuid) ? uuid : QString{};
 }

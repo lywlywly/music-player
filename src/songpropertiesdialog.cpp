@@ -37,9 +37,7 @@ SongPropertiesDialog::SongPropertiesDialog(
 SongPropertiesDialog::~SongPropertiesDialog() { delete ui; }
 
 bool SongPropertiesDialog::isNonTagInternalField(const std::string &key) {
-  return key == "filepath" || key == "song_identity_key" ||
-         key == "song_identity_id" || key == "play_count" ||
-         key == "last_played_timestamp" || key == "date_added";
+  return key == "filepath" || key == "date_added";
 }
 
 bool SongPropertiesDialog::isBuiltInFieldKey(const std::string &key) {
@@ -125,7 +123,9 @@ void SongPropertiesDialog::buildRows(
       row.editable = false;
     } else {
       row.source = RowSource::SongField;
-      row.editable = !isNonTagInternalField(key);
+      // A plugin's field is the plugin's, not a tag.
+      row.editable = !isNonTagInternalField(key) &&
+                     !(field && field->source == ColumnSource::Plugin);
     }
     rows_.push_back(std::move(row));
   }

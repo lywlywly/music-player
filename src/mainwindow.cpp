@@ -28,7 +28,9 @@
 #include <QLabel>
 #include <QResource>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QStatusBar>
+#include <QTimer>
 #include <algorithm>
 #include <utility>
 #include <vector>
@@ -77,6 +79,13 @@ QString pluginFolder() {
   return exeDir.absoluteFilePath("plugins");
 }
 
+// The folder the plugins' data folders are in: plugins/ beside the app's
+// database (docs/plugins/plugin-system.md, "Data folders").
+QString defaultPluginDataRoot() {
+  return QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation))
+      .filePath("plugins");
+}
+
 void prewarmSelectedPlaybackBackend() {
   if (loadPlaybackBackendSetting() ==
       PlaybackBackendManager::Backend::GStreamer) {
@@ -102,18 +111,17 @@ void setUpPlaybackButtonIcons(Ui::MainWindow *ui) {
 } // namespace
 
 MainWindow::MainWindow(QWidget *parent)
-    : MainWindow(QString{}, QString{}, parent) {}
+    : MainWindow(QString{}, QString{}, defaultPluginDataRoot(), parent) {}
 
 MainWindow::MainWindow(QString databaseName, QString connectionName,
-                       QWidget *parent)
+                       const QString &pluginDataRoot, QWidget *parent)
     : QMainWindow(parent), ui(new Ui::MainWindow),
       columnLayoutManager_(columnRegistry_, this),
       databaseManager_(columnRegistry_, std::move(databaseName),
                        std::move(connectionName)),
       songLibrary(columnRegistry_, databaseManager_),
       monitoredLibrary_(songLibrary, columnRegistry_, databaseManager_, {},
-                        &fileSystemMonitor_),
-      cloudPlayStatsSyncCoordinator_(songLibrary, this) {
+                        &fileSystemMonitor_) {
   prewarmSelectedPlaybackBackend();
   Q_INIT_RESOURCE(resources);
   ui->setupUi(this);
@@ -123,7 +131,12 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
   coverArt_ = new CoverArtPresenter(ui->label, this);
   // A child created after ui->setupUi, so the plugin panels in the info panel
   // are destroyed before it shuts the plugins down.
-  plugins_ = new PluginManager(*playback_, pluginFolder(), this);
+  plugins_ =
+      new PluginManager(*playback_, pluginFolder(), pluginDataRoot, this);
+  // Before NowPlayingPresenter parses the display expressions, so the
+  // plugins' fields resolve, and before the library loads their values.
+  plugins_->registerSongFields(columnRegistry_, songLibrary);
+  setUpProvidedFields();
   songInfo_ = new SongInfoPresenter(ui->songInfoPanel, songLibrary,
                                     monitoredLibrary_, columnRegistry_, this);
   spectrum_ = new SpectrumPresenter(ui->spectrumWidget, this);
@@ -145,7 +158,6 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
   setUpMenuBar();
   setUpInfoTabs();
   setUpPluginMenus();
-  initCloudSync();
   setUpPlaylist();
   setUpLibraryScanStatus();
   initSettings();
@@ -155,11 +167,20 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
   setUpSplitter();
 }
 
-void MainWindow::initCloudSync() {
-  connect(&cloudPlayStatsSyncCoordinator_,
-          &CloudPlayStatsSyncCoordinator::songDataChanged, this,
-          [this](int songPk) { playlists_->notifySongChanged(songPk); });
-  refreshManualCloudRebaseActionEnabled();
+void MainWindow::setUpProvidedFields() {
+  connect(plugins_, &PluginManager::providedValuesChanged, this,
+          [this](const QString &pluginId, const QStringList &keys) {
+            songLibrary.markStale(pluginId, keys);
+          });
+  // One refresh per batch of stale keys, from the event loop: a scan adding
+  // songs in a loop is one read after it, and a plugin's change is not
+  // applied inside the call that reported it (docs/plugins/playstats.md,
+  // "One path for every change after the load").
+  songLibrary.setStaleCallback([this]() {
+    QTimer::singleShot(0, this, [this]() {
+      playlists_->notifySongsChanged(songLibrary.refreshStale());
+    });
+  });
 }
 
 void MainWindow::setUpMenuBar() {
@@ -207,8 +228,6 @@ void MainWindow::setUpMenuBar() {
   ui->actionSearch_playlist->setShortcut(QKeySequence::Find);
   connect(ui->actionSearch_playlist, &QAction::triggered, this,
           &MainWindow::openPlaylistSearchDialog);
-  connect(ui->actionManual_cloud_rebase, &QAction::triggered, this,
-          &MainWindow::triggerManualCloudRebase);
 }
 
 void MainWindow::setUpPluginMenus() {
@@ -281,8 +300,8 @@ void MainWindow::setUpPlaylist() {
   playlistTabs = ui->playlistTabs;
   setPlaylistDependentActionsEnabled(false);
   statusBar()->showMessage(tr("Loading library..."));
-  loadLibrary(columnRegistry_, databaseManager_, songLibrary, this,
-              [this]() { finishSetUpPlaylist(); });
+  libraryLoad_ = loadLibrary(columnRegistry_, databaseManager_, songLibrary,
+                             this, [this]() { finishSetUpPlaylist(); });
 }
 
 void MainWindow::finishSetUpPlaylist() {
@@ -317,7 +336,6 @@ void MainWindow::finishSetUpPlaylist() {
   setPlaylistDependentActionsEnabled(true);
   // Playback is available before the scan; it runs in the background.
   monitoredLibrary_.rescan();
-  cloudPlayStatsSyncCoordinator_.startSync();
 }
 
 void MainWindow::setPlaylistDependentActionsEnabled(bool enabled) {
@@ -335,7 +353,6 @@ void MainWindow::setPlaylistDependentActionsEnabled(bool enabled) {
   ui->stop_button->setEnabled(enabled);
   ui->next_button->setEnabled(enabled);
   ui->prev_button->setEnabled(enabled);
-  refreshManualCloudRebaseActionEnabled();
 }
 
 void MainWindow::updatePlaylistWriteActionsEnabled() {
@@ -398,13 +415,6 @@ void MainWindow::initSettings() {
       playlists_->reloadAutoPlaylistExpressions();
       // TODO: refresh custom/computed attributes
     });
-    connect(dialog, &SettingsDialog::cloudUuidChanged, this,
-            [this](const QString &uuid) {
-              refreshManualCloudRebaseActionEnabled();
-              if (!uuid.isEmpty()) {
-                cloudPlayStatsSyncCoordinator_.triggerManualRebase();
-              }
-            });
     connect(dialog, &SettingsDialog::statusBarExpressionChanged, this,
             [this](const QString &expression) {
               nowPlaying_->setExpression(DisplayExpressionKind::StatusBar,
@@ -453,9 +463,6 @@ void MainWindow::setUpPlayback() {
           &MainWindow::navigateIndex);
   connect(playback_, &PlaybackController::songFinished, this,
           [this]() { QApplication::alert(this); });
-  connect(playback_, &PlaybackController::playCounted,
-          &cloudPlayStatsSyncCoordinator_,
-          &CloudPlayStatsSyncCoordinator::pushIncrementForSongPk);
   connect(
       playback_, &PlaybackController::playbackFailed, this,
       [this](const QString &filepath) {
@@ -626,20 +633,12 @@ void MainWindow::openPlaylistSearchDialog() {
 }
 
 MainWindow::~MainWindow() {
+  // The load's workers call the plugins' song field providers, so they finish
+  // before plugins_, a child destroyed after this body, shuts the plugins
+  // down (docs/plugins/playstats.md, "Lifetime").
+  libraryLoad_.waitForFinished();
   // It uses columnLayoutManager_, which is destroyed before the window's
   // children.
   delete playlistSearchDialog_;
   delete ui;
-}
-
-void MainWindow::triggerManualCloudRebase() {
-  if (!playlistReady_) {
-    return;
-  }
-  cloudPlayStatsSyncCoordinator_.triggerManualRebase();
-}
-
-void MainWindow::refreshManualCloudRebaseActionEnabled() {
-  ui->actionManual_cloud_rebase->setEnabled(
-      playlistReady_ && cloudPlayStatsSyncCoordinator_.hasValidUuid());
 }

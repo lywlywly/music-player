@@ -13,11 +13,6 @@ bool isBuiltInSongAttribute(const FieldDefinition &definition) {
          !definition.id.startsWith("attr:");
 }
 
-bool isPlayStatsFieldId(const QString &id) {
-  return id == QStringLiteral("play_count") ||
-         id == QStringLiteral("last_played_timestamp");
-}
-
 bool isDynamicSongAttribute(const FieldDefinition &definition) {
   return definition.source == ColumnSource::SongAttribute &&
          definition.id.startsWith("attr:");
@@ -101,15 +96,6 @@ ColumnRegistry::ColumnRegistry() {
       {.id = "channels",
        .valueType = ValueType::Number,
        .displayKind = DisplayKind::ChannelLayout});
-  add({.id = "play_count", .title = "Play Count", .defaultWidth = 120},
-      {.id = "play_count", .valueType = ValueType::Number});
-  add({.id = "last_played_timestamp",
-       .title = "Last Played",
-       .visibleByDefault = false,
-       .defaultWidth = 180},
-      {.id = "last_played_timestamp",
-       .valueType = ValueType::DateTime,
-       .displayKind = DisplayKind::EpochSecondsDateTime});
   add({.id = "filepath",
        .title = "File path",
        .visibleByDefault = false,
@@ -148,7 +134,41 @@ bool ColumnRegistry::isBuiltInSongAttributeKey(const QString &id) const {
 
 bool ColumnRegistry::isReservedComputedFieldKey(const QString &key) const {
   const QString normalized = util::canonicalizeTagKey(key);
-  return normalized.isEmpty() || hasField(computedFieldId(normalized));
+  return normalized.isEmpty() || hasField(computedFieldId(normalized)) ||
+         isPluginFieldId(normalized);
+}
+
+bool ColumnRegistry::isPluginFieldId(const QString &id) const {
+  const FieldDefinition *definition = findField(id);
+  return definition && definition->source == ColumnSource::Plugin;
+}
+
+QList<QString> ColumnRegistry::pluginFieldIds() const {
+  QList<QString> ids;
+  for (const FieldDefinition &definition : fieldDefinitions_) {
+    if (definition.source == ColumnSource::Plugin) {
+      ids.push_back(definition.id);
+    }
+  }
+  return ids;
+}
+
+bool ColumnRegistry::isNameInUse(const QString &name) const {
+  if (hasField(name) || hasColumn(name)) {
+    return true;
+  }
+  const std::string normalized = util::normalizedText(name).toStdString();
+  for (const ExprSymbolInfo &symbol : expressionSymbols()) {
+    if (symbol.name == normalized) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void ColumnRegistry::addPluginField(const ColumnDefinition &column,
+                                    const FieldDefinition &field) {
+  add(column, field);
 }
 
 QList<ColumnDefinition> ColumnRegistry::definitions() const {
@@ -209,6 +229,13 @@ std::vector<ExprSymbolInfo> ColumnRegistry::expressionSymbols() const {
     addSymbol(resolvedId, resolvedId, definition);
   }
 
+  // Stored on the song under the field id, as a custom field's attr: id.
+  for (const FieldDefinition &definition : fieldDefinitions_) {
+    if (definition.source == ColumnSource::Plugin) {
+      addSymbol(definition.id, definition.id, definition);
+    }
+  }
+
   return symbols;
 }
 
@@ -251,8 +278,7 @@ QList<FieldDefinition> ColumnRegistry::songAttributeDefinitions() const {
   QList<FieldDefinition> result;
   result.reserve(fieldDefinitions_.size());
   for (const FieldDefinition &definition : fieldDefinitions_) {
-    if (isBuiltInSongAttribute(definition) &&
-        !isPlayStatsFieldId(definition.id)) {
+    if (isBuiltInSongAttribute(definition)) {
       result.push_back(definition);
     }
   }

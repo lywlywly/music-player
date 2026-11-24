@@ -16,6 +16,7 @@ private slots:
   void loadDynamicColumns_replacesRemovedDynamicColumns();
   void loadDynamicColumns_loadsComputedDefinitions();
   void fieldTypePool_staysInSyncWithRegistryFields();
+  void pluginField_isASymbolAndReservesItsName();
 };
 
 void TestColumnRegistry::builtInDefinitions_areAvailable() {
@@ -69,11 +70,9 @@ void TestColumnRegistry::builtInDefinitions_areAvailable() {
   QCOMPARE(registry.findField(sampleRate->id)->valueType, ValueType::Number);
   QVERIFY(!sampleRate->visibleByDefault);
 
-  const ColumnDefinition *lastPlayed =
-      registry.findColumn("last_played_timestamp");
-  QVERIFY(lastPlayed != nullptr);
-  QCOMPARE(registry.findField(lastPlayed->id)->displayKind,
-           DisplayKind::EpochSecondsDateTime);
+  // Play stats are the play stats plugin's fields.
+  QVERIFY(!registry.hasField("play_count"));
+  QVERIFY(!registry.hasField("last_played_timestamp"));
 
   const ColumnDefinition *channels = registry.findColumn("channels");
   QVERIFY(channels != nullptr);
@@ -159,6 +158,11 @@ void TestColumnRegistry::loadDynamicColumns_loadsAndNormalizes() {
 
 void TestColumnRegistry::loadDynamicColumns_replacesRemovedDynamicColumns() {
   ColumnRegistry registry;
+  registry.addPluginField({.id = "plays", .title = "Plays"},
+                          {.id = "plays",
+                           .source = ColumnSource::Plugin,
+                           .valueType = ValueType::Number,
+                           .writable = false});
   const QString connectionName = "test_columnregistry_reload_connection";
   {
     QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
@@ -187,6 +191,9 @@ void TestColumnRegistry::loadDynamicColumns_replacesRemovedDynamicColumns() {
     QVERIFY(q.exec("DELETE FROM attribute_definitions WHERE key='rating'"));
     QVERIFY(registry.loadDynamicColumns(db));
     QVERIFY(registry.findColumn("attr:rating") == nullptr);
+    // A plugin's field is not in the database, and stays.
+    QVERIFY(registry.findColumn("plays") != nullptr);
+    QCOMPARE(registry.pluginFieldIds(), QList<QString>{"plays"});
   }
 
   QSqlDatabase::removeDatabase(connectionName);
@@ -309,6 +316,37 @@ void TestColumnRegistry::fieldTypePool_staysInSyncWithRegistryFields() {
     QVERIFY(FieldTypePool::instance().find("computed:era") == nullptr);
   }
   QSqlDatabase::removeDatabase(connectionName);
+}
+
+void TestColumnRegistry::pluginField_isASymbolAndReservesItsName() {
+  ColumnRegistry registry;
+  QVERIFY(registry.isNameInUse("artist"));
+  QVERIFY(registry.isNameInUse("builtin:artist"));
+  QVERIFY(!registry.isNameInUse("plays"));
+  QVERIFY(!registry.isReservedComputedFieldKey("plays"));
+
+  registry.addPluginField({.id = "plays", .title = "Plays"},
+                          {.id = "plays",
+                           .source = ColumnSource::Plugin,
+                           .valueType = ValueType::Number,
+                           .writable = false});
+  QVERIFY(registry.isPluginFieldId("plays"));
+  QVERIFY(!registry.isPluginFieldId("artist"));
+  QVERIFY(registry.isNameInUse("plays"));
+  // A computed field of that key would take the same symbol.
+  QVERIFY(registry.isReservedComputedFieldKey("plays"));
+  // Not a songs column.
+  QVERIFY(!registry.songAttributeColumnIds().contains("plays"));
+  // Resolves to the song's field of that id.
+  bool found = false;
+  for (const ExprSymbolInfo &symbol : registry.expressionSymbols()) {
+    if (symbol.name == "plays") {
+      found = true;
+      QCOMPARE(symbol.resolvedId, std::string("plays"));
+      QCOMPARE(symbol.valueType, ValueType::Number);
+    }
+  }
+  QVERIFY(found);
 }
 
 QTEST_MAIN(TestColumnRegistry)

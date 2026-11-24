@@ -24,7 +24,8 @@ as it is. It is called the **manual library** below.
 * **Two independent libraries, one song table.** The manual and the
   monitored library never change each other's membership. They share one
   `songs` row per file path, so a file that is in a watched folder and also
-  added by hand is one song with one set of tags and play stats.
+  added by hand is one song with one set of tags and plugin values (play
+  stats).
 * **A song row lives while either library holds it**, and is deleted only
   when neither does. `PlaylistCollection::releaseSongs` is the only place
   that deletes songs.
@@ -89,8 +90,10 @@ as it is. It is called the **manual library** below.
 ### Terms
 
 * **Song row**: one row in `songs`, one per canonical file path, with a
-  `song_id` (pk). It holds tags, `attr:` and computed values, and links to an
-  identity that holds play stats. In memory the pk is the index into
+  `song_id` (pk). It holds tags, `attr:` and computed values; play stats are
+  the Play Stats plugin's, by a key of the song's tags
+  ([plugins/playstats.md](plugins/playstats.md)). In memory the pk is the
+  index into
   `SongLibrary::songs`.
 * **Owner**: a library that keeps song rows alive. There are exactly two.
   * **Manual library**: songs in at least one manual playlist
@@ -136,8 +139,9 @@ as it is. It is called the **manual library** below.
 7. **Each monitored file belongs to exactly one watched folder**
    (`monitored_files.folder_id`), because folders don't overlap and the walk
    doesn't follow symlinks.
-8. **Song data is shared.** Tag edits, metadata refresh, play stats and cloud
-   sync write the shared row, and every view of that pk refreshes
+8. **Song data is shared.** Tag edits, metadata refresh and a plugin's
+   provided values (play stats) write the shared row, and every view of that
+   pk refreshes
    (`PlaylistCollection::notifySongChanged`), whichever library the change
    came through.
 
@@ -167,7 +171,7 @@ Signals are listed in the order they are emitted.
 | File changed and now unreadable | W or M+W | - or M | treated as gone (rows below), path goes into the failed set |
 | File gone from an online folder | W | - | delete `monitored_files` row; `songsLeft` (autoplaylist rows removed), then `releaseSongs`: row deleted, `songsRemovedFromLibrary` |
 | same | M+W | M | delete `monitored_files` row; `songsLeft`, then `releaseSongs`: row kept (still in manual playlists) |
-| File moved (within or between watched folders) | W at A | W at B | gone at A + new at B: B gets a new pk, play stats carry over by identity; a manual playlist holding A keeps A as a missing file |
+| File moved (within or between watched folders) | W at A | W at B | gone at A + new at B: B gets a new pk, play stats carry over by key (same tags); a manual playlist holding A keeps A as a missing file |
 | Folder removed from the watch list | W or M+W | - or M | delete `library_folders` row (cascades `monitored_files`), remove the watch; `songsLeft`, then `releaseSongs` for all its pks |
 | Folder offline at scan | W or M+W | same | nothing released; `folderAvailabilityChanged(id, false)` |
 | Offline folder available again | W or M+W | per scan | `folderAvailabilityChanged(id, true)`, add the watch, then a normal scan of it |
@@ -178,7 +182,8 @@ Signals are listed in the order they are emitted.
 | New file unreadable by TagLib | - | - | not added; kept in the failed set (see "Unreadable files") |
 
 A deleted and re-added file gets a new pk (`song_id` is `AUTOINCREMENT`), and
-its play count comes back through its identity, as today.
+its play count comes back through its key (the plugin keeps rows of songs
+that are gone).
 
 ## Change detection
 
@@ -237,7 +242,7 @@ can count as gone.
      equal the snapshot. If not (for example the app saved tags in the
      meantime), skip the entry and queue the path for another scan, so an
      older parse never overwrites newer data.
-   * Fill computed fields and the identity key with the live registry
+   * Fill computed fields with the live registry
      (`SongLibrary::prepareParsedSong`), then `addTolibrary`.
    * new -> insert `monitored_files`, `songsEntered`;
      changed -> update stats, `songsUpdated` + `notifySongChanged`;
@@ -366,8 +371,9 @@ file's mtime and size and fires the watcher.
 * Re-evaluated for:
   * the pks in `songsEntered` and `songsLeft`;
   * the pk in every `PlaylistCollection::notifySongChanged(pk)`: file
-    changes, Song Properties, play stats, cloud sync. So `play_count > 10`
-    gains a song as soon as its count passes 10;
+    changes, Song Properties, and `notifySongsChanged` for the songs a
+    plugin's values reached (play stats). So `play_count > 10` gains a song
+    as soon as its count passes 10;
   * the pks of a "Refresh Playlist Metadata" run: `Playlist` gets a new
     signal `songsRefreshed(pks)`, emitted after `songsReset`, which
     `PlaylistCollection` handles like `notifySongChanged` for each pk (this
@@ -377,11 +383,10 @@ file's mtime and size and fires the watcher.
     change: `MainWindow`'s `customFieldsChanged` handler calls
     `PlaylistCollection::reloadAutoPlaylistExpressions()`, which re-parses
     every expression first.
-* Play stats are per identity: `markSongPlayedAtStart` and
-  `incrementPlayCount` change every song sharing the identity, so
-  `PlaybackController` notifies every pk of the identity
-  (`SongLibrary::songPksSharingIdentity(pk)`), not only the playing one, and
-  autoplaylists on `play_count` stay right for duplicates.
+* A plugin's values are per key: a change reaches every song sharing the key
+  (`SongLibrary::refreshStale` returns their pks, which `MainWindow` passes
+  to `notifySongsChanged`), not only the playing one, so autoplaylists on
+  `play_count` stay right for duplicates.
 * Songs in offline folders stay members (they are still in the monitored
   library).
 
@@ -611,10 +616,9 @@ CREATE TABLE IF NOT EXISTS playlists (
   * `search(expr, candidatePks)`, in `filepath` order; also fills
     autoplaylists.
   * `matches(expr, pk)`, for autoplaylist membership.
-  * `prepareParsedSong(MSong &) const`: computed fields and identity key,
-    split out of `loadPreparedSongFromFile`.
+  * `prepareParsedSong(MSong &) const`: computed fields, split out of
+    `loadPreparedSongFromFile`.
   * `addTolibrary` canonicalises `filepath` (invariant 1).
-  * `songPksSharingIdentity(pk)`, from `songIdsByIdentityId_`.
 * `parseSongFilter(const SongLibrary &, const QString &)` (new, next to
   `parseLibraryExpression`): parse plus the boolean check, with the error
   "Expression must be a condition". Used by Library Search, autoplaylists,
@@ -645,7 +649,7 @@ CREATE TABLE IF NOT EXISTS playlists (
     `autoPlaylistExpression(id)`, `autoPlaylistError(id)` and
     `reloadAutoPlaylistExpressions()`, and the signal
     `autoPlaylistExpressionChanged(id)` after either of the setters.
-  * `notifySongsChanged(pks)` (public), used for the identity fan-out.
+  * `notifySongsChanged(pks)` (public), used for a plugin's values.
   * `releaseSongs(pks)` replaces `removeSongsInNoPlaylist`: keeps pks in no
     manual playlist and not `MonitoredLibrary::holds`, calls
     `SongLibrary::removeSongs`, emits `songsRemovedFromLibrary` (signal
@@ -655,10 +659,8 @@ CREATE TABLE IF NOT EXISTS playlists (
   * `loadAll()` loads both kinds; auto playlists are filled from
     `MonitoredLibrary::songPks()`.
   * Keeps auto playlists current (see "Autoplaylists > Membership").
-* `PlaybackController`: notify every pk sharing the identity after
-  `markSongPlayedAtStart` and `incrementPlayCount`. No other new logic;
-  `PlaybackManager` and the policies already handle pks that are no longer in
-  the playlist.
+* `PlaybackController`: no new logic; `PlaybackManager` and the policies
+  already handle pks that are no longer in the playlist.
 
 ### Frontend
 
@@ -701,7 +703,8 @@ Startup:
 4. Start the startup scan. The watches are already in place, so changes made
    during the scan are caught too. Folders found offline lose their watch and
    go to the 60 s poll.
-5. Cloud sync.
+5. Cloud sync starts from the event loop, in the Play Stats plugin (it does
+   not wait for these steps; [cloud-sync.md](cloud-sync.md)).
 
 Shutdown: a running scan's results are dropped (its `QFutureWatcher` is a
 child of `MonitoredLibrary`, as `loadLibrary`'s is of `MainWindow`). Nothing
@@ -722,7 +725,8 @@ Each phase is separately testable and committable.
    for the new constructor.
 2. **Autoplaylist backend.** `parseSongFilter`, `Playlist` kind and row
    methods, membership and re-evaluation (including `songsRefreshed` and
-   identity fan-out), row order, invalid expressions. Tests in
+   a plugin's values reaching every song of a key), row order, invalid
+   expressions. Tests in
    `tst_playlistcollection` and a new `tst_autoplaylist`.
 3. **UI.** Settings Library page, `AutoPlaylistDialog`, Library Search scope,
    boolean check and "Save as autoplaylist", tab behaviour, action enabling.
@@ -746,7 +750,7 @@ Each phase is separately testable and committable.
 ## Not covered
 
 * Tracking moved files by inode or file id to keep their pk. A move is a
-  remove + add; play stats survive through identity.
+  remove + add; play stats survive through the key.
 * A list of unreadable files in the UI.
 * Watching network shares reliably. Native events may not arrive for remote
   changes; the startup scan and "Rescan now" still pick them up.

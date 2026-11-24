@@ -2,6 +2,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
@@ -28,7 +29,6 @@
 #include <QUuid>
 
 #include "../autoplaylistdialog.h"
-#include "../cloudplaystatssyncservice.h"
 #include "../columnregistry.h"
 #include "../databasemanager.h"
 #include "../displayexpression.h"
@@ -47,7 +47,6 @@
 #include "../songparser.h"
 #include "../songpropertiesdialog.h"
 #include "../spectrum/spectrumwidget.h"
-#include "../utils.h"
 #include "scopedhomedir.h"
 #include "testaudiofiles.h"
 #include <optional>
@@ -65,12 +64,6 @@ MSong makeSong(const QString &title, const QString &artist,
   song.insert_or_assign("genre", FieldValue("genre", "genre"));
   song.insert_or_assign("filepath",
                         FieldValue(filepath.toStdString(), "filepath"));
-  const std::string identity =
-      util::normalizedText(title).toStdString() + "|" +
-      util::normalizedText(artist).toStdString() + "|" +
-      util::normalizedText(QStringLiteral("Album")).toStdString();
-  song.insert_or_assign("song_identity_key",
-                        FieldValue(identity, "song_identity_key"));
   return song;
 }
 
@@ -147,9 +140,9 @@ private slots:
   void newAutoPlaylistAction_opensDialog();
   void playlistSearch_followsShownPlaylistAndPlaysResults();
   void libraryScanStatus_showsProgressThenOfflineFolders();
-  void countedPlay_isPushedToCloud();
-  void cloudSync_startupRebase_runsOnWindowStartup();
-  void cloudSync_manualRebase_appliesCloudPlayCount_integration();
+  void playStats_countedPlayShowsInItsRowAndAutoplaylist();
+  void playStats_disabledPluginHasNoFields();
+  void closingDuringTheLoad_waitsForItBeforePluginsShutDown();
 
   void play_allFilesMissing_stopsAndReportsError();
   void infoTabs_restoreAndShowSelectedSong();
@@ -161,6 +154,8 @@ private slots:
 
 private:
   void recreateWindow();
+  // The plugins keep their data in workDir_, not in the developer's.
+  QString pluginDataRoot() const;
   // Writes tagged WAVs with these titles into a folder, watches it and waits
   // for the scan.
   void watchTaggedSongs(const QStringList &titles);
@@ -186,12 +181,19 @@ void TestMainWindow::recreateWindow() {
   connectionName_ =
       QStringLiteral("mainwindow_test_%1")
           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
-  window_ = new MainWindow(":memory:", connectionName_);
+  window_ = new MainWindow(":memory:", connectionName_, pluginDataRoot());
+}
+
+QString TestMainWindow::pluginDataRoot() const {
+  return workDir_->filePath("plugin-data");
 }
 
 void TestMainWindow::init() {
   qputenv("MYPLAYER_USE_DUMMY_AUDIO_PLAYER", "1");
   qputenv("MYPLAYER_USE_DUMMY_MEDIA_INTERFACE", "1");
+  // The play stats plugin's cloud sync reaches no network: Settings' OK saves
+  // a new UUID, which starts a rebase.
+  qputenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC", "1");
   {
     QSettings settings;
     settings.clear(); // default display expressions
@@ -220,6 +222,7 @@ void TestMainWindow::cleanup() {
   workDir_ = nullptr;
   qunsetenv("MYPLAYER_USE_DUMMY_AUDIO_PLAYER");
   qunsetenv("MYPLAYER_USE_DUMMY_MEDIA_INTERFACE");
+  qunsetenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC");
   qunsetenv("MYPLAYER_TEST_LIBRARY_LOAD_DELAY_MS");
 }
 
@@ -350,7 +353,7 @@ void TestMainWindow::
       QStringLiteral("mainwindow_file_test_%1")
           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
   const QString dbPath = workDir_->filePath("deferred-startup.sqlite");
-  window_ = new MainWindow(dbPath, connectionName_);
+  window_ = new MainWindow(dbPath, connectionName_, pluginDataRoot());
 
   QAction *openAction = window_->findChild<QAction *>("actionOpen");
   QAction *playAction = window_->findChild<QAction *>("actionPlay");
@@ -358,15 +361,12 @@ void TestMainWindow::
       window_->findChild<QAction *>("actionNew_autoplaylist");
   QAction *searchPlaylistAction =
       window_->findChild<QAction *>("actionSearch_playlist");
-  QAction *manualRebase =
-      window_->findChild<QAction *>("actionManual_cloud_rebase");
   QStatusBar *statusBar = window_->findChild<QStatusBar *>("statusbar");
   auto *media = window_->findChild<DummySystemMediaInterface *>();
   QVERIFY(openAction != nullptr);
   QVERIFY(playAction != nullptr);
   QVERIFY(newAutoPlaylistAction != nullptr);
   QVERIFY(searchPlaylistAction != nullptr);
-  QVERIFY(manualRebase != nullptr);
   QVERIFY(statusBar != nullptr);
   QVERIFY(media != nullptr);
 
@@ -374,7 +374,6 @@ void TestMainWindow::
   QVERIFY(!playAction->isEnabled());
   QVERIFY(!newAutoPlaylistAction->isEnabled());
   QVERIFY(!searchPlaylistAction->isEnabled());
-  QVERIFY(!manualRebase->isEnabled());
   QCOMPARE(statusBar->currentMessage(), QStringLiteral("Loading library..."));
 
   media->requestPlayForTest();
@@ -685,7 +684,7 @@ void TestMainWindow::startup_displayExpressionResolvesCustomField() {
   connectionName_ =
       QStringLiteral("mainwindow_file_test_%1")
           .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
-  window_ = new MainWindow(dbPath, connectionName_);
+  window_ = new MainWindow(dbPath, connectionName_, pluginDataRoot());
   QAction *playAction = window_->findChild<QAction *>("actionPlay");
   QStatusBar *statusBar = window_->findChild<QStatusBar *>("statusbar");
   PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
@@ -1168,134 +1167,71 @@ void TestMainWindow::libraryScanStatus_showsProgressThenOfflineFolders() {
   QCOMPARE(label->text(), QString("1 library folder offline"));
 }
 
-void TestMainWindow::countedPlay_isPushedToCloud() {
-  // When a play counts is decided by PlaybackController
-  // (tst_playbackcontroller); the window pushes each count to cloud sync.
-  qputenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC", "1");
-  CloudPlayStatsSync::clearDummyPullPages();
-  CloudPlayStatsSync::clearDummyPushCalls();
-  {
-    QSettings settings;
-    settings.setValue("cloud_sync/user_uuid",
-                      "11111111-1111-1111-1111-111111111111");
-  }
-  recreateWindow();
-
+void TestMainWindow::playStats_countedPlayShowsInItsRowAndAutoplaylist() {
+  // When a play counts is the plugin's (tst_playstats); the window shows the
+  // plugin's fields like any other.
+  watchTaggedSongs({"Song"});
+  PlaylistCollection *collection = window_->findChild<PlaylistCollection *>();
+  const int songPk = collection->monitoredLibrary().songPks().front();
   PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
-  QVERIFY(tabs != nullptr);
   Playlist *playlist = tabs->currentPlaylist();
-  QVERIFY(playlist != nullptr);
-  PlaybackBackendManager *backend =
-      window_->findChild<PlaybackBackendManager *>();
-  QVERIFY(backend != nullptr);
-  DummyAudioPlayer *dummyPlayer =
-      qobject_cast<DummyAudioPlayer *>(backend->player());
-  QVERIFY(dummyPlayer != nullptr);
+  QVERIFY(playlist->addSongByPk(songPk));
+  const int autoId = collection->createAutoPlaylist("Played", "play_count > 0");
+  QVERIFY(collection->playlist(autoId)->empty());
+  // Play starts the shown playlist: the manual one again.
+  tabs->navigateIndex(0, playlist);
+  QCOMPARE(tabs->currentPlaylist(), playlist);
+  playlist->setLastPlayed(songPk);
+  auto *backend = window_->findChild<PlaybackBackendManager *>();
+  auto *player = qobject_cast<DummyAudioPlayer *>(backend->player());
+  QVERIFY(player != nullptr);
+  player->setDurationForTest(120000);
 
-  const QString wav = workDir_->filePath("stats-listen.wav");
-  QVERIFY(writeSilentWav(wav));
-  playlist->addSong(makeSong("Song", "Artist", wav));
-  playlist->setLastPlayed(playlist->getPkByIndex(0));
-  dummyPlayer->setDurationForTest(120000);
-
-  QAction *playAction = window_->findChild<QAction *>("actionPlay");
-  QVERIFY(playAction != nullptr);
-  playAction->trigger();
-  // playSong refreshes the song from the untagged file, which sets its
-  // identity key.
-  const std::string identityKey =
-      playlist->getSongByIndex(0).at("song_identity_key").text;
+  window_->findChild<QAction *>("actionPlay")->trigger();
   for (const qint64 positionMs : {1000, 35000, 70000, 109000, 119000}) {
-    backend->player()->setPosition(positionMs);
+    player->setPosition(positionMs);
   }
 
-  QTRY_COMPARE(CloudPlayStatsSync::dummyPushCalls().size(), size_t{1});
-  const CloudPlayStatsSync::DummyPushCall call =
-      CloudPlayStatsSync::dummyPushCalls().front();
-  QCOMPARE(call.songIdentityKey, identityKey);
-  QCOMPARE(call.delta, 1);
-
-  CloudPlayStatsSync::clearDummyPullPages();
-  CloudPlayStatsSync::clearDummyPushCalls();
-  qunsetenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC");
+  // The plugin's change reaches the rows from the event loop.
+  QTRY_VERIFY(playlist->getSongByIndex(0).contains("play_count"));
+  QCOMPARE(playlist->getSongByIndex(0).at("play_count").text, std::string("1"));
+  QVERIFY(playlist->getSongByIndex(0).contains("last_played_timestamp"));
+  QCOMPARE(collection->playlist(autoId)->songCount(), 1);
+  QVERIFY(QFileInfo::exists(pluginDataRoot() + "/playstats/playstats.db"));
 }
 
-void TestMainWindow::cloudSync_startupRebase_runsOnWindowStartup() {
-  qputenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC", "1");
-  CloudPlayStatsSync::clearDummyPullPages();
-  CloudPlayStatsSync::clearDummyPushCalls();
-  {
-    QSettings settings;
-    settings.setValue("cloud_sync/user_uuid",
-                      "11111111-1111-1111-1111-111111111111");
-    settings.setValue("cloud_sync/last_synced_at", 1000);
-    settings.setValue("cloud_sync/rebase_pending", true);
-  }
-
-  CloudPlayStatItem item{.songIdentityKey = "song|artist|album",
-                         .playCount = 7,
-                         .updatedAt = 2000};
-  CloudPlayStatsSync::setDummyPullPages({{item}}, true, 2000);
-
+void TestMainWindow::playStats_disabledPluginHasNoFields() {
+  QSettings().setValue("plugins/disabled", QStringList{"playstats"});
   recreateWindow();
 
-  QSettings settings;
-  QTRY_VERIFY(!settings.value("cloud_sync/rebase_pending", true).toBool());
-  const qint64 syncedAt =
-      settings.value("cloud_sync/last_synced_at", 0).toLongLong();
-  QVERIFY(syncedAt >= 2000);
-
-  CloudPlayStatsSync::clearDummyPullPages();
-  CloudPlayStatsSync::clearDummyPushCalls();
-  qunsetenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC");
+  // No Play Count column, no submenu.
+  const QAbstractItemModel *model = modelFor(
+      window_->findChild<PlaylistTabs *>("playlistTabs")->currentPlaylist());
+  QVERIFY(model != nullptr);
+  for (int col = 0; col < model->columnCount(); ++col) {
+    QVERIFY(model->headerData(col, Qt::Horizontal).toString() != "Play Count");
+  }
+  QCOMPARE(window_->findChild<QMenu *>("playStatsMenu"), nullptr);
 }
 
-void TestMainWindow::
-    cloudSync_manualRebase_appliesCloudPlayCount_integration() {
-  qputenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC", "1");
-  CloudPlayStatsSync::clearDummyPullPages();
-  CloudPlayStatsSync::clearDummyPushCalls();
-
-  PlaylistTabs *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
-  QVERIFY(tabs != nullptr);
-  Playlist *playlist = tabs->currentPlaylist();
-  QVERIFY(playlist != nullptr);
-
-  const QString wav = workDir_->filePath("cloud-sync-song.wav");
-  QVERIFY(writeSilentWav(wav));
-  playlist->addSong(makeSong("Song", "Artist", wav));
-  QCOMPARE(playlist->songCount(), 1);
-
-  QSettings settings;
-  settings.setValue("cloud_sync/user_uuid",
-                    "11111111-1111-1111-1111-111111111111");
-  settings.setValue("cloud_sync/last_synced_at", 1000);
-  settings.setValue("cloud_sync/rebase_pending", true);
-
-  CloudPlayStatItem item{.songIdentityKey = "song|artist|album",
-                         .playCount = 7,
-                         .updatedAt = 2000};
-  CloudPlayStatsSync::setDummyPullPages({{item}}, true, 2000);
-
-  QAction *manualRebase =
-      window_->findChild<QAction *>("actionManual_cloud_rebase");
-  QVERIFY(manualRebase != nullptr);
-  manualRebase->setEnabled(true);
-  manualRebase->trigger();
-
-  QTRY_VERIFY(playlist->getSongByIndex(0).contains("play_count"));
-  QTRY_COMPARE(playlist->getSongByIndex(0).at("play_count").text,
-               std::string("7"));
-
-  const qint64 syncedAt =
-      settings.value("cloud_sync/last_synced_at", 0).toLongLong();
-  QVERIFY(syncedAt >= 2000);
-
-  CloudPlayStatsSync::clearDummyPullPages();
-  CloudPlayStatsSync::clearDummyPushCalls();
-  qunsetenv("MYPLAYER_USE_DUMMY_CLOUD_SYNC");
+void TestMainWindow::closingDuringTheLoad_waitsForItBeforePluginsShutDown() {
+  // The load's worker calls the play stats plugin's provider, so the window
+  // waits for it rather than shutting the plugin down under it.
+  delete window_;
+  window_ = nullptr;
+  qputenv("MYPLAYER_TEST_LIBRARY_LOAD_DELAY_MS", "300");
+  connectionName_ =
+      QStringLiteral("mainwindow_file_test_%1")
+          .arg(QUuid::createUuid().toString(QUuid::WithoutBraces));
+  QElapsedTimer elapsed;
+  elapsed.start();
+  window_ = new MainWindow(workDir_->filePath("closing.sqlite"),
+                           connectionName_, pluginDataRoot());
+  delete window_;
+  window_ = nullptr;
+  QVERIFY(elapsed.elapsed() >= 250);
+  qunsetenv("MYPLAYER_TEST_LIBRARY_LOAD_DELAY_MS");
 }
-
 void TestMainWindow::play_allFilesMissing_stopsAndReportsError() {
   // When playback gives up is tested in tst_playbackcontroller; the window
   // reports the file in the status bar and stops system media.
@@ -1387,8 +1323,9 @@ void TestMainWindow::settings_pluginPageAppliesToItsPanelOnOk() {
   // The lyrics plugin's page, under Plugins.
   QTreeWidgetItem *plugins = tree->topLevelItem(tree->topLevelItemCount() - 1);
   QCOMPARE(plugins->text(0), QString("Plugins"));
-  QCOMPARE(plugins->childCount(), 1);
+  QCOMPARE(plugins->childCount(), 2);
   QCOMPARE(plugins->child(0)->text(0), QString("Lyrics"));
+  QCOMPARE(plugins->child(1)->text(0), QString("Play Stats"));
   tree->setCurrentItem(plugins->child(0));
   auto *size = pages->currentWidget()->findChild<QSpinBox *>();
   QVERIFY(size != nullptr);
@@ -1404,7 +1341,8 @@ void TestMainWindow::settings_pluginPageAppliesToItsPanelOnOk() {
 void TestMainWindow::plugins_disabledPluginsHaveNoTabPageOrMenu() {
   {
     QSettings settings;
-    settings.setValue("plugins/disabled", QStringList{"lyrics", "abrepeat"});
+    settings.setValue("plugins/disabled",
+                      QStringList{"lyrics", "abrepeat", "playstats"});
     settings.setValue("infopanel/current_tab", "lyrics");
   }
   recreateWindow();
@@ -1437,10 +1375,13 @@ void TestMainWindow::plugins_disabledPluginsHaveNoTabPageOrMenu() {
 }
 
 void TestMainWindow::abRepeatMenu_loopsThePlayingSong() {
-  // The plugin's submenu, from Tests/plugins, last in Playback.
+  // The plugins' submenus, from Tests/plugins, end Playback in load order:
+  // A-B Repeat, then Play Stats.
   auto *playbackMenu = window_->findChild<QMenu *>("menuPlayback");
   QVERIFY(playbackMenu != nullptr);
-  QMenu *menu = playbackMenu->actions().last()->menu();
+  const QList<QAction *> items = playbackMenu->actions();
+  QCOMPARE(items.last()->menu()->objectName(), QString("playStatsMenu"));
+  QMenu *menu = items.at(items.size() - 2)->menu();
   QVERIFY(menu != nullptr);
   QCOMPARE(menu->title(), QString("A-B Repeat"));
   auto *setA = menu->findChild<QAction *>("abRepeatSetA");

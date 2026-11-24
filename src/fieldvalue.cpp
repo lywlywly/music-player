@@ -83,8 +83,17 @@ void FieldValue::assign(const std::string &textValue,
   if (!definition) {
     return;
   }
+  parseTyped(definition->valueType);
+}
 
-  switch (definition->valueType) {
+FieldValue::FieldValue(const std::string &textValue, std::string fieldIdValue,
+                       ValueType valueType)
+    : text(textValue), fieldId(std::move(fieldIdValue)) {
+  parseTyped(valueType);
+}
+
+void FieldValue::parseTyped(ValueType valueType) {
+  switch (valueType) {
   case ValueType::Number: {
     typed.numberDouble = 0.0;
     double parsed = 0.0;

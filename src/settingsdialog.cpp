@@ -7,14 +7,11 @@
 #include "pluginspage.h"
 #include "ui_settingsdialog.h"
 #include "utils.h"
-#include <QInputDialog>
 #include <QLabel>
 #include <QMessageBox>
 #include <QPlainTextEdit>
-#include <QSettings>
 #include <QStackedWidget>
 #include <QTreeWidget>
-#include <QUuid>
 #include <QVBoxLayout>
 #include <QWidget>
 #include <algorithm>
@@ -36,7 +33,6 @@ SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
   // Backend's.
   ui->replaygain_combo_box->setCurrentIndex(
       static_cast<int>(loadReplayGainModeSetting()));
-  QSettings settings;
   const QString initialStatusExpression =
       loadDisplayExpressionSetting(DisplayExpressionKind::StatusBar);
   const QString initialWindowTitleExpression =
@@ -117,19 +113,6 @@ SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
   statusLayout->addStretch();
   setUpPageTree(new LibraryFoldersPage(monitoredLibrary, this), statusTab,
                 plugins);
-  QString cloudUuid =
-      settings.value("cloud_sync/user_uuid").toString().trimmed();
-  const bool disabledByUser =
-      settings.value("cloud_sync/disabled_by_user", false).toBool();
-  if (cloudUuid.isEmpty() && !disabledByUser) {
-    cloudUuid = QUuid::createUuid().toString(QUuid::WithoutBraces);
-  }
-  initialCloudUuid_ = cloudUuid;
-  initialCloudDisabledByUser_ = disabledByUser;
-  pendingCloudUuid_ = cloudUuid;
-  pendingCloudDisabledByUser_ = disabledByUser;
-  ui->cloud_uuid_edit->setText(pendingCloudUuid_);
-  updateCloudUuidStatus();
   ui->custom_field_value_type_combo->addItem("Text",
                                              static_cast<int>(ValueType::Text));
   ui->custom_field_value_type_combo->addItem(
@@ -187,54 +170,6 @@ SettingsDialog::SettingsDialog(ColumnRegistry &columnRegistry,
           });
 
   connect(this, &QDialog::accepted, this, &SettingsDialog::applySettings);
-
-  auto applyCloudUuid = [this](const QString &uuidText) {
-    pendingCloudUuid_ = uuidText;
-    pendingCloudDisabledByUser_ = uuidText.isEmpty();
-    ui->cloud_uuid_edit->setText(pendingCloudUuid_);
-    updateCloudUuidStatus();
-  };
-
-  connect(ui->set_cloud_uuid_button, &QPushButton::clicked, this,
-          [this, applyCloudUuid]() {
-            bool ok = false;
-            const QString entered = QInputDialog::getText(
-                this, "Set Cloud UUID", "User UUID:", QLineEdit::Normal,
-                QString(), &ok);
-            if (!ok) {
-              return;
-            }
-            const QString uuidText = entered.trimmed();
-            if (!uuidText.isEmpty() && QUuid(uuidText).isNull()) {
-              QMessageBox::warning(this, "Set Cloud UUID",
-                                   "Invalid UUID format.");
-              return;
-            }
-            applyCloudUuid(uuidText);
-            QMessageBox::information(
-                this, "Set Cloud UUID",
-                "Cloud UUID will be saved when you click OK. Keep it secret.");
-          });
-  connect(ui->start_new_cloud_user_button, &QPushButton::clicked, this,
-          [this, applyCloudUuid]() {
-            const QString uuidText =
-                QUuid::createUuid().toString(QUuid::WithoutBraces);
-            applyCloudUuid(uuidText);
-            QMessageBox::information(
-                this, "Start as New User",
-                "A new cloud UUID was generated. It will be saved when you "
-                "click OK.");
-          });
-  connect(ui->disable_cloud_sync_button, &QPushButton::clicked, this, [this]() {
-    pendingCloudUuid_.clear();
-    pendingCloudDisabledByUser_ = true;
-    ui->cloud_uuid_edit->setText(pendingCloudUuid_);
-    updateCloudUuidStatus();
-    QMessageBox::information(
-        this, "Disable Cloud Sync",
-        "Cloud sync will be disabled when you click OK. Local play stats are "
-        "kept.");
-  });
 }
 
 SettingsDialog::~SettingsDialog() { delete ui; }
@@ -243,7 +178,7 @@ void SettingsDialog::setUpPageTree(QWidget *libraryPage, QWidget *displayPage,
                                    const QList<PluginEntry> &plugins) {
   QTreeWidget *tree = ui->settings_page_tree;
   QStackedWidget *stack = ui->settings_pages;
-  // The .ui's pages (Playback, Fields, Cloud Sync) are in the stack already.
+  // The .ui's pages (Playback, Fields) are in the stack already.
   stack->addWidget(libraryPage);
   stack->addWidget(displayPage);
   pluginsPage_ = new PluginsPage(plugins, this);
@@ -264,7 +199,6 @@ void SettingsDialog::setUpPageTree(QWidget *libraryPage, QWidget *displayPage,
   addItem(nullptr, libraryPage, tr("Library"));
   addItem(nullptr, ui->fields_tab, tr("Fields"));
   addItem(nullptr, displayPage, tr("Display"));
-  addItem(nullptr, ui->cloud_sync_tab, tr("Cloud Sync"));
   QTreeWidgetItem *pluginsItem = addItem(nullptr, pluginsPage_, tr("Plugins"));
   // Only a Loaded entry has a root object; qobject_cast of the others' null
   // root is null.
@@ -443,6 +377,12 @@ void SettingsDialog::addCustomFieldFromForm() {
       return;
     }
   }
+  // Its key is its expression symbol, which a plugin's field may have.
+  if (columnRegistry_.isPluginFieldId(key)) {
+    QMessageBox::warning(this, "Add Custom Field",
+                         "That key conflicts with an existing field.");
+    return;
+  }
 
   customFields_.push_back(definition);
   customFieldSchemasById_.insert(definition.id, field);
@@ -552,28 +492,6 @@ void SettingsDialog::removeSelectedComputedField() {
   }
 }
 
-void SettingsDialog::updateCloudUuidStatus() {
-  const QString uuidText = ui->cloud_uuid_edit->text().trimmed();
-  if (uuidText.isEmpty()) {
-    ui->cloud_uuid_status_label->setText("Disabled");
-    ui->set_cloud_uuid_button->setVisible(true);
-    ui->start_new_cloud_user_button->setVisible(true);
-    ui->disable_cloud_sync_button->setVisible(false);
-    return;
-  }
-  if (QUuid(uuidText).isNull()) {
-    ui->cloud_uuid_status_label->setText("Invalid UUID");
-    ui->set_cloud_uuid_button->setVisible(true);
-    ui->start_new_cloud_user_button->setVisible(true);
-    ui->disable_cloud_sync_button->setVisible(false);
-    return;
-  }
-  ui->cloud_uuid_status_label->setText("Enabled");
-  ui->set_cloud_uuid_button->setVisible(false);
-  ui->start_new_cloud_user_button->setVisible(false);
-  ui->disable_cloud_sync_button->setVisible(true);
-}
-
 void SettingsDialog::setActiveDisplayExpressionEditor(QPlainTextEdit *editor) {
   activeDisplayExpressionEdit_ = editor;
   updateActiveDisplayExpressionPreview();
@@ -631,8 +549,6 @@ void SettingsDialog::applySettings() {
   saveReplayGainModeSetting(replayGainMode);
   emit replayGainModeChanged(replayGainMode);
 
-  QSettings settings;
-
   for (IPluginSettingsPage *page : std::as_const(pluginPages_)) {
     page->apply();
   }
@@ -647,23 +563,6 @@ void SettingsDialog::applySettings() {
   emit windowTitleExpressionChanged(windowTitleExpression);
   emit displayThemeModeChanged(
       displayThemeModeCombo_->currentData().toString());
-  const QString cloudUuid = pendingCloudUuid_.trimmed();
-  if (!cloudUuid.isEmpty() && QUuid(cloudUuid).isNull()) {
-    QMessageBox::warning(this, "Settings", "Cloud UUID format is invalid.");
-    return;
-  }
-  settings.setValue("cloud_sync/user_uuid", cloudUuid);
-  settings.setValue("cloud_sync/disabled_by_user", pendingCloudDisabledByUser_);
-  if (cloudUuid.isEmpty()) {
-    settings.setValue("cloud_sync/rebase_pending", false);
-  } else if (cloudUuid != initialCloudUuid_ ||
-             pendingCloudDisabledByUser_ != initialCloudDisabledByUser_) {
-    settings.setValue("cloud_sync/last_synced_at", 0);
-    settings.setValue("cloud_sync/rebase_pending", true);
-  }
-  if (cloudUuid != initialCloudUuid_) {
-    emit cloudUuidChanged(cloudUuid);
-  }
 
   QSet<QString> currentCustomFieldIds;
   QSet<QString> currentComputedFieldIds;

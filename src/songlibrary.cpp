@@ -1,7 +1,6 @@
 #include "songlibrary.h"
 #include "databasemanager.h"
 #include "songparser.h"
-#include "utils.h"
 #include <QDebug>
 #include <QDir>
 #include <QFileInfo>
@@ -31,26 +30,36 @@ SongLibrary::SongLibrary(const ColumnRegistry &columnRegistry,
 #endif
 
 void SongLibrary::loadFromDatabase() {
-  // Order matters: built-in songs provide song_id/path/identity; subsequent
-  // loaders attach additional values onto existing in-memory songs.
+  // Order matters: built-in songs provide song_id/path and the key fields;
+  // subsequent loaders attach additional values onto existing in-memory
+  // songs.
   loadBuiltInSongs();
   loadDynamicAttributes();
   loadComputedValues();
-  loadPlayStats();
+  loadProvidedKeys();
 }
 
-SongLibrary::Snapshot SongLibrary::snapshot() const {
-  return Snapshot{.songs = songs,
-                  .paths = paths,
-                  .songIdsByIdentityId = songIdsByIdentityId_};
+SongLibrary::Snapshot SongLibrary::takeSnapshot() {
+  Snapshot snapshot{.songs = std::move(songs), .paths = std::move(paths)};
+  for (auto &[sourceId, source] : providedSources_) {
+    snapshot.providedKeys.emplace(sourceId, std::move(source.keys));
+  }
+  return snapshot;
 }
+
+void SongLibrary::beginLoad() { loading_ = true; }
 
 void SongLibrary::replaceWithSnapshot(Snapshot &&snapshot) {
   songs = std::move(snapshot.songs);
   paths = std::move(snapshot.paths);
-  songIdsByIdentityId_ = std::move(snapshot.songIdsByIdentityId);
+  for (auto &[sourceId, keys] : snapshot.providedKeys) {
+    providedSources_.at(sourceId).keys = std::move(keys);
+  }
   registeredQueryFields.clear();
   registeredQueries.clear();
+  loading_ = false;
+  // The keys marked stale during the load, read for the loaded songs.
+  refreshStale();
 }
 
 const FieldValue *findSongFieldValue(const MSong &song,
@@ -121,16 +130,6 @@ FieldValue fieldValueFromRuntime(const ExprRuntimeValue &runtimeValue,
   }
   ok = false;
   return FieldValue("", fieldId);
-}
-
-std::string songIdentityKeyFromSong(const MSong &song) {
-  const std::string title =
-      util::normalizedText(songFieldText(song, "title")).toStdString();
-  const std::string artist =
-      util::normalizedText(songFieldText(song, "artist")).toStdString();
-  const std::string album =
-      util::normalizedText(songFieldText(song, "album")).toStdString();
-  return title + "|" + artist + "|" + album;
 }
 
 void evaluateComputedFieldsInSong(MSong &song, const ColumnRegistry &registry) {
@@ -226,7 +225,13 @@ int SongLibrary::addTolibrary(MSong &&s) {
   }
   songs[songId] = std::move(s);
   paths[path] = songId;
-  addSongToIdentityIndex(songId, songIdentityIdBySongId(songId));
+  // Its provided fields are read at the next refresh, batched with the
+  // other songs a scan or a folder adds (docs/plugins/playstats.md, "One
+  // path for every change after the load").
+  for (auto &[sourceId, source] : providedSources_) {
+    indexProvidedKey(source, songId);
+    markStale(source, source.keys.keyBySongPk[songId]);
+  }
   // New song path: persist dynamic attributes after inserting into memory/DB.
   syncDynamicAttributesBySongId(songId, songs[songId]);
   syncComputedValuesBySongId(songId, songs[songId]);
@@ -255,7 +260,9 @@ void SongLibrary::removeSongs(const std::vector<int> &songPks) {
   }
 
   for (int songPk : songPks) {
-    removeSongFromIdentityIndex(songPk, songIdentityIdBySongId(songPk));
+    for (auto &[sourceId, source] : providedSources_) {
+      unindexProvidedKey(source, songPk);
+    }
     const MSong removed = std::exchange(songs.at(songPk), MSong{});
     paths.erase(removed.at("filepath").text);
     for (auto &[artist, songIds] : registeredQueries) {
@@ -390,7 +397,6 @@ void SongLibrary::loadBuiltInSongs() {
   songs.resize(maxId + 1);
   paths.clear();
   paths.reserve(maxId + 1);
-  songIdsByIdentityId_.clear();
 
   const QList<QString> columns = columnRegistry_.songAttributeColumnIds();
 
@@ -399,14 +405,9 @@ void SongLibrary::loadBuiltInSongs() {
   for (const QString &columnId : columns) {
     selectColumns.push_back(QStringLiteral("s.") + columnId);
   }
-  selectColumns.push_back("s.identity_id");
-  selectColumns.push_back("i.song_identity_key");
 
-  const QString sql =
-      QString("SELECT %1 FROM songs s "
-              "JOIN song_identities i ON i.identity_id=s.identity_id "
-              "ORDER BY s.song_id")
-          .arg(selectColumns.join(", "));
+  const QString sql = QString("SELECT %1 FROM songs s ORDER BY s.song_id")
+                          .arg(selectColumns.join(", "));
 
   QSqlQuery q(db);
   if (!q.exec(sql)) {
@@ -430,14 +431,6 @@ void SongLibrary::loadBuiltInSongs() {
       const std::string value = q.value(col + 1).toString().toStdString();
       m.insert_or_assign(key, FieldValue(value, key));
     }
-    const int identityId = q.value(columns.size() + 1).toInt();
-    m.insert_or_assign(
-        "song_identity_id",
-        FieldValue(std::to_string(identityId), "song_identity_id"));
-    m.insert_or_assign(
-        "song_identity_key",
-        FieldValue(q.value(columns.size() + 2).toString().toStdString(),
-                   "song_identity_key"));
 
     const std::string path = m.at("filepath").text;
     if (path.empty()) {
@@ -447,7 +440,6 @@ void SongLibrary::loadBuiltInSongs() {
       qFatal("loadBuiltInSongs: duplicated filepath detected: %s",
              path.c_str());
     }
-    addSongToIdentityIndex(id, identityId);
   }
 }
 
@@ -582,323 +574,187 @@ void SongLibrary::loadComputedValues() {
   }
 }
 
-void SongLibrary::loadPlayStats() {
-  QSqlDatabase &db = databaseManager_.db();
-  QSqlQuery query(db);
-  if (!query.exec(R"(
-        SELECT identity_id, play_count, last_played_timestamp
-        FROM song_play_stats
-    )")) {
-    qFatal("loadPlayStats query failed: %s",
-           query.lastError().text().toUtf8().data());
+void SongLibrary::addProvidedSource(ProvidedFields provider) {
+  const QString sourceId = provider.sourceId;
+  ProvidedSource &source =
+      providedSources_
+          .emplace(sourceId, ProvidedSource{.provider = std::move(provider)})
+          .first->second;
+  for (int songId = 0; songId < static_cast<int>(songs.size()); ++songId) {
+    indexProvidedKey(source, songId);
   }
+}
 
-  while (query.next()) {
-    const int identityId = query.value(0).toInt();
-    const int playCount = query.value(1).toInt();
-    const qint64 lastPlayed = query.value(2).toLongLong();
-    auto it = songIdsByIdentityId_.find(identityId);
-    if (it == songIdsByIdentityId_.end()) {
+std::vector<ProvidedFields> SongLibrary::providedSources() const {
+  std::vector<ProvidedFields> sources;
+  for (const auto &[sourceId, source] : providedSources_) {
+    sources.push_back(source.provider);
+  }
+  return sources;
+}
+
+void SongLibrary::setStaleCallback(std::function<void()> onStale) {
+  onStale_ = std::move(onStale);
+}
+
+void SongLibrary::loadProvidedKeys() {
+  for (auto &[sourceId, source] : providedSources_) {
+    source.keys = {};
+    for (int songId = 0; songId < static_cast<int>(songs.size()); ++songId) {
+      indexProvidedKey(source, songId);
+    }
+  }
+}
+
+void SongLibrary::fillProvidedValues(const QString &sourceId,
+                                     const ProvidedValuesByKey &values) {
+  ProvidedSource &source = providedSources_.at(sourceId);
+  // Walks the rows, most keys having none, rather than every song's key; each
+  // row's values are converted once and copied into the key's songs.
+  for (auto it = values.cbegin(); it != values.cend(); ++it) {
+    const auto songsIt = source.keys.songsByKey.find(it.key());
+    if (songsIt == source.keys.songsByKey.end()) {
       continue;
     }
-    for (int songId : it->second) {
-      songs[songId].insert_or_assign(
-          "play_count", FieldValue(std::to_string(playCount), "play_count"));
-      songs[songId].insert_or_assign(
-          "last_played_timestamp",
-          FieldValue(std::to_string(lastPlayed), "last_played_timestamp"));
+    const std::vector<std::optional<FieldValue>> fieldValues =
+        toFieldValues(source.provider, &it.value());
+    for (int songId : songsIt->second) {
+      setProvidedFields(source.provider, songs[songId], fieldValues);
     }
   }
 }
 
-int SongLibrary::songIdentityIdBySongId(int songId) const {
-  if (songId < 0 || songId >= static_cast<int>(songs.size()) ||
-      songs[songId].empty()) {
-    return -1;
-  }
-  auto it = songs[songId].find("song_identity_id");
-  if (it == songs[songId].end() || it->second.text.empty()) {
-    return -1;
-  }
-  bool ok = false;
-  const int identityId = QString::fromStdString(it->second.text).toInt(&ok);
-  if (!ok) {
-    return -1;
-  }
-  if (identityId <= 0) {
-    return -1;
-  }
-  return identityId;
-}
-
-int SongLibrary::ensureSongIdentityId(const std::string &identityKey) {
-  if (identityKey.empty()) {
-    return -1;
-  }
-  QSqlDatabase &db = databaseManager_.db();
-  QSqlQuery insert(db);
-  insert.prepare(R"(
-      INSERT OR IGNORE INTO song_identities(song_identity_key)
-      VALUES(:song_identity_key)
-  )");
-  insert.bindValue(":song_identity_key", QString::fromStdString(identityKey));
-  if (!insert.exec()) {
-    qFatal("ensureSongIdentityId insert failed: %s",
-           insert.lastError().text().toUtf8().data());
-  }
-
-  QSqlQuery find(db);
-  find.prepare(R"(
-      SELECT identity_id
-      FROM song_identities
-      WHERE song_identity_key=:song_identity_key
-  )");
-  find.bindValue(":song_identity_key", QString::fromStdString(identityKey));
-  if (!find.exec() || !find.next()) {
-    qFatal("ensureSongIdentityId query failed: %s",
-           find.lastError().text().toUtf8().data());
-  }
-  return find.value(0).toInt();
-}
-
-void SongLibrary::addSongToIdentityIndex(int songId, int identityId) {
-  if (identityId <= 0) {
+void SongLibrary::markStale(const QString &sourceId, const QStringList &keys) {
+  const auto it = providedSources_.find(sourceId);
+  if (it == providedSources_.end()) {
     return;
   }
-  auto &songIds = songIdsByIdentityId_[identityId];
-  if (std::find(songIds.begin(), songIds.end(), songId) == songIds.end()) {
-    songIds.push_back(songId);
+  for (const QString &key : keys) {
+    markStale(it->second, key);
   }
 }
 
-void SongLibrary::removeSongFromIdentityIndex(int songId, int identityId) {
-  if (identityId <= 0) {
+void SongLibrary::markStale(ProvidedSource &source, const QString &key) {
+  if (key.isEmpty()) {
     return;
   }
-  auto it = songIdsByIdentityId_.find(identityId);
-  if (it == songIdsByIdentityId_.end()) {
-    return;
-  }
-  auto &songIds = it->second;
-  songIds.erase(std::remove(songIds.begin(), songIds.end(), songId),
-                songIds.end());
-  if (songIds.empty()) {
-    songIdsByIdentityId_.erase(it);
-  }
-}
-
-bool SongLibrary::markSongPlayedAtStart(int songPk, qint64 unixSeconds) {
-  if (songPk < 0 || songPk >= static_cast<int>(songs.size()) ||
-      songs[songPk].empty()) {
-    return false;
-  }
-
-  int playCount = 0;
-  auto playCountIt = songs[songPk].find("play_count");
-  if (playCountIt != songs[songPk].end() &&
-      playCountIt->second.valueType() == ValueType::Number) {
-    playCount = static_cast<int>(playCountIt->second.typed.numberDouble);
-  }
-
-  const int identityId = songIdentityIdBySongId(songPk);
-  if (identityId <= 0) {
-    return false;
-  }
-
-  QSqlDatabase &db = databaseManager_.db();
-  QSqlQuery query(db);
-  query.prepare(R"(
-      INSERT INTO song_play_stats(identity_id, play_count, last_played_timestamp)
-      VALUES(:identity_id, :play_count, :last_played_timestamp)
-      ON CONFLICT(identity_id) DO UPDATE SET
-          last_played_timestamp=excluded.last_played_timestamp
-  )");
-  query.bindValue(":identity_id", identityId);
-  query.bindValue(":play_count", playCount);
-  query.bindValue(":last_played_timestamp", unixSeconds);
-  if (!query.exec()) {
-    qFatal("markSongPlayedAtStart upsert failed: %s",
-           query.lastError().text().toUtf8().data());
-  }
-  auto identityIt = songIdsByIdentityId_.find(identityId);
-  if (identityIt == songIdsByIdentityId_.end()) {
-    return true;
-  }
-  for (int id : identityIt->second) {
-    songs[id].insert_or_assign(
-        "last_played_timestamp",
-        FieldValue(std::to_string(unixSeconds), "last_played_timestamp"));
-    if (songs[id].find("play_count") == songs[id].end()) {
-      songs[id].insert_or_assign("play_count", FieldValue("0", "play_count"));
+  source.staleKeys.insert(key);
+  // Once per batch: the caller's refresh reads every key marked until it
+  // runs.
+  if (!hasStaleKeys_) {
+    hasStaleKeys_ = true;
+    if (onStale_) {
+      onStale_();
     }
   }
-  return true;
 }
 
-bool SongLibrary::incrementPlayCount(int songPk) {
-  if (songPk < 0 || songPk >= static_cast<int>(songs.size()) ||
-      songs[songPk].empty()) {
-    return false;
-  }
-
-  const int identityId = songIdentityIdBySongId(songPk);
-  if (identityId <= 0) {
-    return false;
-  }
-
-  QSqlDatabase &db = databaseManager_.db();
-  int currentCount = 0;
-  QSqlQuery readQuery(db);
-  readQuery.prepare(R"(
-      SELECT play_count
-      FROM song_play_stats
-      WHERE identity_id=:identity_id
-  )");
-  readQuery.bindValue(":identity_id", identityId);
-  if (readQuery.exec() && readQuery.next()) {
-    currentCount = readQuery.value(0).toInt();
-  } else {
-    auto countIt = songs[songPk].find("play_count");
-    if (countIt != songs[songPk].end() &&
-        countIt->second.valueType() == ValueType::Number) {
-      currentCount = static_cast<int>(countIt->second.typed.numberDouble);
-    }
-  }
-  const int newCount = currentCount + 1;
-
-  qint64 lastPlayedTs = 0;
-  auto tsIt = songs[songPk].find("last_played_timestamp");
-  if (tsIt != songs[songPk].end()) {
-    lastPlayedTs = QString::fromStdString(tsIt->second.text).toLongLong();
-  }
-
-  QSqlQuery query(db);
-  query.prepare(R"(
-      INSERT INTO song_play_stats(identity_id, play_count, last_played_timestamp)
-      VALUES(:identity_id, :play_count, :last_played_timestamp)
-      ON CONFLICT(identity_id) DO UPDATE SET
-          play_count=excluded.play_count
-  )");
-  query.bindValue(":identity_id", identityId);
-  query.bindValue(":play_count", newCount);
-  query.bindValue(":last_played_timestamp", lastPlayedTs);
-  if (!query.exec()) {
-    qFatal("incrementPlayCount upsert failed: %s",
-           query.lastError().text().toUtf8().data());
-  }
-  auto identityIt = songIdsByIdentityId_.find(identityId);
-  if (identityIt == songIdsByIdentityId_.end()) {
-    return true;
-  }
-  for (int id : identityIt->second) {
-    songs[id].insert_or_assign(
-        "play_count", FieldValue(std::to_string(newCount), "play_count"));
-  }
-  return true;
-}
-
-std::string SongLibrary::songIdentityKeyBySongPk(int songPk) const {
-  if (songPk < 0 || songPk >= static_cast<int>(songs.size()) ||
-      songs[songPk].empty()) {
+std::vector<int> SongLibrary::refreshStale() {
+  if (loading_) {
     return {};
   }
-  auto it = songs[songPk].find("song_identity_key");
-  if (it == songs[songPk].end()) {
-    return {};
-  }
-  return it->second.text;
-}
-
-std::vector<int> SongLibrary::songPksSharingIdentity(int songPk) const {
-  const auto it = songIdsByIdentityId_.find(songIdentityIdBySongId(songPk));
-  if (it == songIdsByIdentityId_.end()) {
-    return {songPk};
-  }
-  return it->second;
-}
-
-std::vector<int>
-SongLibrary::applyCloudPlayCount(const std::string &identityKey,
-                                 int cloudPlayCount, qint64) {
-  std::vector<int> affected;
-  if (identityKey.empty() || cloudPlayCount < 0) {
-    return affected;
-  }
-
-  const int identityId = ensureSongIdentityId(identityKey);
-  if (identityId <= 0) {
-    return affected;
-  }
-
-  QSqlDatabase &db = databaseManager_.db();
-  qint64 lastPlayedTs = 0;
-  int localCount = 0;
-  QSqlQuery readQuery(db);
-  readQuery.prepare(R"(
-      SELECT play_count, last_played_timestamp
-      FROM song_play_stats
-      WHERE identity_id=:identity_id
-  )");
-  readQuery.bindValue(":identity_id", identityId);
-  if (readQuery.exec() && readQuery.next()) {
-    localCount = readQuery.value(0).toInt();
-    lastPlayedTs = readQuery.value(1).toLongLong();
-  }
-  const int merged = std::max(localCount, cloudPlayCount);
-
-  QSqlQuery upsert(db);
-  upsert.prepare(R"(
-      INSERT INTO song_play_stats(identity_id, play_count, last_played_timestamp)
-      VALUES(:identity_id, :play_count, :last_played_timestamp)
-      ON CONFLICT(identity_id) DO UPDATE SET
-          play_count=excluded.play_count
-  )");
-  upsert.bindValue(":identity_id", identityId);
-  upsert.bindValue(":play_count", merged);
-  upsert.bindValue(":last_played_timestamp", lastPlayedTs);
-  if (!upsert.exec()) {
-    qFatal("applyCloudPlayCount upsert failed: %s",
-           upsert.lastError().text().toUtf8().data());
-  }
-
-  auto identityIt = songIdsByIdentityId_.find(identityId);
-  if (identityIt == songIdsByIdentityId_.end()) {
-    return affected;
-  }
-  affected.reserve(identityIt->second.size());
-  for (int songPk : identityIt->second) {
-    songs[songPk].insert_or_assign(
-        "play_count", FieldValue(std::to_string(merged), "play_count"));
-    affected.push_back(songPk);
-  }
-  return affected;
-}
-
-std::unordered_map<std::string, int> SongLibrary::identityPlayCounts() const {
-  std::unordered_map<std::string, int> counts;
-  counts.reserve(songs.size());
-  for (const MSong &song : songs) {
-    if (song.empty()) {
+  hasStaleKeys_ = false;
+  std::vector<int> changed;
+  for (auto &[sourceId, source] : providedSources_) {
+    // Resolved to songs now, so a song removed since it was marked is
+    // skipped, and keys no song has are not read.
+    QStringList keys;
+    for (const QString &key : std::as_const(source.staleKeys)) {
+      if (source.keys.songsByKey.contains(key)) {
+        keys.push_back(key);
+      }
+    }
+    source.staleKeys.clear();
+    if (keys.isEmpty()) {
       continue;
     }
-    auto keyIt = song.find("song_identity_key");
-    if (keyIt == song.end() || keyIt->second.text.empty()) {
+    const ProvidedValuesByKey values = source.provider.values(keys);
+    for (const QString &key : std::as_const(keys)) {
+      const auto valuesIt = values.find(key);
+      const std::vector<std::optional<FieldValue>> fieldValues =
+          toFieldValues(source.provider,
+                        valuesIt == values.end() ? nullptr : &valuesIt.value());
+      for (int songId : source.keys.songsByKey.at(key)) {
+        setProvidedFields(source.provider, songs[songId], fieldValues);
+        changed.push_back(songId);
+      }
+    }
+  }
+  std::sort(changed.begin(), changed.end());
+  changed.erase(std::unique(changed.begin(), changed.end()), changed.end());
+  return changed;
+}
+
+QString SongLibrary::providedKey(const ProvidedFields &provider,
+                                 const MSong &song) {
+  QStringList keyFieldValues;
+  keyFieldValues.reserve(static_cast<qsizetype>(provider.keyFields.size()));
+  for (const std::string &keyField : provider.keyFields) {
+    keyFieldValues.push_back(songFieldText(song, keyField));
+  }
+  return provider.songKey(keyFieldValues);
+}
+
+void SongLibrary::indexProvidedKey(ProvidedSource &source, int songId) {
+  std::vector<QString> &keyBySongPk = source.keys.keyBySongPk;
+  if (songId >= static_cast<int>(keyBySongPk.size())) {
+    keyBySongPk.resize(songs.size());
+  }
+  if (songs[songId].empty()) {
+    return;
+  }
+  QString key = providedKey(source.provider, songs[songId]);
+  if (key.isEmpty()) {
+    return;
+  }
+  source.keys.songsByKey[key].push_back(songId);
+  keyBySongPk[songId] = std::move(key);
+}
+
+void SongLibrary::unindexProvidedKey(ProvidedSource &source, int songId) {
+  QString &key = source.keys.keyBySongPk[songId];
+  if (key.isEmpty()) {
+    return;
+  }
+  const auto it = source.keys.songsByKey.find(key);
+  std::erase(it->second, songId);
+  if (it->second.empty()) {
+    source.keys.songsByKey.erase(it);
+  }
+  key.clear();
+}
+
+std::vector<std::optional<FieldValue>>
+SongLibrary::toFieldValues(const ProvidedFields &provider,
+                           const QList<QVariant> *values) {
+  std::vector<std::optional<FieldValue>> fieldValues(provider.fields.size());
+  if (values == nullptr) {
+    return fieldValues;
+  }
+  for (size_t i = 0; i < provider.fields.size(); ++i) {
+    const QVariant value = values->value(static_cast<qsizetype>(i));
+    if (!value.isValid()) {
       continue;
     }
-    int count = 0;
-    auto countIt = song.find("play_count");
-    if (countIt != song.end() &&
-        countIt->second.valueType() == ValueType::Number) {
-      count = static_cast<int>(countIt->second.typed.numberDouble);
-    }
-    auto existing = counts.find(keyIt->second.text);
-    if (existing == counts.end()) {
-      counts.emplace(keyIt->second.text, count);
+    // By the source's type: the load's worker registry has no plugin fields
+    // (docs/plugins/playstats.md, "What SongLibrary keeps").
+    const ProvidedFields::Field &field = provider.fields[i];
+    fieldValues[i].emplace(std::to_string(value.toLongLong()), field.id,
+                           field.type);
+  }
+  return fieldValues;
+}
+
+void SongLibrary::setProvidedFields(
+    const ProvidedFields &provider, MSong &song,
+    const std::vector<std::optional<FieldValue>> &fieldValues) {
+  for (size_t i = 0; i < provider.fields.size(); ++i) {
+    if (fieldValues[i]) {
+      song.insert_or_assign(provider.fields[i].id, *fieldValues[i]);
     } else {
-      existing->second = std::max(existing->second, count);
+      song.erase(provider.fields[i].id);
     }
   }
-  return counts;
 }
 
 void SongLibrary::syncComputedValuesBySongId(int songId, const MSong &song) {
@@ -955,9 +811,6 @@ std::optional<MSong> SongLibrary::loadPreparedSongFromFile(
 
 void SongLibrary::prepareParsedSong(MSong &song) const {
   evaluateComputedFieldsInSong(song, columnRegistry_);
-  song.insert_or_assign(
-      "song_identity_key",
-      FieldValue(songIdentityKeyFromSong(song), "song_identity_key"));
 }
 
 const MSong &SongLibrary::refreshSongFromFile(
@@ -1036,8 +889,6 @@ int SongLibrary::ensureSongInDb(MSong &song) {
     columnNames.push_back(columnId);
     placeholders.push_back(":" + columnId);
   }
-  columnNames.push_back("identity_id");
-  placeholders.push_back(":identity_id");
 
   QSqlQuery insert(db);
   // In current add flow, insertion failure is treated as fatal.
@@ -1048,20 +899,10 @@ int SongLibrary::ensureSongInDb(MSong &song) {
     const QString value = songFieldText(song, key);
     insert.bindValue(":" + columnId, value);
   }
-  const std::string identityKey = song.at("song_identity_key").text;
-  const int identityId = ensureSongIdentityId(identityKey);
-  if (identityId <= 0) {
-    qFatal("ensureSongInDb: invalid identity id for key: %s",
-           identityKey.c_str());
-  }
-  insert.bindValue(":identity_id", identityId);
   if (!insert.exec()) {
     qFatal("ensureSongInDb insert failed: %s",
            insert.lastError().text().toUtf8().data());
   }
-  song.insert_or_assign(
-      "song_identity_id",
-      FieldValue(std::to_string(identityId), "song_identity_id"));
 
   QSqlQuery find(db);
   find.prepare("SELECT song_id FROM songs WHERE filepath=:path");
@@ -1084,11 +925,21 @@ void SongLibrary::syncBuiltInFieldsBySongId(int songId, const MSong &song) {
   for (const QString &columnId : columns) {
     assignments.push_back(QString("%1=:%1").arg(columnId));
   }
-  assignments.push_back("identity_id=:identity_id");
 
   QSqlQuery updateSong(db);
   updateSong.prepare(QString("UPDATE songs SET %1 WHERE song_id=:song_id")
                          .arg(assignments.join(", ")));
+  // Whether a source's key fields change, from the text before the update.
+  std::vector<ProvidedSource *> rekeyed;
+  for (auto &[sourceId, source] : providedSources_) {
+    for (const std::string &keyField : source.provider.keyFields) {
+      if (songFieldText(songs[songId], keyField) !=
+          songFieldText(song, keyField)) {
+        rekeyed.push_back(&source);
+        break;
+      }
+    }
+  }
   for (const QString &columnId : columns) {
     const std::string key = columnId.toStdString();
     const QString value = songFieldText(song, key);
@@ -1096,24 +947,25 @@ void SongLibrary::syncBuiltInFieldsBySongId(int songId, const MSong &song) {
 
     songs[songId].insert_or_assign(key, FieldValue(value.toStdString(), key));
   }
-  const int oldIdentityId = songIdentityIdBySongId(songId);
-  const std::string identityKey = song.at("song_identity_key").text;
-  const int identityId = ensureSongIdentityId(identityKey);
-  updateSong.bindValue(":identity_id", identityId);
-  songs[songId].insert_or_assign(
-      "song_identity_id",
-      FieldValue(std::to_string(identityId), "song_identity_id"));
-  songs[songId].insert_or_assign("song_identity_key",
-                                 FieldValue(identityKey, "song_identity_key"));
   updateSong.bindValue(":song_id", songId);
   if (!updateSong.exec()) {
     qFatal("syncBuiltInFieldsBySongId failed: %s",
            updateSong.lastError().text().toUtf8().data());
   }
-  // Title/artist/album edits can move a song to another identity bucket.
-  if (oldIdentityId != identityId) {
-    removeSongFromIdentityIndex(songId, oldIdentityId);
-    addSongToIdentityIndex(songId, identityId);
+  // The only place a key changes: key fields are built-in tag fields. The
+  // song loses the old key's values at once and gets the new key's at the
+  // refresh; the old key's are not carried over, since other songs may keep
+  // them (docs/plugins/playstats.md, "A re-tag starts fresh").
+  for (ProvidedSource *source : rekeyed) {
+    const QString oldKey = source->keys.keyBySongPk[songId];
+    if (providedKey(source->provider, songs[songId]) == oldKey) {
+      continue;
+    }
+    unindexProvidedKey(*source, songId);
+    indexProvidedKey(*source, songId);
+    setProvidedFields(source->provider, songs[songId],
+                      toFieldValues(source->provider, nullptr));
+    markStale(*source, source->keys.keyBySongPk[songId]);
   }
 }
 

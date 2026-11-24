@@ -2,7 +2,6 @@
 
 #include "playlist.h"
 #include "playlistcollection.h"
-#include <QDateTime>
 #include <QDebug>
 #include <QFileInfo>
 #include <QRandomGenerator>
@@ -61,7 +60,7 @@ void PlaybackController::connectPlayer() {
   connect(player(), &AudioPlayer::mediaStatusChanged, this,
           &PlaybackController::onMediaStatusChanged);
   connect(player(), &AudioPlayer::durationChanged, this,
-          &PlaybackController::onDurationChanged);
+          &PlaybackController::durationChanged);
   connect(player(), &AudioPlayer::positionChanged, this,
           &PlaybackController::onPositionChanged);
   connect(player(), &AudioPlayer::bitrateChanged, this,
@@ -179,7 +178,6 @@ void PlaybackController::seek(qint64 positionMs) {
   if (!canPlay()) {
     return;
   }
-  completionTracker_.seeked();
   emit seeking(positionMs);
   player()->setPosition(positionMs);
 }
@@ -239,10 +237,8 @@ void PlaybackController::playSong(const MSong &song, int row, Playlist *pl) {
   // Set before setSource: InvalidMedia handling reads it (see
   // onMediaStatusChanged).
   currentSongPk_ = songPk;
-  completionTracker_.startSession();
-  library_.markSongPlayedAtStart(songPk, QDateTime::currentSecsSinceEpoch());
-  // Play stats are per identity.
-  playlists_.notifySongsChanged(library_.songPksSharingIdentity(songPk));
+  // The refresh may have changed the song's tags.
+  playlists_.notifySongChanged(songPk);
 
   player()->setSource(QString::fromStdString(activeSong.at("filepath").text));
   player()->play();
@@ -267,24 +263,10 @@ void PlaybackController::handlePlaybackFailure(const QString &filepath) {
   emit playbackFailed(filepath);
 }
 
-void PlaybackController::maybeCountCompletedPlay() {
-  if (currentSongPk_ < 0 || !completionTracker_.shouldCount()) {
-    return;
-  }
-  if (!library_.incrementPlayCount(currentSongPk_)) {
-    return;
-  }
-  completionTracker_.markCounted();
-  playlists_.notifySongsChanged(
-      library_.songPksSharingIdentity(currentSongPk_));
-  emit playCounted(currentSongPk_);
-}
-
 void PlaybackController::onMediaStatusChanged(
     QMediaPlayer::MediaStatus status) {
   switch (status) {
   case QMediaPlayer::EndOfMedia:
-    maybeCountCompletedPlay();
     emit songFinished();
     next();
     break;
@@ -308,14 +290,5 @@ void PlaybackController::onPositionChanged(qint64 positionMs) {
   if (positionMs > 0) {
     consecutiveFailures_ = 0;
   }
-  completionTracker_.recordPositionMs(
-      positionMs,
-      manager_.getStatus() == PlaybackQueue::PlaybackStatus::Playing);
-  maybeCountCompletedPlay();
   emit positionChanged(positionMs);
-}
-
-void PlaybackController::onDurationChanged(qint64 durationMs) {
-  completionTracker_.setDurationMs(durationMs);
-  emit durationChanged(durationMs);
 }

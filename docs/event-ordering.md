@@ -251,15 +251,17 @@ another thread.
 | efsw's watcher thread → `MonitoredLibrary` | `EfswFileSystemMonitor::Listener` | `invokeMethod` to the monitor |
 | Artwork threads → the system media interfaces | Each interface | `invokeMethod` to itself, with a task id |
 | SMTC callbacks (Windows) → `WindowsMediaCenter` | `WindowsMediaCenter` | `invokeMethod` to itself |
-| Cloud sync worker ↔ `CloudPlayStatsSyncCoordinator` | The coordinator | `invokeMethod` both ways |
+| Cloud sync worker ↔ `CloudPlayStatsSyncCoordinator` (Play Stats plugin) | The coordinator | `invokeMethod` both ways |
 | Plugin commands → `PlaybackController` | The host (`IPlayerControl`) | The plugin calls a plain method, from anywhere; the host queues it; planned: it checks the generation |
+| A plugin's changed song field values → `SongLibrary` | The host (`ISongFieldHost::valuesChanged`) | The plugin calls a plain method, from anywhere, also inside `trackStarted` (inside `PlaybackController::playSong`); the host queues it, then `SongLibrary::markStale` queues one refresh (`QTimer::singleShot(0)`) that reads the values and repaints the rows ([plugins/playstats.md](plugins/playstats.md)) |
 
 * **App edges are queued by hand** in the class that owns the foreign
   thread. The rule (code on another thread queues before it touches the
   core) is checked in review; only signals have it built in, through
   `AutoConnection`.
-* **The plugin edge is queued by the host**, so it holds for code that cannot
-  be reviewed: a plugin cannot skip it and need not know about it.
+* **The plugin edges are queued by the host**, so they hold for code that
+  cannot be reviewed: a plugin cannot skip them and need not know about
+  them.
 * **A plugin's own edges are the plugin's.** A result from its worker thread
   for its own widget (a lyrics fetch) is queued by the plugin; the host
   covers only calls into the host.

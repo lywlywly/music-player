@@ -15,7 +15,6 @@
 #include "../songlibrary.h"
 #include "../songparser.h"
 #include "../spectrum/pcmtap.h"
-#include "../utils.h"
 #include "testaudiofiles.h"
 
 namespace {
@@ -26,12 +25,6 @@ MSong makeSong(const QString &title, const QString &filepath) {
   song.insert_or_assign("album", FieldValue("Album", "album"));
   song.insert_or_assign("filepath",
                         FieldValue(filepath.toStdString(), "filepath"));
-  const std::string identity =
-      util::normalizedText(title).toStdString() + "|" +
-      util::normalizedText(QStringLiteral("Artist")).toStdString() + "|" +
-      util::normalizedText(QStringLiteral("Album")).toStdString();
-  song.insert_or_assign("song_identity_key",
-                        FieldValue(identity, "song_identity_key"));
   return song;
 }
 } // namespace
@@ -46,10 +39,8 @@ private slots:
   void play_startsLastPlayedSongInSignalOrder();
   void play_afterLastPlayedRowRemoved_startsFirstRow();
   void play_onEmptyOrNoPlaylist_doesNothing();
-  void endOfMedia_countsFinishesAndPlaysNext();
-  void playStats_seekToEndWithoutListenDoesNotCount();
-  void playStats_nearEndWithListenCountsOnce();
-  void playStats_notifyEverySongOfTheIdentity();
+  void endOfMedia_finishesAndPlaysNext();
+  void play_notifiesTheStartedSongsRows();
 
   void next_overMissingFile_stopsPreviousAndSkips();
   void invalidMedia_skipsToNextSong();
@@ -191,98 +182,47 @@ void TestPlaybackController::play_onEmptyOrNoPlaylist_doesNothing() {
   QCOMPARE(controller_->status(), PlaybackQueue::PlaybackStatus::None);
 }
 
-void TestPlaybackController::endOfMedia_countsFinishesAndPlaysNext() {
+void TestPlaybackController::endOfMedia_finishesAndPlaysNext() {
   addSong("Song0");
   addSong("Song1");
   playlist_->setLastPlayed(playlist_->getPkByIndex(0));
   DummyAudioPlayer *audio = player();
-  // The whole song is listened to before the backend reports its duration,
-  // so only the end of the song can count the play.
-  audio->setDurationForTest(0);
   controller_->play();
-  for (const qint64 positionMs : {1000, 60000, 119000}) {
-    audio->setPosition(positionMs);
-  }
-  emit audio->durationChanged(120000);
-  QSignalSpy countedSpy(controller_, &PlaybackController::playCounted);
   QSignalSpy finishedSpy(controller_, &PlaybackController::songFinished);
   QSignalSpy movedSpy(controller_, &PlaybackController::movedToRow);
+  // songFinished comes before the next song starts.
+  int finishedAtPk = -1;
+  connect(controller_, &PlaybackController::songFinished, this,
+          [&]() { finishedAtPk = controller_->currentSongPk(); });
 
   emit audio->mediaStatusChanged(QMediaPlayer::EndOfMedia);
 
-  QCOMPARE(countedSpy.size(), 1);
-  QCOMPARE(countedSpy.at(0).at(0).toInt(), playlist_->getPkByIndex(0));
   QCOMPARE(finishedSpy.size(), 1);
+  QCOMPARE(finishedAtPk, playlist_->getPkByIndex(0));
   QCOMPARE(controller_->currentSongPk(), playlist_->getPkByIndex(1));
   QCOMPARE(movedSpy.size(), 1);
   QCOMPARE(movedSpy.at(0).at(0).toInt(), 1);
 }
 
-void TestPlaybackController::playStats_seekToEndWithoutListenDoesNotCount() {
-  addSong("Song");
+void TestPlaybackController::play_notifiesTheStartedSongsRows() {
+  // Tagged, as playing re-reads the tags: the rows show what was read.
+  const QString path = dir_->filePath("a.wav");
+  QVERIFY(writeSilentWav(path));
+  QVERIFY(SongParser::writeTags(
+      path.toStdString(),
+      {{"title", "Retagged"}, {"artist", "Artist"}, {"album", "Album"}},
+      *registry_));
+  playlist_->addSong(makeSong("Song", path));
   playlist_->setLastPlayed(playlist_->getPkByIndex(0));
-  player()->setDurationForTest(120000);
-  QSignalSpy countedSpy(controller_, &PlaybackController::playCounted);
-
-  controller_->play();
-  controller_->seek(115000);
-
-  QCOMPARE(countedSpy.size(), 0);
-  QSqlQuery q(databaseManager_->db());
-  QVERIFY(q.exec("SELECT IFNULL(MAX(play_count), 0) FROM song_play_stats"));
-  QVERIFY(q.next());
-  QCOMPARE(q.value(0).toInt(), 0);
-}
-
-void TestPlaybackController::playStats_nearEndWithListenCountsOnce() {
-  addSong("Song");
-  playlist_->setLastPlayed(playlist_->getPkByIndex(0));
-  player()->setDurationForTest(120000);
-  QSignalSpy countedSpy(controller_, &PlaybackController::playCounted);
-
-  controller_->play();
-  for (const qint64 positionMs : {1000, 35000, 70000, 109000, 115000, 119000}) {
-    player()->setPosition(positionMs);
-  }
-
-  QCOMPARE(countedSpy.size(), 1);
-  QCOMPARE(countedSpy.at(0).at(0).toInt(), playlist_->getPkByIndex(0));
-  QSqlQuery q(databaseManager_->db());
-  QVERIFY(q.exec("SELECT play_count, last_played_timestamp "
-                 "FROM song_play_stats"));
-  QVERIFY(q.next());
-  QCOMPARE(q.value(0).toInt(), 1);
-  QVERIFY(q.value(1).toLongLong() > 0);
-  QVERIFY(!q.next());
-}
-
-void TestPlaybackController::playStats_notifyEverySongOfTheIdentity() {
-  // Two files with the same title, artist and album: one identity, so shared
-  // play stats. Tagged, as playing re-reads the tags.
-  for (const QString &name :
-       {QStringLiteral("a.wav"), QStringLiteral("b.wav")}) {
-    const QString path = dir_->filePath(name);
-    QVERIFY(writeSilentWav(path));
-    QVERIFY(SongParser::writeTags(
-        path.toStdString(),
-        {{"title", "Song"}, {"artist", "Artist"}, {"album", "Album"}},
-        *registry_));
-    playlist_->addSong(makeSong("Song", path));
-  }
-  playlist_->setLastPlayed(playlist_->getPkByIndex(0));
-  player()->setDurationForTest(120000);
   QSignalSpy changedSpy(playlist_, &Playlist::songDataChanged);
 
   controller_->play();
-  QCOMPARE(changedSpy.count(), 2);
-  for (const qint64 positionMs : {1000, 35000, 70000, 109000, 115000, 119000}) {
-    player()->setPosition(positionMs);
-  }
 
-  QCOMPARE(changedSpy.count(), 4);
-  QCOMPARE(changedSpy.at(2).at(0).toInt() + changedSpy.at(3).at(0).toInt(), 1);
+  QCOMPARE(changedSpy.count(), 1);
+  QCOMPARE(changedSpy.at(0).at(0).toInt(), 0);
+  QCOMPARE(playlist_->getSongByIndex(0).at("title").text,
+           std::string("Retagged"));
 }
-
 void TestPlaybackController::next_overMissingFile_stopsPreviousAndSkips() {
   // Skipping a missing file behaves like pressing Next again: the previous
   // song stops at once, then the following song plays, and the last

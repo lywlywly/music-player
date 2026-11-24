@@ -96,30 +96,9 @@ void DatabaseManager::applyPragmas() {
 bool DatabaseManager::createTables() {
   QSqlQuery q(db_);
 
-  return ensureSongIdentitiesSchema(q) && ensureSongsSchema(q) &&
-         ensurePlaylistsSchema(q) && ensureDynamicAttributesSchema(q) &&
-         ensureComputedAttributesSchema(q) && ensurePlayStatsSchema(q) &&
-         ensureMonitoredLibrarySchema(q);
-}
-
-bool DatabaseManager::ensureSongIdentitiesSchema(QSqlQuery &q) {
-  if (!execOrWarn(q,
-                  R"(
-        CREATE TABLE IF NOT EXISTS song_identities (
-            identity_id       INTEGER PRIMARY KEY AUTOINCREMENT,
-            song_identity_key TEXT NOT NULL UNIQUE
-        );
-    )",
-                  "Error creating song_identities table:")) {
-    return false;
-  }
-
-  q.exec(R"(
-      CREATE INDEX IF NOT EXISTS idx_song_identities_key
-      ON song_identities(song_identity_key);
-  )");
-
-  return true;
+  return ensureSongsSchema(q) && ensurePlaylistsSchema(q) &&
+         ensureDynamicAttributesSchema(q) &&
+         ensureComputedAttributesSchema(q) && ensureMonitoredLibrarySchema(q);
 }
 
 bool DatabaseManager::ensureSongsSchema(QSqlQuery &q) {
@@ -129,9 +108,6 @@ bool DatabaseManager::ensureSongsSchema(QSqlQuery &q) {
        columnRegistry_.songAttributeDefinitions()) {
     songsColumns.push_back(songsColumnDefinition(definition));
   }
-  songsColumns.push_back("identity_id INTEGER NOT NULL");
-  songsColumns.push_back(
-      "FOREIGN KEY(identity_id) REFERENCES song_identities(identity_id)");
 
   const QString createSongsSql =
       QString("CREATE TABLE IF NOT EXISTS songs (%1);")
@@ -140,9 +116,6 @@ bool DatabaseManager::ensureSongsSchema(QSqlQuery &q) {
     qWarning() << "Error creating songs table:" << q.lastError();
     return false;
   }
-
-  q.exec(
-      R"(CREATE INDEX IF NOT EXISTS idx_songs_identity_id ON songs(identity_id);)");
 
   return true;
 }
@@ -295,28 +268,6 @@ bool DatabaseManager::ensureComputedAttributesSchema(QSqlQuery &q) {
   q.exec(R"(
       CREATE INDEX IF NOT EXISTS idx_song_computed_attrs_key_type
       ON song_computed_attributes(key, value_type);
-  )");
-
-  return true;
-}
-
-bool DatabaseManager::ensurePlayStatsSchema(QSqlQuery &q) {
-  if (!execOrWarn(q,
-                  R"(
-        CREATE TABLE IF NOT EXISTS song_play_stats (
-            identity_id             INTEGER PRIMARY KEY,
-            play_count              INTEGER NOT NULL DEFAULT 0,
-            last_played_timestamp   INTEGER NOT NULL DEFAULT 0,
-            FOREIGN KEY(identity_id) REFERENCES song_identities(identity_id)
-        );
-    )",
-                  "Error creating song_play_stats table:")) {
-    return false;
-  }
-
-  q.exec(R"(
-      CREATE INDEX IF NOT EXISTS idx_song_play_stats_last_played
-      ON song_play_stats(last_played_timestamp);
   )");
 
   return true;

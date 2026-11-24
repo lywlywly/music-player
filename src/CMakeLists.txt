@@ -92,6 +92,7 @@ endfunction()
 # Their build files go outside plugins/, the folder the built plugins go in.
 add_subdirectory(plugins/lyrics lyrics-plugin-build)
 add_subdirectory(plugins/abrepeat abrepeat-plugin-build)
+add_subdirectory(plugins/playstats playstats-plugin-build)
 
 if(WIN32)
   find_package(FFmpeg REQUIRED COMPONENTS avcodec avformat avutil)
@@ -116,10 +117,6 @@ set(PROJECT_SOURCES
   audiofileformats.h
   autoplaylistdialog.h
   autoplaylistdialog.cpp
-  cloudplaystatssyncservice.h
-  cloudplaystatssyncservice.cpp
-  cloudplaystatssynccoordinator.h
-  cloudplaystatssynccoordinator.cpp
   columndefinition.h
   columnregistry.h
   columnregistry.cpp
@@ -192,8 +189,6 @@ set(PROJECT_SOURCES
   playbackpolicyshuffle.cpp
   playbackqueue.h
   playbackqueue.cpp
-  playcompletiontracker.h
-  playcompletiontracker.cpp
   playlist.h
   playlist.cpp
   playlistcollection.h
@@ -217,6 +212,7 @@ set(PROJECT_SOURCES
   pluginplayerhost.cpp
   pluginspage.h
   pluginspage.cpp
+  providedfields.h
   qtaudioplayer.h
   qtaudioplayer.cpp
   replaygain.h
@@ -288,7 +284,6 @@ target_link_libraries(
   Qt6::Widgets
   Qt6::Sql
   Qt6::Multimedia
-  Qt6::Network
   Qt6::Concurrent
   ${ICU_LIBRARIES}
   ${MYPLAYER_TAGLIB_TARGET}
@@ -333,7 +328,7 @@ endif()
 add_executable(EXEC main.cpp)
 target_link_libraries(EXEC MYLib)
 # The app loads the plugins at runtime; building it builds them.
-add_dependencies(EXEC lyricsplugin abrepeatplugin)
+add_dependencies(EXEC lyricsplugin abrepeatplugin playstatsplugin)
 
 if(APPLE)
   set_target_properties(EXEC PROPERTIES

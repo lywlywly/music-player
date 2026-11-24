@@ -37,7 +37,6 @@
 #include "../songlibrary.h"
 #include "../songparser.h"
 #include "../songpropertiesdialog.h"
-#include "../utils.h"
 
 namespace {
 MSong makeSong(const QString &title, const QString &artist, const QString &path,
@@ -54,12 +53,6 @@ MSong makeSong(const QString &title, const QString &artist, const QString &path,
   song.insert_or_assign("date", FieldValue("2024-01-01", "date"));
   song.insert_or_assign("genre", FieldValue("genre", "genre"));
   song.insert_or_assign("filepath", FieldValue(path.toStdString(), "filepath"));
-  const std::string identity =
-      util::normalizedText(title).toStdString() + "|" +
-      util::normalizedText(artist).toStdString() + "|" +
-      util::normalizedText(QStringLiteral("Album")).toStdString();
-  song.insert_or_assign("song_identity_key",
-                        FieldValue(identity, "song_identity_key"));
   return song;
 }
 

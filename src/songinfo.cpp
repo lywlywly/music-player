@@ -108,8 +108,10 @@ SongInfo buildSongInfo(int songPk, const SongLibrary &library,
   info.sections.push_back(std::move(tags));
 
   SongInfoSection stats{.title = QObject::tr("Library")};
-  addFieldRow(stats, song, registry, "play_count");
-  addFieldRow(stats, song, registry, "last_played_timestamp");
+  // The plugins' fields (play stats), in registration order.
+  for (const QString &fieldId : registry.pluginFieldIds()) {
+    addFieldRow(stats, song, registry, fieldId.toStdString().c_str());
+  }
   if (folder.has_value()) {
     const QString folderPath = QDir::toNativeSeparators(folder->path);
     addRow(stats, QObject::tr("Watched folder"),

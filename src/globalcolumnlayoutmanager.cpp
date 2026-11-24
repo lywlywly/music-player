@@ -118,6 +118,10 @@ void GlobalColumnLayoutManager::refreshFromRegistry() {
       }
     }
   }
+  // Columns registered after load() (custom and plugin fields) have their
+  // saved widths read now; persist() would otherwise remove them, as it
+  // writes every registry column's width.
+  loadSavedWidths();
 
   if (visibleColumnIds().isEmpty() && !orderedIds_.isEmpty()) {
     hiddenIds_.remove(orderedIds_.front());
@@ -173,18 +177,24 @@ void GlobalColumnLayoutManager::load() {
   }
 
   columnWidths_.clear();
-  for (const QString &id : registry_.defaultOrderedIds()) {
-    const QString key = QString::fromUtf8(kWidthPrefix) + id;
-    if (settings.contains(key)) {
-      const int width = settings.value(key).toInt();
-      if (width > 0) {
-        columnWidths_.insert(id, width);
-      }
-    }
-  }
+  loadSavedWidths();
 
   if (changed) {
     persist();
+  }
+}
+
+void GlobalColumnLayoutManager::loadSavedWidths() {
+  const QSettings settings;
+  for (const QString &id : registry_.defaultOrderedIds()) {
+    const QString key = QString::fromUtf8(kWidthPrefix) + id;
+    if (columnWidths_.contains(id) || !settings.contains(key)) {
+      continue;
+    }
+    const int width = settings.value(key).toInt();
+    if (width > 0) {
+      columnWidths_.insert(id, width);
+    }
   }
 }
 

@@ -374,8 +374,7 @@ void TestMonitoredLibrary::movedFile_getsNewPk() {
   QVERIFY(monitored_->addFolder(root()).folderId > 0);
   waitIdle();
   const int oldPk = monitored_->songPks().front();
-  const std::string identity =
-      library_->getSongByPK(oldPk).at("song_identity_key").text;
+  const std::string title = library_->getSongByPK(oldPk).at("title").text;
 
   QVERIFY(QDir().mkpath(root() + "/b"));
   QVERIFY(QFile::rename(root() + "/a/x.mp3", root() + "/b/x.mp3"));
@@ -385,7 +384,8 @@ void TestMonitoredLibrary::movedFile_getsNewPk() {
   const int newPk = monitored_->songPks().front();
   QVERIFY(newPk != oldPk);
   QVERIFY(library_->getSongByPK(oldPk).empty());
-  QCOMPARE(library_->getSongByPK(newPk).at("song_identity_key").text, identity);
+  // Same tags, so the same provided values (play stats) once refreshed.
+  QCOMPARE(library_->getSongByPK(newPk).at("title").text, title);
 }
 
 void TestMonitoredLibrary::releasingManualReferences_keepsMonitoredRow() {

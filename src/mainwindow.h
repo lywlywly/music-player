@@ -1,7 +1,6 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
-#include "cloudplaystatssynccoordinator.h"
 #include "columnregistry.h"
 #include "coverartpresenter.h"
 #include "databasemanager.h"
@@ -14,6 +13,7 @@
 #include "playlisttabs.h"
 #include "songlibrary.h"
 #include "systemmediapresenter.h"
+#include <QFuture>
 #include <QMainWindow>
 #include <QPointer>
 #include <QString>
@@ -36,8 +36,10 @@ class MainWindow : public QMainWindow {
 
 public:
   MainWindow(QWidget *parent = nullptr);
+  // The tests' window: its own database and connection, and the folder
+  // under which the plugins keep their data.
   MainWindow(QString databaseName, QString connectionName,
-             QWidget *parent = nullptr);
+             const QString &pluginDataRoot, QWidget *parent = nullptr);
   ~MainWindow();
 
 protected:
@@ -72,7 +74,8 @@ private:
   void updatePlaylistWriteActionsEnabled();
   // Shows scan progress, then the offline folder count, in the status bar.
   void setUpLibraryScanStatus();
-  void initCloudSync();
+  // Refreshes the plugins' song fields when their values change.
+  void setUpProvidedFields();
   void setUpMenuBar();
   // Adds the plugins' panels to the info panel, restores and saves its
   // current tab, and handles the Properties tab's buttons.
@@ -83,8 +86,6 @@ private:
   // Shows the Playlist Search dialog, creating it if none is open. It
   // follows the playlist shown.
   void openPlaylistSearchDialog();
-  void triggerManualCloudRebase();
-  void refreshManualCloudRebaseActionEnabled();
   Ui::MainWindow *ui;
   ColumnRegistry columnRegistry_;
   GlobalColumnLayoutManager columnLayoutManager_;
@@ -104,7 +105,8 @@ private:
   SystemMediaPresenter *systemMedia_ = nullptr;
   NowPlayingPresenter *nowPlaying_ = nullptr;
   QActionGroup *playbackOrderMenuActionGroup;
-  CloudPlayStatsSyncCoordinator cloudPlayStatsSyncCoordinator_;
+  // The startup load's worker; finished once it ran.
+  QFuture<void> libraryLoad_;
   bool playlistReady_ = false;
   QPointer<PlaylistSearchDialog> playlistSearchDialog_;
 };

@@ -207,10 +207,11 @@ void TestPlaylistSearchDialogUi::results_followPlaylistRowsAndTarget() {
 
 void TestPlaylistSearchDialogUi::results_followSongDataAndVisibleColumns() {
   auto *status = child<QLabel>("playlist_search_status_label");
-  type("play_count >= 1");
+  type("genre HAS bebop");
   QTRY_COMPARE(status->text(), QStringLiteral("0 matches"));
-  const int pk = playlist_->getPkByIndex(1);
-  QVERIFY(library_->incrementPlayCount(pk));
+  // Re-tagged: the same file with another genre.
+  const int pk = addSong("Blue Train", "bebop");
+  QCOMPARE(pk, playlist_->getPkByIndex(1));
   collection_->notifySongChanged(pk);
   QTRY_COMPARE(resultTitles(), QStringList({"Blue Train"}));
 

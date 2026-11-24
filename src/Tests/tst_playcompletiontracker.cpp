@@ -1,7 +1,7 @@
 #include <QObject>
 #include <QTest>
 
-#include "../playcompletiontracker.h"
+#include "../plugins/playstats/playcompletiontracker.h"
 
 namespace {
 // Feeds playing positions from fromMs to toMs (inclusive) in stepMs steps.

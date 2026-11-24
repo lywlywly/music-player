@@ -160,10 +160,12 @@ The interfaces in `src/pluginapi/` come in three groups.
 | Capabilities | `IPanelProvider` | plugin (root object) | Makes a tab for the info panel |
 | | `ISettingsPageProvider` | plugin (root object) | Makes a page for the Settings dialog, as an `IPluginSettingsPage` (`widget()`, `apply()` on OK) |
 | | `IMenuProvider` | plugin (root object) | Makes a submenu for the end of the Playback menu |
-| Host services | `IPluginHost` | app | What the app offers plugins: `player()` and `control()` |
+| | `ISongFieldProvider` | plugin (root object) | Song fields the plugin keeps the values of, shown as columns and usable in expressions |
+| Host services | `IPluginHost` | app | What the app offers one plugin (each gets its own): `player()`, `control()`, `dataFolder()` and `songFieldHost()` |
 | | `IPlayerHost` | app | `addListener` / `removeListener` for playback events |
 | | `IPlayerControl` | app | Playback commands, deferred: today `seek(ms)` and `play()` |
-| | `IPlayerListener` | plugin | Receives `trackStarted(TrackInfo)`, `stopped()`, `positionChanged(ms)` |
+| | `ISongFieldHost` | app | `valuesChanged(keys)`: tells the app which of the plugin's values to read again, deferred like a command |
+| | `IPlayerListener` | plugin | Receives `trackStarted(TrackInfo)`, `stopped()`, `paused()`, `resumed()`, `positionChanged(ms)`, `durationChanged(ms)`, `seeked(ms)`, `finished()` |
 | | `TrackInfo` | (plain data) | The playing song's fields as text, copied from the app's song |
 
 Four ideas run through it:
@@ -205,10 +207,20 @@ The A-B Repeat plugin (`abrepeatplugin.dll`) has the same shape: its root
 object makes a submenu of Playback, and its `ABRepeat` gets the events and
 calls `seek` to jump back to A.
 
+The Play Stats plugin (`playstatsplugin.dll`) has no tab. Its listener
+counts plays into the plugin's own SQLite file, in its data folder, and its
+root object provides `play_count` and `last_played_timestamp` as song fields:
+the app keeps a copy of the values on each song, so the columns sort and
+autoplaylists filter on them like any field, and reads them again when the
+plugin reports changed keys. It also syncs the counts with the cloud and
+adds a Settings page and a submenu. Its design, and how the app keeps a
+plugin's fields, are in
+[docs/plugins/playstats.md](../docs/plugins/playstats.md).
+
 | Piece | Where | Role |
 | --- | --- | --- |
 | `pluginapi` | `src/pluginapi/` | The interfaces, header-only |
-| `PluginManager` | app | Lists the plugins and loads those not disabled, is their `IPluginHost`, shuts them down |
+| `PluginManager` | app | Lists the plugins and loads those not disabled, gives each its own `IPluginHost`, registers their song fields, shuts them down |
 | `PluginPlayerHost` | app | The `IPlayerHost`: turns `PlaybackController`'s signals into listener calls; and the `IPlayerControl`: queues the plugins' seeks |
 | `MainWindow`, `SettingsDialog` | app | Use the capabilities: add the plugins' tabs, menus and Settings pages |
 | `PluginsPage` | app | Settings > Plugins: lists every plugin with its state, enables and disables them |
@@ -261,12 +273,15 @@ calls `seek` to jump back to A.
 3. **Following and controlling playback.** The Lyrics tab's presenter adds
    itself as a listener when it is created, A-B Repeat's loop when the
    plugin is initialized. When a song starts, playback stops or the position
-   moves, `PluginPlayerHost` calls `trackStarted`, `stopped` or
-   `positionChanged` on each listener. When the loop sees a position past B,
+   moves (or a song pauses, resumes, seeks or ends), `PluginPlayerHost`
+   calls the matching method, `trackStarted`, `stopped`, `positionChanged`
+   and so on, on each listener. When the loop sees a position past B,
    it calls `seek(A)`, which the host queues and then runs through
    `PlaybackController`. A click on a lyrics line seeks the same way, to the
    line's timestamp, then calls `play()`, so a paused song resumes there.
-4. **Shutdown.** The window's widgets are destroyed first, with the plugins'
+4. **Shutdown.** If the library is still loading, the window first waits
+   for the load, which reads the Play Stats plugin's values on a worker
+   thread. The window's widgets are destroyed next, with the plugins'
    tabs; their presenters remove themselves as listeners. Then the
    `PluginManager` calls `shutdown()` on each plugin. Libraries are never
    unloaded while the app runs: objects they created may still exist, and

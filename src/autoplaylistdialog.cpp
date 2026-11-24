@@ -22,7 +22,7 @@ AutoPlaylistDialog::AutoPlaylistDialog(const SongLibrary &library,
   expressionEdit_ = new QLineEdit(expression, this);
   expressionEdit_->setObjectName("expression_edit");
   expressionEdit_->setPlaceholderText(
-      QStringLiteral("genre HAS jazz AND play_count > 0"));
+      QStringLiteral("genre HAS jazz AND tracknumber <= 3"));
   expressionEdit_->setMinimumWidth(420);
   statusLabel_ = new QLabel(this);
   statusLabel_->setObjectName("status_label");

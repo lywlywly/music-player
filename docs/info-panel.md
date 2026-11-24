@@ -11,7 +11,8 @@ Status: implemented. The Spectrum tab is described in
   **Spectrum**, with the playing song's cover art below it.
 * **Properties** shows the song selected in the shown playlist: its file
   (name, folder, path, size, modified and created times), its audio
-  properties, its main tags, its play stats and its watched folder. It
+  properties, its main tags, the plugins' fields (play stats) and its
+  watched folder. It
   follows the selection; it does not show the playing song.
 * The **cover art** shows the playing song's embedded cover
   (`CoverArtPresenter`).
@@ -30,7 +31,7 @@ Status: implemented. The Spectrum tab is described in
     panel.
 * **One song.** With several rows selected, the first (smallest) selected
   row is shown. A multi-song summary (count, total size) is out of scope.
-* **Stored values, no re-parse.** Audio properties, tags and play stats come
+* **Stored values, no re-parse.** Audio properties, tags and plugin fields come
   from the `MSong` already in `SongLibrary`, the values the playlist table
   shows. The panel never calls `SongLibrary::refreshSongFromFile`: that
   parses the file and writes the DB, which must not happen on every
@@ -120,7 +121,7 @@ have, is left out, and so is a section with no rows.
 | | Created | `QFileInfo::birthTime()`, "Unknown" when invalid |
 | Audio | Codec, Duration, Bitrate, Sample rate, Channels | `codec`, `duration`, `bitrate` (with " kbps"), `sample_rate` (with " Hz"), `channels` |
 | Tags | Title, Artist, Album, Disc no, Track no, Date, Genre | the built-in columns of the same ids |
-| Library | Play Count, Last Played | `play_count`, `last_played_timestamp` |
+| Library | each plugin field, in registration order (Play Count, Last Played with the Play Stats plugin) | `ColumnRegistry::pluginFieldIds()` (`play_count`, `last_played_timestamp`) |
 | | Watched folder | the folder's path, with "(offline)" when offline; left out for a song not in the monitored library |
 
 * The Audio, Tags and Library labels (except Watched folder) are the
@@ -199,7 +200,7 @@ have, is left out, and so is a section with no rows.
   * the shown playlist sends `songDataChanged(row)` for the song's row
     (`getIndexByPk`). Every song write outside playlist operations reaches it
     through `PlaylistCollection::notifySongsChanged`: Song Properties saves,
-    play counts and last played, cloud sync, monitored rescans
+    a plugin's provided values (play stats), monitored rescans
     (`songsEntered`, `songsUpdated`), and Refresh (`songsRefreshed`);
   * a watched folder goes offline or online
     (`MonitoredLibrary::folderAvailabilityChanged`).

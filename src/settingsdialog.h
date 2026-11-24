@@ -49,7 +49,6 @@ signals:
   void backendChanged(PlaybackBackendManager::Backend backend);
   void replayGainModeChanged(ReplayGainMode mode);
   void customFieldsChanged();
-  void cloudUuidChanged(const QString &uuid);
   void statusBarExpressionChanged(const QString &expression);
   void windowTitleExpressionChanged(const QString &expression);
   void displayThemeModeChanged(const QString &mode);
@@ -65,7 +64,6 @@ private:
   void addComputedFieldFromForm();
   void removeSelectedCustomField();
   void removeSelectedComputedField();
-  void updateCloudUuidStatus();
   void setActiveDisplayExpressionEditor(QPlainTextEdit *editor);
   void updateActiveDisplayExpressionPreview();
   QString evaluateDisplayExpressionPreview(const QString &expressionText,
@@ -86,10 +84,6 @@ private:
   QHash<QString, FieldDefinition> computedFieldSchemasById_;
   QSet<QString> originalCustomFieldIds_;
   QSet<QString> originalComputedFieldIds_;
-  QString initialCloudUuid_;
-  bool initialCloudDisabledByUser_ = false;
-  QString pendingCloudUuid_;
-  bool pendingCloudDisabledByUser_ = false;
   // The loaded plugins' pages, under Plugins.
   QList<IPluginSettingsPage *> pluginPages_;
   PluginsPage *pluginsPage_ = nullptr;

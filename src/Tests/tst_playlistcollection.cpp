@@ -10,7 +10,6 @@
 #include "../monitoredlibrary.h"
 #include "../playlistcollection.h"
 #include "../songlibrary.h"
-#include "../utils.h"
 
 namespace {
 MSong makeSong(const QString &title, const QString &path) {
@@ -20,12 +19,6 @@ MSong makeSong(const QString &title, const QString &path) {
   song.insert_or_assign("album", FieldValue("Album", "album"));
   song.insert_or_assign("discnumber", FieldValue("1", "discnumber"));
   song.insert_or_assign("filepath", FieldValue(path.toStdString(), "filepath"));
-  const std::string identity =
-      util::normalizedText(title).toStdString() + "|" +
-      util::normalizedText(QStringLiteral("Artist")).toStdString() + "|" +
-      util::normalizedText(QStringLiteral("Album")).toStdString();
-  song.insert_or_assign("song_identity_key",
-                        FieldValue(identity, "song_identity_key"));
   return song;
 }
 

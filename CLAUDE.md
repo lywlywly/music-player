@@ -116,8 +116,9 @@ Without Qt's `bin` on `PATH`, the app and tests exit with `0xc0000135`.
 
 ## Conventions
 
-- Play stats belong to a song's identity (normalized `title|artist|album`): songs with the same identity
-  share them.
+- Play stats are the Play Stats plugin's (`src/plugins/playstats/`, its own SQLite file): they belong to a
+  song's identity (normalized `title|artist|album`), so songs with the same identity share them. The app
+  keeps no play stats; it shows a plugin's fields through `ISongFieldProvider`.
 - The main window's layout lives in `src/mainwindow.ui`; its custom widgets (`SongInfoPanel`,
   `SpectrumWidget`, ...) are promoted there (`<customwidget>`).
 - Settings are `QSettings` keys named `<area>/<name>` (e.g. `infopanel/current_tab`), documented in the

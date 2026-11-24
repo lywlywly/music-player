@@ -6,8 +6,8 @@ storage and threading. Each feature's design is in its own doc, listed in
 
 ## Overview
 
-`MainWindow` wires the subsystems together. Songs and play stats live in
-`SongLibrary`, stored in SQLite (`DatabaseManager`) and described by
+`MainWindow` wires the subsystems together. Songs live in `SongLibrary`,
+stored in SQLite (`DatabaseManager`) and described by
 `ColumnRegistry`. Songs enter the library from manual playlists (Open, Add
 Folder) or from watched folders (`MonitoredLibrary`). Playlists (`Playlist`,
 `PlaylistCollection`) order songs; autoplaylists are views of the watched
@@ -17,9 +17,9 @@ runs playback on top of them, and an `AudioPlayer` backend (Qt Multimedia or
 GStreamer) plays it. Qt models, widgets and dialogs
 (`PlaylistTableModel`, `PlaylistTabs`, ...) only present backend state.
 
-* Startup: load the library on a worker thread, then build playlists and tabs
-  on the main thread, then scan the watched folders in the background and
-  start cloud sync ("Startup loading").
+* Startup: load the library (and the plugins' song field values beside it)
+  on a worker thread, then build playlists and tabs on the main thread, then
+  scan the watched folders in the background ("Startup loading").
 * Adding files: parse tags, store the song, append it to the playlist; or a
   scan finds the file in a watched folder ("Song ingest and metadata
   refresh").
@@ -36,7 +36,7 @@ The backend must not depend on how (or whether) it is displayed.
 
 * Backend: `SongLibrary`, `DatabaseManager`, `Playlist`, `PlaylistCollection`,
   `PlaybackQueue`, `PlaybackManager`, playback policies,
-  `PlayCompletionTracker`, `PlaybackController`, `MonitoredLibrary`,
+  `PlaybackController`, `MonitoredLibrary`,
   `LibraryScanner`, `IFileSystemMonitor` implementations, `SongMatcher`.
 * Frontend (Qt view adapters and widgets): `PlaylistTableModel`,
   `PlaylistTableView`, `PlaylistTabs`, `LibrarySearchResultsModel`, dialogs,
@@ -98,17 +98,18 @@ view updates:     Playlist / PlaybackQueue / layout signals -> PlaylistTableMode
 * Callers (`MainWindow`, `PlaylistTabs`, dialogs) perform playlist operations
   through `Playlist` or `PlaylistCollection`, not by writing `SongLibrary`
   directly.
-* Song changes outside playlist operations (Song Properties save, play stats,
-  cloud sync) write `SongLibrary` directly, then call
-  `PlaylistCollection::notifySongChanged(songPk)` so every playlist refreshes
-  that song's rows.
+* Song changes outside playlist operations (Song Properties save, a plugin's
+  provided values) write `SongLibrary` directly, then call
+  `PlaylistCollection::notifySongChanged(songPk)` (or `notifySongsChanged`)
+  so every playlist refreshes that song's rows.
 
 ## Main Classes and Responsibilities
 
 Expression classes (`libraryexpression_*`, `LibrarySearchDialog`,
 `NowPlayingDisplay`, `displayexpression`) are described in
-[expressions.md](expressions.md), and the cloud sync classes in
-[cloud-sync.md](cloud-sync.md).
+[expressions.md](expressions.md). Play stats and their cloud sync are the
+Play Stats plugin's ([plugins/playstats.md](plugins/playstats.md),
+[cloud-sync.md](cloud-sync.md)).
 
 ### App composition
 
@@ -206,19 +207,24 @@ The in-memory song store and reading/writing audio file tags.
 
 * `SongLibrary`
   * Canonical song repository in memory + DB sync.
-  * Loads built-in, dynamic, computed, and play-stats fields.
+  * Loads built-in, dynamic and computed fields.
   * Parses/imports files, refreshes metadata, evaluates computed fields, and
     evaluates library search expressions.
-  * Maintains identity-based play stats using normalized `title|artist|album`.
+  * Keeps a copy of the fields plugins provide (play stats): per source, a
+    key per song from its tag fields, songs grouped by key, and the keys to
+    read again, refreshed in one batch from the event loop (`markStale`,
+    `refreshStale`). See [plugins/playstats.md](plugins/playstats.md),
+    "What `SongLibrary` keeps".
   * `addTolibrary` stores the canonical file path
     (`QFileInfo::canonicalFilePath`, or the cleaned absolute path for a
     missing file), so one file never gets two rows.
   * `removeSongs(songPks)` deletes songs from `songs` (attributes and
     `playlist_items` cascade) and from memory, including registered queries.
-    Identities and play stats are kept, so a re-added file gets its play count
-    back under a new pk (`song_id` is `AUTOINCREMENT`, never reused).
-  * Exposes a plain-data `Snapshot` used to transfer worker-loaded library
-    state back to the main-thread instance.
+    A re-added file gets a new pk (`song_id` is `AUTOINCREMENT`, never
+    reused); a plugin's values are by key, so it gets them back.
+  * `takeSnapshot()` moves the worker-loaded library state (songs, paths,
+    provided keys) out as a plain-data `Snapshot` for the main-thread
+    instance, without copying it.
 * `MonitoredLibrary` (backend, owned by `MainWindow`)
   * Watched folders (`library_folders`) and the songs found under them
     (`monitored_files`), kept in sync by scans (`LibraryScanner` on a worker
@@ -262,7 +268,7 @@ are the Qt frontend.
     created and loaded before insertion, and its address stays stable).
   * Owns playlist metadata behavior (`playlists` table): load, create/delete playlist rows, rename, persist/repair `tab_order`. Refuses to remove the last playlist.
   * `loadAll()` emits no signals; after it, `playlistCreated` / `playlistAboutToBeRemoved` / `playlistRemoved` / `playlistRenamed` report changes. `playlistAboutToBeRemoved` is sent while the `Playlist` still exists.
-  * `notifySongChanged(songPk)` / `notifySongsChanged(songPks)` update autoplaylist rows and refresh a song's rows in every playlist after non-playlist song writes (play stats, cloud sync, Song Properties, `Playlist::songsRefreshed`, and the songs `MonitoredLibrary` added or re-read: `songsEntered`, `songsUpdated`).
+  * `notifySongChanged(songPk)` / `notifySongsChanged(songPks)` update autoplaylist rows and refresh a song's rows in every playlist after non-playlist song writes (a plugin's provided values, Song Properties, `Playlist::songsRefreshed`, and the songs `MonitoredLibrary` added or re-read: `songsEntered`, `songsUpdated`).
   * Autoplaylists (`createAutoPlaylist`, `setAutoPlaylistExpression`, `reloadAutoPlaylistExpressions`): their rows are the `MonitoredLibrary` songs matching a `parseSongFilter` expression, filled in `filepath` order, with songs that start matching appended. An invalid expression gives no rows and `autoPlaylistError`. See [monitored-library.md](monitored-library.md).
   * `releaseSongs` is the only place that deletes songs: it removes from `SongLibrary` the songs that are in no manual playlist and not held by `MonitoredLibrary`. It runs on each playlist's `songPksRemoved` (Remove from Playlist, Clear Playlist), in `removePlaylist` (Remove Tab), and on `MonitoredLibrary::songsLeft`. Then emits `songsRemovedFromLibrary(songPks)`.
 * `PlaylistTabs` (frontend)
@@ -338,11 +344,11 @@ The UI for one song: viewing and editing its tags, and revealing its file.
 Each has its own doc; the classes are listed here with where they sit.
 
 * Playback ([playback.md](playback.md)): `PlaybackQueue`, `PlaybackManager`,
-  the playback policies, `PlayCompletionTracker` and `PlaybackController`
-  (backend); `PlaybackBackendManager` and the `AudioPlayer` backends
+  the playback policies and `PlaybackController` (backend);
+  `PlaybackBackendManager` and the `AudioPlayer` backends
   (`QtAudioPlayer`, `GstAudioPlayer`), and ReplayGain (`ReplayGainTags`).
-  The same doc covers stopping and skipping unplayable songs, seeking, play
-  counting, the OS media controls (`ISystemMediaInterface`,
+  The same doc covers stopping and skipping unplayable songs, seeking, the
+  OS media controls (`ISystemMediaInterface`,
   `SystemMediaPresenter`) and the GStreamer plugin registry and scanner
   setup on Windows.
 * Info panel ([info-panel.md](info-panel.md)): `SongInfoPresenter`,
@@ -353,7 +359,9 @@ Each has its own doc; the classes are listed here with where they sit.
   `LyricsSettingsPage`, in `src/plugins/lyrics/`) in
   [plugins/lyrics.md](plugins/lyrics.md), and the A-B Repeat plugin
   (`ABRepeat`, in `src/plugins/abrepeat/`) in
-  [plugins/abrepeat.md](plugins/abrepeat.md).
+  [plugins/abrepeat.md](plugins/abrepeat.md). The Play Stats plugin
+  (`PlayStats`, `PlayStatsStore`, the cloud sync classes, in
+  `src/plugins/playstats/`) is in [plugins/playstats.md](plugins/playstats.md).
 * `SystemMediaPresenter`, `CoverArtPresenter` and `NowPlayingPresenter` do not
   know about each other; `MainWindow` drives them from `PlaybackController`'s
   signals.
@@ -376,20 +384,26 @@ is ready.
 
 * File-backed startup keeps library-dependent actions disabled until playlist
   hydration finishes and shows `Loading library...` in the status bar.
-* `loadLibrary` (libraryloader.h) loads the custom columns and the songs. For a
-  file-backed database, a worker thread creates its own `ColumnRegistry`,
-  `DatabaseManager`, and `SongLibrary` with a separate SQLite connection and
-  returns a `SongLibrary::Snapshot`; on the main thread `loadLibrary` then
-  loads the custom columns into the app's `ColumnRegistry`, applies the
-  snapshot to the app-owned `SongLibrary`, and calls back. The watcher for the
-  worker is a child of `MainWindow`, so destroying the window during the load
-  drops the result.
+* `loadLibrary` (libraryloader.h) loads the custom columns, the songs and the
+  values of the plugins' song fields. For a file-backed database, a worker
+  thread creates its own `ColumnRegistry`, `DatabaseManager`, and
+  `SongLibrary` with a separate SQLite connection, computes each song's keys,
+  fills the values each provider's `allValues` read in a task of its own
+  beside the songs' load, and returns a `SongLibrary::Snapshot` (moved, not
+  copied); on the main thread `loadLibrary` then loads the custom columns
+  into the app's `ColumnRegistry`, applies the snapshot to the app-owned
+  `SongLibrary` (which refreshes the keys marked stale during the load), and
+  calls back. The watcher for the worker is a child of `MainWindow`, so
+  destroying the window during the load drops the result; `~MainWindow`
+  waits for the worker (the future `loadLibrary` returns), since it calls
+  the plugins' providers, before the plugins shut down
+  ([plugins/playstats.md](plugins/playstats.md), "Startup", "Lifetime").
 * In the callback, `MainWindow` loads and watches the monitored library
   (`MonitoredLibrary::load()`) and loads playlists (`PlaylistCollection::loadAll()`),
   creates playlist tabs/models, re-enables actions, restores the normal
   status-bar message (through `NowPlayingPresenter::reloadExpressions()`),
-  starts the monitored library scan in the background
-  (`MonitoredLibrary::rescan()`), and starts cloud sync.
+  and starts the monitored library scan in the background
+  (`MonitoredLibrary::rescan()`).
 * Custom (`attr:`) columns enter `ColumnRegistry` through
   `ColumnRegistry::loadDynamicColumns` in `loadLibrary`, but the display
   expressions are parsed earlier, when the `MainWindow` constructor creates
@@ -401,8 +415,8 @@ is ready.
   See [expressions.md](expressions.md) for how display expressions resolve
   fields.
 * Startup-sensitive handlers are guarded in addition to disabling actions, so
-  direct/system-media requests cannot play, seek, load songs, or manually rebase
-  before playlist hydration finishes.
+  direct/system-media requests cannot play, seek or load songs before playlist
+  hydration finishes.
 * `:memory:` databases keep the synchronous path for tests because separate
   SQLite in-memory connections do not share state: `loadLibrary` loads on the
   calling thread and calls back before it returns.
@@ -411,7 +425,7 @@ is ready.
 
 How files become songs, and how songs are refreshed after their tags change.
 
-* Ingest path: parse file -> evaluate computed fields -> generate identity key -> upsert song -> sync dynamic/computed attributes.
+* Ingest path: parse file -> evaluate computed fields -> upsert song -> sync dynamic/computed attributes -> file the song under each provided source's key, whose values are read at the next refresh.
   Adding files to a playlist (open, add folder) goes through
   `Playlist::addFiles(...)`, which runs this path for each file and then
   appends the rows. A monitored library scan parses on a worker thread
@@ -504,11 +518,13 @@ What is saved per playlist, and which class writes each table.
 * Qt UI/model code runs on the main thread, and so do backend playlist and
   playback operations; their signals use direct connections, except
   GStreamer's bus messages on macOS and Windows (below).
-* Cloud sync HTTP functions run synchronously on a coordinator-owned worker
-  thread; results that touch `SongLibrary` or UI models are delivered back to
-  the main thread.
-* Cloud sync worker tasks are serialized through the worker thread event queue.
-  See [cloud-sync.md](cloud-sync.md) for the sync design.
+* Cloud sync (the Play Stats plugin) runs its HTTP functions synchronously
+  on a coordinator-owned worker thread; results are delivered back to the
+  main thread, serialized through the worker thread's event queue. See
+  [cloud-sync.md](cloud-sync.md).
+* The startup load's worker calls the plugins' song field providers
+  (`songKey`, `allValues`), which read with SQLite connections of their own
+  ([plugins/playstats.md](plugins/playstats.md), "Threading contract").
 * Monitored library scans walk and parse files on a `QtConcurrent` worker
   with copies of their input; `MonitoredLibrary` applies the result on the
   main thread in batches, one transaction each. One scan runs at a time.
