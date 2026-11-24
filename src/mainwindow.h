@@ -19,6 +19,7 @@
 #include <QString>
 
 class NowPlayingPresenter;
+class PanelLayoutView;
 class PlaylistSearchDialog;
 class PluginManager;
 class SettingsDialog;
@@ -44,7 +45,6 @@ public:
 
 protected:
   bool event(QEvent *event) override;
-  void resizeEvent(QResizeEvent *event) override;
 
 private:
   void positionChanged(qint64 progress);
@@ -57,9 +57,6 @@ private:
   // Selects and scrolls to the row that started playing, if Cursor follows
   // playback is on.
   void navigateIndex(int row, Playlist *);
-  // Restores the splitters' sizes and saves them when dragged; keeps the
-  // cover sized to its pane.
-  void setUpSplitter();
   void initSettings();
   // Creates the audio backend and connects the playback controller's signals
   // to the window.
@@ -77,9 +74,10 @@ private:
   // Refreshes the plugins' song fields when their values change.
   void setUpProvidedFields();
   void setUpMenuBar();
-  // Adds the plugins' panels to the info panel, restores and saves its
-  // current tab, and handles the Properties tab's buttons.
-  void setUpInfoTabs();
+  // Registers the layout's elements (the plugins' panels among them), builds
+  // the saved or default layout, saves its changes, and wires View > Edit
+  // Layout and Reset Layout (docs/layout-editing.md).
+  void setUpLayout();
   // Adds the plugins' menus to the Playback menu.
   void setUpPluginMenus();
   void openLibrarySearchDialog();
@@ -104,6 +102,8 @@ private:
   SpectrumPresenter *spectrum_ = nullptr;
   SystemMediaPresenter *systemMedia_ = nullptr;
   NowPlayingPresenter *nowPlaying_ = nullptr;
+  // A child of ui->layoutHost (see PanelLayoutView).
+  PanelLayoutView *layoutView_ = nullptr;
   QActionGroup *playbackOrderMenuActionGroup;
   // The startup load's worker; finished once it ran.
   QFuture<void> libraryLoad_;

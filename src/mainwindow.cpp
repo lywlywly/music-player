@@ -6,8 +6,11 @@
 #include "gstaudioplayer.h"
 #include "imenuprovider.h"
 #include "ipanelprovider.h"
+#include "layout/panellayouteditor.h"
+#include "layout/panellayoutview.h"
 #include "libraryloader.h"
 #include "librarysearchdialog.h"
+#include "mainwindowlayout.h"
 #include "nowplayingpresenter.h"
 #include "playbackbuttonstyle.h"
 #include "playlistdialogs.h"
@@ -26,6 +29,7 @@
 #include <QEvent>
 #include <QKeySequence>
 #include <QLabel>
+#include <QMessageBox>
 #include <QResource>
 #include <QSettings>
 #include <QStandardPaths>
@@ -44,13 +48,8 @@ constexpr const char *kPlaybackFollowsCursorSettingsKey =
     "playback/playback_follows_cursor";
 constexpr const char *kCursorFollowsPlaybackSettingsKey =
     "playback/cursor_follows_playback";
-constexpr const char *kInfoTabSettingsKey = "infopanel/current_tab";
-// QSplitter::saveState of the splitter between the info panel and the
-// playlists, and of the one between the info panel's tabs and the cover.
-constexpr const char *kMainSplitterSettingsKey = "layout/main_splitter";
-constexpr const char *kInfoSplitterSettingsKey = "layout/info_splitter";
-constexpr const char *kInfoTabProperties = "properties";
-constexpr const char *kInfoTabSpectrum = "spectrum";
+// The central area's layout, as PanelLayout::toJson (docs/layout-editing.md).
+constexpr const char *kLayoutSettingsKey = "layout/tree";
 
 int clampVolumePercent(int volumePercent) {
   return std::clamp(volumePercent, kMinVolumePercent, kMaxVolumePercent);
@@ -128,9 +127,9 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
   playlists_ = new PlaylistCollection(songLibrary, databaseManager_,
                                       monitoredLibrary_, this);
   playback_ = new PlaybackController(songLibrary, *playlists_, this);
-  coverArt_ = new CoverArtPresenter(ui->label, this);
-  // A child created after ui->setupUi, so the plugin panels in the info panel
-  // are destroyed before it shuts the plugins down.
+  coverArt_ = new CoverArtPresenter(ui->coverLabel, this);
+  // A child created after ui->setupUi, so the plugin panels in the layout are
+  // destroyed before it shuts the plugins down.
   plugins_ =
       new PluginManager(*playback_, pluginFolder(), pluginDataRoot, this);
   // Before NowPlayingPresenter parses the display expressions, so the
@@ -139,6 +138,15 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
   setUpProvidedFields();
   songInfo_ = new SongInfoPresenter(ui->songInfoPanel, songLibrary,
                                     monitoredLibrary_, columnRegistry_, this);
+  connect(ui->songInfoPanel, &SongInfoPanel::revealRequested, this,
+          [this](int songPk) {
+            revealSongFile(this, songLibrary.getSongByPK(songPk));
+          });
+  connect(ui->songInfoPanel, &SongInfoPanel::editPropertiesRequested, this,
+          [this](int songPk) {
+            openSongProperties(this, songPk, songLibrary, columnRegistry_,
+                               *playlists_);
+          });
   spectrum_ = new SpectrumPresenter(ui->spectrumWidget, this);
   // Only the GStreamer backend feeds the spectrum everywhere; the Qt one
   // does only where Qt has its FFmpeg media backend (docs/spectrum.md).
@@ -156,7 +164,7 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
   applyDisplayThemeMode(loadDisplayThemeModeSetting());
   setUpPlaybackButtonIcons(ui);
   setUpMenuBar();
-  setUpInfoTabs();
+  setUpLayout();
   setUpPluginMenus();
   setUpPlaylist();
   setUpLibraryScanStatus();
@@ -164,7 +172,6 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
   setUpPlayback();
   initVolumeControl();
   setUpPlaybackActions();
-  setUpSplitter();
 }
 
 void MainWindow::setUpProvidedFields() {
@@ -249,50 +256,65 @@ void MainWindow::setUpPluginMenus() {
   }
 }
 
-void MainWindow::setUpInfoTabs() {
-  // The loaded plugins' panels come first, in load order, each named by its
-  // plugin's id. Only a Loaded entry has a root object; qobject_cast of the
-  // others' null root is null.
-  std::vector<std::pair<QWidget *, QString>> tabs;
+void MainWindow::setUpLayout() {
+  layoutView_ =
+      new PanelLayoutView(ui->layoutHost, ui->layoutElements,
+                          tr("Empty. Turn on View > Edit Layout, then "
+                             "right-click here to insert a panel."));
+  layoutView_->addElement(MainWindowLayout::kPlaylist, tr("Playlist"),
+                          ui->playlistTabs);
+  layoutView_->addElement(MainWindowLayout::kProperties, tr("Properties"),
+                          ui->songInfoPanel);
+  layoutView_->addElement(MainWindowLayout::kSpectrum, tr("Spectrum"),
+                          ui->spectrumWidget);
+  layoutView_->addElement(MainWindowLayout::kCover, tr("Cover Art"),
+                          ui->coverLabel);
+  // The loaded plugins' panels, in load order, each named by its plugin's id.
+  // A plugin not loaded only names its node, if the layout has one. Only a
+  // Loaded entry has a root object; qobject_cast of the others' null root is
+  // null. The panels are created in layoutElements, part of the UI, so they
+  // are destroyed before plugins_ shuts the plugins down.
   for (const PluginEntry &entry : plugins_->plugins()) {
+    if (entry.state != PluginEntry::State::Loaded && !entry.id.isEmpty()) {
+      layoutView_->setUnavailableTitle(entry.id, entry.name);
+    }
     auto *provider = qobject_cast<IPanelProvider *>(entry.root);
     if (provider == nullptr) {
       continue;
     }
-    QWidget *panel = provider->createPanel(ui->infoTabs);
-    ui->infoTabs->insertTab(static_cast<int>(tabs.size()), panel,
-                            provider->panelTitle());
-    tabs.emplace_back(panel, entry.id);
+    layoutView_->addElement(entry.id, provider->panelTitle(),
+                            provider->createPanel(ui->layoutElements));
   }
-  tabs.emplace_back(ui->propertiesTab, kInfoTabProperties);
-  tabs.emplace_back(ui->spectrumTab, kInfoTabSpectrum);
-  // Inserting before the current tab keeps it current; start from the first
-  // tab unless another one is saved. A saved tab with no panel (its plugin is
-  // disabled) leaves the first tab current and the key as it is, so that tab
-  // is current again once the plugin is enabled: the key is written only
-  // when the user changes tabs.
-  ui->infoTabs->setCurrentIndex(0);
-  const QString savedTab = QSettings().value(kInfoTabSettingsKey).toString();
-  for (const auto &[tab, name] : tabs) {
-    if (savedTab == name) {
-      ui->infoTabs->setCurrentWidget(tab);
-    }
+
+  const PanelLayout defaultLayout = MainWindowLayout::defaultLayout();
+  const QVariant saved = QSettings().value(kLayoutSettingsKey);
+  std::optional<PanelLayout> layout =
+      PanelLayout::fromJson(saved.toString().toUtf8());
+  if (saved.isValid() && !layout) {
+    qWarning("MainWindow: %s is not a valid layout; using the default",
+             kLayoutSettingsKey);
   }
-  connect(ui->infoTabs, &QTabWidget::currentChanged, this, [this, tabs]() {
-    for (const auto &[tab, name] : tabs) {
-      if (ui->infoTabs->currentWidget() == tab) {
-        QSettings().setValue(kInfoTabSettingsKey, name);
-      }
-    }
-  });
-  connect(ui->songInfoPanel, &SongInfoPanel::revealRequested, this,
-          [this](int songPk) {
-            revealSongFile(this, songLibrary.getSongByPK(songPk));
-          });
-  connect(ui->songInfoPanel, &SongInfoPanel::editPropertiesRequested, this,
-          [this](int songPk) {
-            openSongProperties(this, songPk, songLibrary, columnRegistry_,
-                               *playlists_);
+  layoutView_->setLayout(layout.value_or(defaultLayout));
+
+  const auto save = [this]() {
+    QSettings().setValue(kLayoutSettingsKey,
+                         QString::fromUtf8(layoutView_->layout().toJson()));
+  };
+  connect(layoutView_, &PanelLayoutView::layoutChanged, this, save);
+  auto *editor = new PanelLayoutEditor(*layoutView_);
+  connect(editor, &PanelLayoutEditor::layoutChanged, this, save);
+  connect(ui->actionEdit_layout, &QAction::toggled, editor,
+          &PanelLayoutEditor::setEnabled);
+  connect(ui->actionReset_layout, &QAction::triggered, this,
+          [this, defaultLayout, save]() {
+            if (QMessageBox::question(
+                    this, tr("Reset Layout"),
+                    tr("Replace the layout with the default one? Your "
+                       "changes to it are lost.")) != QMessageBox::Yes) {
+              return;
+            }
+            layoutView_->setLayout(defaultLayout);
+            save();
           });
 }
 
@@ -502,28 +524,6 @@ void MainWindow::setUpPlaybackActions() {
           [this]() { playback_->seek(ui->horizontalSlider->value()); });
 }
 
-void MainWindow::setUpSplitter() {
-  // With nothing saved, the info panel starts at a quarter of the window, so
-  // its width does not depend on its panels' size hints (docs/architecture.md).
-  // The splitter scales these to its width; both are above the panes' minimum
-  // widths, which would otherwise replace them.
-  ui->splitter->setSizes({320, 960});
-  QSettings settings;
-  const std::pair<QSplitter *, const char *> splitters[] = {
-      {ui->splitter, kMainSplitterSettingsKey},
-      {ui->splitter_2, kInfoSplitterSettingsKey},
-  };
-  for (const auto &[splitter, key] : splitters) {
-    splitter->restoreState(settings.value(key).toByteArray());
-    // Saved when the user drags it.
-    connect(splitter, &QSplitter::splitterMoved, this, [splitter, key]() {
-      QSettings().setValue(key, splitter->saveState());
-    });
-    connect(splitter, &QSplitter::splitterMoved, coverArt_,
-            &CoverArtPresenter::updateCoverSize);
-  }
-}
-
 void MainWindow::initVolumeControl() {
   QSettings settings;
   const int savedVolume = clampVolumePercent(
@@ -568,11 +568,6 @@ bool MainWindow::event(QEvent *event) {
     return true;
   }
   return QMainWindow::event(event);
-}
-
-void MainWindow::resizeEvent(QResizeEvent *event) {
-  QMainWindow::resizeEvent(event);
-  coverArt_->updateCoverSize();
 }
 
 void MainWindow::durationChanged(qint64 newDuration) {

@@ -4,8 +4,9 @@ Status: implemented.
 
 ## Summary
 
-* A third tab, **Spectrum**, in the info panel at the top left (next to
-  Lyrics and Properties; see [info-panel.md](info-panel.md)).
+* A **Spectrum** panel, one of the info panels, inserted into the layout from
+  View > Edit Layout (see [info-panel.md](info-panel.md) and
+  [layout-editing.md](layout-editing.md)).
 * It shows the spectrum of the playing song as 20 bars, log-spaced from 50 Hz
   to 20 kHz, on a 0 dB to -60 dB scale, with peak marks.
 * The analysis and the widget are a separate module, `src/spectrum/`, built
@@ -115,9 +116,10 @@ swapped later.
 * `setBandLabels(labels, floorDb)`, `setLevels(levels, peaks)`,
   `setMessage(text)` (drawn over the bars when not empty), and their
   getters for tests.
-* Emits `shownChanged(bool)` from `showEvent` / `hideEvent`. In a
-  `QTabWidget` only the current page is shown, so this tells whether the
-  Spectrum tab is in front.
+* Emits `shownChanged(bool)` from `showEvent` / `hideEvent`, so it tells
+  whether the panel can be seen: it is hidden while out of the layout, and
+  on a tab that is not in front (a `QTabWidget` shows only its current
+  page).
 
 ### `SpectrumPresenter`
 
@@ -193,9 +195,10 @@ swapped later.
 
 ### `MainWindow`, `mainwindow.ui`
 
-* A third page `spectrumTab` with `spectrumWidget` (`SpectrumWidget`,
-  promoted, header `spectrum/spectrumwidget.h`).
-* `infopanel/current_tab` gains `spectrum`.
+* `spectrumWidget` (`SpectrumWidget`, promoted, header
+  `spectrum/spectrumwidget.h`) is the layout's `spectrum` element, outside
+  the default layout ([layout-editing.md](layout-editing.md)). Outside the
+  layout it waits hidden, so it offers no tap.
 * Creates `SpectrumPresenter` and sets its no-audio message; connects
   `tapChanged` to `PlaybackController::setPcmTap`, `songStarted` to
   `Playing`, `playbackStateChanged` to the matching state, and
@@ -238,8 +241,9 @@ send no buffers.
   without a start time is skipped.
 * `tst_playbackcontroller`: the tap moves to the new player on a backend
   switch.
-* `tst_mainwindow`: the Spectrum tab exists and is restored; the player has
-  the tap only while the Spectrum widget is shown.
+* `tst_mainwindow`: the Spectrum panel starts outside the default layout, and
+  is a tab of a saved layout; the player has the tap only while the Spectrum
+  widget is shown.
 * `tst_gstaudioplayer`: a 24-bit WAV tone played through the real
   `GstAudioPlayer` at volume 0 fills the tap at the reported position, in
   its band at the expected level; after a seek, at the new position; stop

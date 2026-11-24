@@ -2,11 +2,13 @@
 
 Status: implemented.
 
-The Lyrics info panel tab: the playing song's lyrics, with the line for the
-play position highlighted and centered, a click on a line to play from it, and
-a Settings page for the font and highlight color. The plugin system it is
-built on is in [plugin-system.md](plugin-system.md); the info panel's tabs in
-[info-panel.md](../info-panel.md).
+The Lyrics panel (an info panel, inserted into the layout from View > Edit
+Layout): the playing song's lyrics, with the line for the play position highlighted and
+centered, a click on a line to play from it, and a Settings page for the font
+and highlight color. The plugin system it is built on is in
+[plugin-system.md](plugin-system.md); the info panels in
+[info-panel.md](../info-panel.md), and the layout that places the panel in
+[layout-editing.md](../layout-editing.md).
 
 ## Code: `src/plugins/lyrics/`
 

@@ -44,6 +44,8 @@ void TestCoverArtPresenter::
   QVERIFY(writeWavWithCover(wav, png, "image/png"));
   QLabel label;
   label.resize(100, 100);
+  // Shown, so a resize is delivered at once.
+  label.show();
   CoverArtPresenter presenter(&label);
   QSignalSpy spy(&presenter, &CoverArtPresenter::artworkChanged);
 
@@ -55,15 +57,14 @@ void TestCoverArtPresenter::
   const QPixmap shown = label.pixmap();
   QCOMPARE(shown.deviceIndependentSize().toSize(), QSize(100, 50));
 
-  // A resize rescales the cover.
+  // A resize of the label rescales the cover.
   label.resize(50, 50);
-  presenter.updateCoverSize();
   QCOMPARE(label.pixmap().deviceIndependentSize().toSize(), QSize(50, 25));
 
   presenter.clear();
   QVERIFY(label.pixmap().isNull());
   // With no cover, a resize shows nothing.
-  presenter.updateCoverSize();
+  label.resize(80, 80);
   QVERIFY(label.pixmap().isNull());
 }
 

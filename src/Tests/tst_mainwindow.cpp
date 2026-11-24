@@ -1,6 +1,7 @@
 #include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
+#include <QContextMenuEvent>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QKeySequence>
@@ -8,6 +9,7 @@
 #include <QLineEdit>
 #include <QMainWindow>
 #include <QMenu>
+#include <QMessageBox>
 #include <QObject>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -24,6 +26,7 @@
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTextEdit>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QUrl>
 #include <QUuid>
@@ -36,6 +39,7 @@
 #include "../dummysystemmediainterface.h"
 #include "../librarysearchdialog.h"
 #include "../mainwindow.h"
+#include "../mainwindowlayout.h"
 #include "../monitoredlibrary.h"
 #include "../playbackbackendmanager.h"
 #include "../playlistcollection.h"
@@ -102,6 +106,32 @@ QString statusAt(const Playlist *playlist, int row, int statusCol) {
   }
   return model->data(model->index(row, statusCol), Qt::DisplayRole).toString();
 }
+
+// The default layout with Lyrics (from the plugin in Tests/plugins),
+// Properties and Spectrum in tabs in place of Properties.
+PanelLayout infoTabsLayout() {
+  PanelLayout::Node tabs{.kind = PanelLayout::Kind::Tabs};
+  for (const char *id :
+       {"lyrics", MainWindowLayout::kProperties, MainWindowLayout::kSpectrum}) {
+    tabs.children.push_back(
+        {.kind = PanelLayout::Kind::Element, .elementId = id});
+    tabs.tabTitles.emplace_back();
+  }
+  PanelLayout layout = MainWindowLayout::defaultLayout();
+  layout.take({0, 0});
+  layout.paste({0, 0}, std::move(tabs));
+  return layout;
+}
+
+// The tab widget whose page holds widget, or nullptr.
+QTabWidget *tabWidgetOf(QWidget *widget) {
+  for (; widget != nullptr; widget = widget->parentWidget()) {
+    if (auto *tabs = qobject_cast<QTabWidget *>(widget)) {
+      return tabs;
+    }
+  }
+  return nullptr;
+}
 } // namespace
 
 class TestMainWindow : public QObject {
@@ -145,11 +175,13 @@ private slots:
   void closingDuringTheLoad_waitsForItBeforePluginsShutDown();
 
   void play_allFilesMissing_stopsAndReportsError();
-  void infoTabs_restoreAndShowSelectedSong();
+  void layout_defaultAndSavedTabsAndShowSelectedSong();
   void spectrum_tapGoesToThePlayerWhileShown();
-  void splitters_startAtAQuarterAndRestoreDraggedSizes();
+  void layout_startsAtAQuarterAndRestoresDraggedSizes();
+  void layout_resetAndInvalidSavedLayoutGiveTheDefault();
+  void layout_editModeIsWiredAndItsEditsAreSaved();
   void settings_pluginPageAppliesToItsPanelOnOk();
-  void plugins_disabledPluginsHaveNoTabPageOrMenu();
+  void plugins_disabledPluginsHaveNoPanelPageOrMenu();
   void abRepeatMenu_loopsThePlayingSong();
 
 private:
@@ -1258,8 +1290,33 @@ void TestMainWindow::play_allFilesMissing_stopsAndReportsError() {
            ISystemMediaInterface::PlaybackState::Stopped);
 }
 
-void TestMainWindow::infoTabs_restoreAndShowSelectedSong() {
-  auto *infoTabs = window_->findChild<QTabWidget *>("infoTabs");
+void TestMainWindow::layout_defaultAndSavedTabsAndShowSelectedSong() {
+  // The default layout: Properties above the cover, beside the playlist, no
+  // tabs; Lyrics and Spectrum wait in the store.
+  auto *panel = window_->findChild<SongInfoPanel *>("songInfoPanel");
+  QVERIFY(panel != nullptr);
+  auto *info = qobject_cast<QSplitter *>(panel->parentWidget());
+  QVERIFY(info != nullptr);
+  QCOMPARE(info->orientation(), Qt::Vertical);
+  QCOMPARE(info->widget(0), panel);
+  QCOMPARE(info->widget(1), window_->findChild<QWidget *>("coverLabel"));
+  auto *root = qobject_cast<QSplitter *>(info->parentWidget());
+  QVERIFY(root != nullptr);
+  QCOMPARE(root->orientation(), Qt::Horizontal);
+  QCOMPARE(root->widget(1), window_->findChild<QWidget *>("playlistTabs"));
+  QCOMPARE(tabWidgetOf(panel), nullptr);
+  auto *store = window_->findChild<QWidget *>("layoutElements");
+  QCOMPARE(window_->findChild<QWidget *>("lyricsPanel")->parentWidget(), store);
+  QCOMPARE(
+      window_->findChild<SpectrumWidget *>("spectrumWidget")->parentWidget(),
+      store);
+
+  // A saved layout with tabs.
+  QSettings().setValue("layout/tree",
+                       QString::fromUtf8(infoTabsLayout().toJson()));
+  recreateWindow();
+  panel = window_->findChild<SongInfoPanel *>("songInfoPanel");
+  QTabWidget *infoTabs = tabWidgetOf(panel);
   QVERIFY(infoTabs != nullptr);
   QCOMPARE(infoTabs->count(), 3);
   QCOMPARE(infoTabs->tabText(0), QString("Lyrics"));
@@ -1268,14 +1325,15 @@ void TestMainWindow::infoTabs_restoreAndShowSelectedSong() {
   // The lyrics plugin's panel, loaded from Tests/plugins.
   QCOMPARE(infoTabs->currentWidget()->objectName(), QString("lyricsPanel"));
 
+  // A tab switch is saved with the layout.
   infoTabs->setCurrentIndex(1);
   recreateWindow();
-  infoTabs = window_->findChild<QTabWidget *>("infoTabs");
-  QCOMPARE(infoTabs->currentIndex(), 1);
+  panel = window_->findChild<SongInfoPanel *>("songInfoPanel");
+  infoTabs = tabWidgetOf(panel);
+  QVERIFY(infoTabs != nullptr);
+  QCOMPARE(infoTabs->currentWidget(), panel);
 
   auto *tabs = window_->findChild<PlaylistTabs *>("playlistTabs");
-  auto *panel = window_->findChild<SongInfoPanel *>("songInfoPanel");
-  QVERIFY(panel != nullptr);
   QVERIFY(panel->info().isEmpty());
 
   QTemporaryDir songDir;
@@ -1299,17 +1357,6 @@ void TestMainWindow::infoTabs_restoreAndShowSelectedSong() {
   auto *dialog = window_->findChild<SongPropertiesDialog *>();
   QVERIFY(dialog != nullptr);
   delete dialog;
-
-  infoTabs->setCurrentIndex(2);
-  recreateWindow();
-  infoTabs = window_->findChild<QTabWidget *>("infoTabs");
-  QCOMPARE(infoTabs->currentIndex(), 2);
-  // A plugin's tab is saved by the plugin's id.
-  infoTabs->setCurrentIndex(0);
-  QCOMPARE(QSettings().value("infopanel/current_tab").toString(),
-           QString("lyrics"));
-  recreateWindow();
-  QCOMPARE(window_->findChild<QTabWidget *>("infoTabs")->currentIndex(), 0);
 }
 
 void TestMainWindow::settings_pluginPageAppliesToItsPanelOnOk() {
@@ -1338,23 +1385,31 @@ void TestMainWindow::settings_pluginPageAppliesToItsPanelOnOk() {
   QCOMPARE(text->font().pointSize(), 30);
 }
 
-void TestMainWindow::plugins_disabledPluginsHaveNoTabPageOrMenu() {
-  {
-    QSettings settings;
-    settings.setValue("plugins/disabled",
-                      QStringList{"lyrics", "abrepeat", "playstats"});
-    settings.setValue("infopanel/current_tab", "lyrics");
-  }
+void TestMainWindow::plugins_disabledPluginsHaveNoPanelPageOrMenu() {
+  QSettings().setValue("plugins/disabled",
+                       QStringList{"lyrics", "abrepeat", "playstats"});
   recreateWindow();
 
-  // No Lyrics tab; the first tab is current, and the saved tab is kept for
-  // when the plugin is enabled again.
-  auto *infoTabs = window_->findChild<QTabWidget *>("infoTabs");
-  QCOMPARE(infoTabs->count(), 2);
-  QCOMPARE(infoTabs->tabText(0), QString("Properties"));
-  QCOMPARE(infoTabs->currentIndex(), 0);
-  QCOMPARE(QSettings().value("infopanel/current_tab").toString(),
-           QString("lyrics"));
+  QCOMPARE(window_->findChild<QWidget *>("lyricsPanel"), nullptr);
+
+  // A saved layout keeps the Lyrics tab's place, with a label for the panel,
+  // and saves it again, for when the plugin is enabled again.
+  QSettings().setValue("layout/tree",
+                       QString::fromUtf8(infoTabsLayout().toJson()));
+  recreateWindow();
+  QTabWidget *infoTabs =
+      tabWidgetOf(window_->findChild<SongInfoPanel *>("songInfoPanel"));
+  QVERIFY(infoTabs != nullptr);
+  QCOMPARE(infoTabs->count(), 3);
+  QCOMPARE(infoTabs->tabText(0), QString("Lyrics"));
+  auto *label = qobject_cast<QLabel *>(infoTabs->widget(0));
+  QVERIFY(label != nullptr);
+  QCOMPARE(label->text(), QString("Lyrics is not available"));
+  infoTabs->setCurrentIndex(2);
+  QVERIFY(QSettings()
+              .value("layout/tree")
+              .toString()
+              .contains(QStringLiteral(R"("id":"lyrics")")));
 
   // No page under Plugins.
   window_->findChild<QAction *>("actionPreferences")->trigger();
@@ -1431,18 +1486,25 @@ void TestMainWindow::abRepeatMenu_loopsThePlayingSong() {
   QTRY_COMPARE(slider->value(), 65000);
 }
 
-void TestMainWindow::splitters_startAtAQuarterAndRestoreDraggedSizes() {
+void TestMainWindow::layout_startsAtAQuarterAndRestoresDraggedSizes() {
+  // The default layout's root splitter, and the one between the info tabs and
+  // the cover.
+  const auto findSplitters = [this]() {
+    auto *root = window_->findChild<QWidget *>("layoutHost")
+                     ->findChild<QSplitter *>(Qt::FindDirectChildrenOnly);
+    return std::pair(root, root ? qobject_cast<QSplitter *>(root->widget(0))
+                                : nullptr);
+  };
   window_->show();
-  auto *splitter = window_->findChild<QSplitter *>("splitter");
+  auto [splitter, infoSplitter] = findSplitters();
   QVERIFY(splitter != nullptr);
+  QVERIFY(infoSplitter != nullptr);
   QTRY_VERIFY(splitter->sizes().at(0) > 0);
   // With nothing saved, the info panel gets a quarter, not its size hint.
   const int total = splitter->sizes().at(0) + splitter->sizes().at(1);
   QVERIFY(qAbs(splitter->sizes().at(0) - total / 4) <= 2);
 
   // Drags of both splitters are saved and restored with the next window.
-  auto *infoSplitter = window_->findChild<QSplitter *>("splitter_2");
-  QVERIFY(infoSplitter != nullptr);
   const int infoTotal =
       infoSplitter->sizes().at(0) + infoSplitter->sizes().at(1);
   splitter->setSizes({500, total - 500});
@@ -1451,10 +1513,76 @@ void TestMainWindow::splitters_startAtAQuarterAndRestoreDraggedSizes() {
   emit infoSplitter->splitterMoved(300, 1);
   recreateWindow();
   window_->show();
-  splitter = window_->findChild<QSplitter *>("splitter");
-  infoSplitter = window_->findChild<QSplitter *>("splitter_2");
+  std::tie(splitter, infoSplitter) = findSplitters();
   QTRY_COMPARE(splitter->sizes().at(0), 500);
   QTRY_COMPARE(infoSplitter->sizes().at(0), 300);
+}
+
+void TestMainWindow::layout_resetAndInvalidSavedLayoutGiveTheDefault() {
+  // A saved layout of the playlist alone: Properties waits in the store.
+  const PanelLayout playlistOnly(
+      PanelLayout::Node{.kind = PanelLayout::Kind::Element,
+                        .elementId = MainWindowLayout::kPlaylist});
+  QSettings().setValue("layout/tree", QString::fromUtf8(playlistOnly.toJson()));
+  recreateWindow();
+  auto *panel = window_->findChild<SongInfoPanel *>("songInfoPanel");
+  QCOMPARE(panel->parentWidget(),
+           window_->findChild<QWidget *>("layoutElements"));
+
+  // Reset Layout asks first.
+  QTimer::singleShot(0, []() {
+    if (auto *box =
+            qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
+      box->button(QMessageBox::Yes)->click();
+    }
+  });
+  window_->findChild<QAction *>("actionReset_layout")->trigger();
+  QVERIFY(qobject_cast<QSplitter *>(panel->parentWidget()) != nullptr);
+  QCOMPARE(QSettings().value("layout/tree").toString().toUtf8(),
+           MainWindowLayout::defaultLayout().toJson());
+
+  // A saved layout that does not parse gives the default too.
+  QSettings().setValue("layout/tree", "{");
+  QTest::ignoreMessage(
+      QtWarningMsg,
+      "MainWindow: layout/tree is not a valid layout; using the default");
+  recreateWindow();
+  panel = window_->findChild<SongInfoPanel *>("songInfoPanel");
+  QVERIFY(qobject_cast<QSplitter *>(panel->parentWidget()) != nullptr);
+}
+
+void TestMainWindow::layout_editModeIsWiredAndItsEditsAreSaved() {
+  auto *editLayout = window_->findChild<QAction *>("actionEdit_layout");
+  QVERIFY(editLayout != nullptr);
+  QVERIFY(!editLayout->isChecked());
+  auto *panel = window_->findChild<SongInfoPanel *>("songInfoPanel");
+  const auto requestMenu = [panel]() {
+    QContextMenuEvent event(QContextMenuEvent::Mouse, QPoint(5, 5),
+                            panel->mapToGlobal(QPoint(5, 5)));
+    QApplication::sendEvent(panel, &event);
+    return qobject_cast<QMenu *>(QApplication::activePopupWidget());
+  };
+
+  // View > Edit Layout turns edit mode on; Delete's edit is saved.
+  editLayout->setChecked(true);
+  QMenu *menu = requestMenu();
+  QVERIFY(menu != nullptr);
+  for (QAction *action : menu->actions()) {
+    if (action->text() == "Delete") {
+      action->trigger();
+    }
+  }
+  menu->close();
+  QCOMPARE(panel->parentWidget(),
+           window_->findChild<QWidget *>("layoutElements"));
+  QVERIFY(!QSettings()
+               .value("layout/tree")
+               .toString()
+               .contains(MainWindowLayout::kProperties));
+
+  // And off again.
+  editLayout->setChecked(false);
+  QCOMPARE(requestMenu(), nullptr);
 }
 
 void TestMainWindow::spectrum_tapGoesToThePlayerWhileShown() {

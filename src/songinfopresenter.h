@@ -11,7 +11,7 @@ class Playlist;
 class SongInfoPanel;
 class SongLibrary;
 
-// Shows the selected song in the Properties tab (SongInfoPanel). Frontend
+// Shows the selected song in the Properties panel (SongInfoPanel). Frontend
 // class: MainWindow tells it which song is selected
 // (PlaylistTabs::selectedSongChanged); it rebuilds the panel when that song's
 // data or a watched folder's availability changes. Rebuilds are debounced, so

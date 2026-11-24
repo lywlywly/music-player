@@ -41,11 +41,18 @@ The backend must not depend on how (or whether) it is displayed.
 * Frontend (Qt view adapters and widgets): `PlaylistTableModel`,
   `PlaylistTableView`, `PlaylistTabs`, `LibrarySearchResultsModel`, dialogs,
   presenters (`SongInfoPresenter`, `SpectrumPresenter`, ...),
-  `SongInfoPanel`, `SpectrumWidget`, `buildSongInfo`, `PluginManager`,
+  `SongInfoPanel`, `SpectrumWidget`, `buildSongInfo`, `PanelLayout`,
+  `PanelLayoutView`, `PanelLayoutEditor`, `MainWindowLayout`, `PluginManager`,
   `PluginPlayerHost`, `PluginsPage`, `MainWindow`.
 * The spectrum module (`src/spectrum/`, library `myspectrum`) depends on Qt
   only, never on app classes. Its analysis classes (`fft`, `SpectrumBands`,
   `SpectrumAnalyzer`, `SpectrumSmoother`, `PcmTap`) use no Qt.
+* The layout module (`src/layout/`, library `mylayout`: `PanelLayout`,
+  `PanelLayoutView`, `PanelLayoutEditor`) depends on Qt only, never on app
+  classes; its tests link it without the app, so using an app class fails
+  to link them. The app gives it the panels and their ids, the default
+  layout (`MainWindowLayout`) and the empty-slot text. See
+  [layout-editing.md](layout-editing.md).
 * A plugin (`src/plugins/<name>/`) depends on Qt and the plugin API
   (`src/pluginapi/`) only. The app never links it: `PluginManager` loads it
   at startup, and the plugin sees the app only through the API's host
@@ -138,30 +145,35 @@ The top-level window and what it owns.
   * Creates `PluginManager`, which lists the plugins and loads those not
     disabled, as a child after `PlaybackController`, so the plugins' panels
     (in the UI) are destroyed before it shuts the plugins down. It passes the
-    loaded plugins' panels to the info panel, their menus to the Playback
-    menu, and the manager's entries to `SettingsDialog`. See
+    loaded plugins' panels to the layout, their menus to the Playback menu,
+    and the manager's entries to `SettingsDialog`. See
     [plugins/plugin-system.md](plugins/plugin-system.md).
-  * The info panel at the top left (`infoTabs`) has a tab per loaded plugin
-    panel (Lyrics), then a Properties and a Spectrum tab; the current one is
-    restored from `infopanel/current_tab` (the plugin's id, `properties` or
-    `spectrum`). `MainWindow` connects
-    `PlaylistTabs::selectedSongChanged` to `SongInfoPresenter::showSong`, and
-    the Properties tab's buttons to `revealSongFile` and `openSongProperties`.
-    See [info-panel.md](info-panel.md). It connects
+  * The central area below the playback controls is an editable layout
+    (`PanelLayout`, `PanelLayoutView`, `PanelLayoutEditor`): splitters and
+    tabs holding the Playlist, Properties, Spectrum and Cover Art elements
+    and each loaded plugin's panel (Lyrics), saved in `layout/tree` and
+    edited from View > Edit Layout. `setUpLayout` registers the elements and
+    builds the saved or default layout. The default
+    (`MainWindowLayout::defaultLayout`) is Properties above the cover on the
+    left and the playlist on the right; Spectrum and the plugin panels start
+    outside it. See
+    [layout-editing.md](layout-editing.md).
+  * `MainWindow` connects `PlaylistTabs::selectedSongChanged` to
+    `SongInfoPresenter::showSong`, and the Properties panel's buttons to
+    `revealSongFile` and `openSongProperties`. See
+    [info-panel.md](info-panel.md). It connects
     `SpectrumPresenter::tapChanged` to `PlaybackController::setPcmTap`, and
     the playback state and position to the presenter. See
     [spectrum.md](spectrum.md).
-  * The splitters between the info panel and the playlists and between the
-    info panel's tabs and the cover keep their sizes in `layout/main_splitter`
-    and `layout/info_splitter` (`QSplitter::saveState`), saved when dragged.
-    With none saved, the info panel starts at a quarter of the width, so its
+  * In the default layout the info panel starts at a quarter of the width
+    (its splitter's sizes, `[320, 960]`, scaled to the splitter), so its
     width does not depend on the panels' size hints. Cost: that first width
     ignores what the panels' content needs; the panes' minimum widths still
-    hold. Rejected: the splitter's
-    default sizing by size hint, which starts the panel too narrow, since it
-    uses a hint cached during `setupUi`, before the plugin tabs are added (Qt
-    does not pass a hidden widget's hint change up to that cache), and
-    clearing those caches by hand, which depends on Qt's internals.
+    hold. Rejected: the splitter's default sizing by size hint, which starts
+    the panel too narrow, since it uses a hint cached before the plugin
+    panels are placed (Qt does not pass a hidden widget's hint change up to
+    that cache), and clearing those caches by hand, which depends on Qt's
+    internals.
   * Edit > Search Playlist (`QKeySequence::Find`) shows the one
     `PlaylistSearchDialog`, kept on the shown playlist through
     `currentPlaylistChanged`. Its row requests go to `PlaybackController::playRow`,
@@ -239,7 +251,7 @@ The in-memory song store and reading/writing audio file tags.
     which are scanned 1 s after the last event; offline folders are polled
     every 60 s instead.
   * `folderOf(songPk)` returns the watched folder holding a song (with its
-    `online` flag), or none; the Properties tab uses it.
+    `online` flag), or none; the Properties panel uses it.
 * `EfswFileSystemMonitor` (backend, owned by `MainWindow`)
   * Recursive efsw watches. Events arrive on efsw's thread and are forwarded
     to the main thread as queued `pathsChanged` / `folderNeedsRescan`
@@ -354,10 +366,10 @@ Each has its own doc; the classes are listed here with where they sit.
   OS media controls (`ISystemMediaInterface`,
   `SystemMediaPresenter`) and the GStreamer plugin registry and scanner
   setup on Windows.
-* Info panel ([info-panel.md](info-panel.md)): `SongInfoPresenter`,
-  `SongInfoPanel` and `buildSongInfo` (the Properties tab) and
-  `CoverArtPresenter` (frontend). The Spectrum tab (`SpectrumPresenter`,
-  `SpectrumWidget`) is in [spectrum.md](spectrum.md); the Lyrics tab
+* Info panels ([info-panel.md](info-panel.md)): `SongInfoPresenter`,
+  `SongInfoPanel` and `buildSongInfo` (the Properties panel) and
+  `CoverArtPresenter` (frontend). The Spectrum panel (`SpectrumPresenter`,
+  `SpectrumWidget`) is in [spectrum.md](spectrum.md); the Lyrics panel
   (`LyricsPanel`, `LyricsPresenter`, `LyricsLoader`, `LyricsManager`,
   `LyricsSettingsPage`, in `src/plugins/lyrics/`) in
   [plugins/lyrics.md](plugins/lyrics.md), and the A-B Repeat plugin

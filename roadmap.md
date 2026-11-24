@@ -17,7 +17,7 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
   - ⬜ Random by album/artist
   - ✅ Playback order persisted in settings
 - ✅ Library metadata and expressions
-  - ✅ Songs persisted in SQLite (`songs` + related attribute/stat tables)
+  - ✅ Songs persisted in SQLite (`songs` + related attribute tables)
   - ✅ Built-in + dynamic (`attr:`) + computed fields
   - ✅ Expression-based library filtering/search
   - ✅ Computed fields usable in query/filter
@@ -86,6 +86,10 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
     `docs/plugins/abrepeat.md` and `docs/plugins/playstats.md`
 - ✅ Settings dialog navigation tree instead of tabs
   - See `docs/settings-dialog.md`
+- ✅ Custom layout editing: splitters, tabs and panels in the central area,
+  edited from View > Edit Layout
+  - ⬜ The playback buttons, seek bar and volume as layout elements
+  - See `docs/layout-editing.md`
 - ⬜ CLI tool and headless mode
 
 ## Architecture

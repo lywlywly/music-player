@@ -9,7 +9,7 @@ class QLabel;
 class QPushButton;
 class QScrollArea;
 
-// The Properties tab: read-only, copyable rows of one SongInfo, grouped by
+// The Properties panel: read-only, copyable rows of one SongInfo, grouped by
 // section, with Open Containing Folder and Edit Properties... buttons.
 // Frontend class; SongInfoPresenter decides what it shows, and MainWindow
 // handles its buttons.

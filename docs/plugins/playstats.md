@@ -482,7 +482,7 @@ a move would take plays that may be theirs.
   expressions**: they read `MSong`, as for any field. Library Search's
   results show plugin columns like song attribute columns
   (`LibrarySearchResultsModel`).
-* **Properties tab** (`buildSongInfo`): the Library section lists the
+* **Properties panel** (`buildSongInfo`): the Library section lists the
   plugin fields (`ColumnRegistry::pluginFieldIds`), in registration order.
 * **Song Properties**: plugin fields are read-only by their source
   (`ColumnSource::Plugin`).
@@ -526,7 +526,7 @@ a move would take plays that may be theirs.
 ## With the plugin disabled
 
 * Its fields are not registered: the Play Count and Last Played columns are
-  gone, Library Search and the Properties tab show no stats.
+  gone, Library Search and the Properties panel show no stats.
 * An autoplaylist or display expression using `play_count` fails to parse
   and shows its existing error until the plugin is enabled.
 * The column layout drops the fields' place: on re-enabling they come back
@@ -636,7 +636,7 @@ custom fields and every last played time.
   registered, a provider whose id clashes refused; `valuesChanged` deferred;
   the plugin's file under the data root the test gives, none created while
   loading), `tst_autoplaylist` and `tst_songinfo` (a refresh reaches
-  autoplaylists and the Properties tab).
+  autoplaylists and the Properties panel).
 * **Plugin** (`tst_playstats`, linking its static library `myplaystats`):
   the key rule; the store on a temporary file, read from another thread,
   with and without a file (a missing file is not created); counting through

@@ -62,6 +62,15 @@ set(TEST_NAMES
 
 SETUP_TESTS(${TEST_NAMES})
 
+# The layout module's tests link the module and Qt only, not MYLib, so the
+# module using an app class fails to link them (docs/layout-editing.md). They
+# use no settings, files or audio, so they need none of SETUP_TESTS' helpers.
+foreach(_testname panellayout panellayoutview panellayouteditor)
+  add_executable(${_testname} tst_${_testname}.cpp)
+  add_test(NAME ${_testname} COMMAND ${_testname})
+  target_link_libraries(${_testname} Qt6::Test mylayout)
+endforeach()
+
 # The lyrics code, tested directly (the app loads it as a plugin).
 target_link_libraries(lyrics mylyrics)
 target_link_libraries(lyricspanel mylyrics)
@@ -119,5 +128,13 @@ set_tests_properties(lyricspanel PROPERTIES
 )
 
 set_tests_properties(spectrumpresenter PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
+
+set_tests_properties(panellayoutview PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+)
+
+set_tests_properties(panellayouteditor PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
 )

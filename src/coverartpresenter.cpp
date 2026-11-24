@@ -1,6 +1,7 @@
 #include "coverartpresenter.h"
 
 #include "songparser.h"
+#include <QEvent>
 #include <QLabel>
 #include <QSize>
 #include <algorithm>
@@ -24,7 +25,18 @@ QPixmap scaledCoverPixmap(const QPixmap &source, const QSize &logicalMaxSize,
 } // namespace
 
 CoverArtPresenter::CoverArtPresenter(QLabel *coverLabel, QObject *parent)
-    : QObject(parent), coverLabel_(coverLabel) {}
+    : QObject(parent), coverLabel_(coverLabel) {
+  coverLabel_->installEventFilter(this);
+}
+
+bool CoverArtPresenter::eventFilter(QObject *watched, QEvent *event) {
+  // The scaled pixmap fits the contents rect, and the label keeps its own
+  // minimum size, so rescaling here never grows the label.
+  if (event->type() == QEvent::Resize) {
+    updateCoverSize();
+  }
+  return QObject::eventFilter(watched, event);
+}
 
 void CoverArtPresenter::showSong(const MSong &song) {
   auto [data, size] = SongParser::extractCoverImage(song.at("filepath").text);

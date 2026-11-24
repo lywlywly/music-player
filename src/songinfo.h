@@ -8,7 +8,7 @@ class ColumnRegistry;
 class MonitoredLibrary;
 class SongLibrary;
 
-// One label/value row of the Properties tab.
+// One label/value row of the Properties panel.
 struct SongInfoRow {
   QString label;
   QString value;
@@ -20,7 +20,7 @@ struct SongInfoSection {
   std::vector<SongInfoRow> rows;
 };
 
-// What the Properties tab shows for one song: display data (column titles,
+// What the Properties panel shows for one song: display data (column titles,
 // formatted values), so it is a frontend type. Empty (songPk < 0) for no song.
 struct SongInfo {
   int songPk = -1;

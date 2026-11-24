@@ -10,8 +10,8 @@
 
 class LyricsPresenter;
 
-// The lyrics plugin's root object: the Lyrics info panel tab and its
-// Settings page.
+// The lyrics plugin's root object: the Lyrics panel (a layout element) and
+// its Settings page.
 class LyricsPlugin : public QObject,
                      public IPlugin,
                      public IPanelProvider,

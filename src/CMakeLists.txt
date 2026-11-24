@@ -66,6 +66,7 @@ myplayer_add_efsw()
 pkg_check_modules(GST IMPORTED_TARGET REQUIRED gstreamer-1.0)
 
 add_subdirectory(spectrum)
+add_subdirectory(layout)
 add_subdirectory(pluginapi)
 
 # Builds a plugin into the folder the app loads plugins from (plugins/ next
@@ -106,6 +107,8 @@ set(PROJECT_SOURCES
   resources/resources.qrc
   mainwindow.h
   mainwindow.cpp
+  mainwindowlayout.h
+  mainwindowlayout.cpp
   addfielddialog.ui
   addfielddialog.h
   addfielddialog.cpp
@@ -290,6 +293,7 @@ target_link_libraries(
   PkgConfig::GST
   efsw
   myspectrum
+  mylayout
   pluginapi
 )
 

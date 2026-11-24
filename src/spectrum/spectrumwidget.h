@@ -5,7 +5,7 @@
 #include <QWidget>
 #include <vector>
 
-// The Spectrum tab: one bar per band, with a peak mark above it, on a dB
+// The Spectrum panel: one bar per band, with a peak mark above it, on a dB
 // scale from 0 at the top to floorDb at the bottom, with a grid line and a
 // label every 10 dB on the right and the band labels below. Paints what it is
 // given; SpectrumPresenter decides what. Colors come from the palette.
@@ -26,8 +26,9 @@ public:
   const QString &message() const { return message_; }
 
 signals:
-  // From showEvent / hideEvent. In a QTabWidget only the current page is
-  // shown, so this says whether the tab is in front.
+  // From showEvent / hideEvent: false while the widget is out of the layout
+  // or on a tab that is not in front (a QTabWidget shows only its current
+  // page).
   void shownChanged(bool shown);
 
 protected:

@@ -52,7 +52,9 @@ From `src/`. After cloning: `git submodule update --init --recursive`.
   it starts.
 - A new source file goes in `PROJECT_SOURCES` in `src/CMakeLists.txt` (or the module's own
   CMakeLists.txt, as `src/spectrum/`); a new test `tst_<name>.cpp` goes in `TEST_NAMES` in
-  `src/Tests/CMakeLists.txt`, with `QT_QPA_PLATFORM=offscreen` if it shows a widget.
+  `src/Tests/CMakeLists.txt`, with `QT_QPA_PLATFORM=offscreen` if it shows a widget. A test of the
+  layout module (`src/layout/`) goes in that file's layout block instead: it links the module and
+  Qt only, which keeps app classes out of the module.
 
 ## Commands (Windows)
 
@@ -119,7 +121,8 @@ Without Qt's `bin` on `PATH`, the app and tests exit with `0xc0000135`.
 - Play stats are the Play Stats plugin's (`src/plugins/playstats/`, its own SQLite file): they belong to a
   song's identity (normalized `title|artist|album`), so songs with the same identity share them. The app
   keeps no play stats; it shows a plugin's fields through `ISongFieldProvider`.
-- The main window's layout lives in `src/mainwindow.ui`; its custom widgets (`SongInfoPanel`,
-  `SpectrumWidget`, ...) are promoted there (`<customwidget>`).
-- Settings are `QSettings` keys named `<area>/<name>` (e.g. `infopanel/current_tab`), documented in the
-  feature's doc.
+- The main window's fixed parts live in `src/mainwindow.ui`; its central area is the editable layout
+  (`PanelLayout`, docs/layout-editing.md), whose element widgets (`SongInfoPanel`, `SpectrumWidget`, ...)
+  are still declared and promoted in `mainwindow.ui` (`<customwidget>`), in `layoutElements`.
+- Settings are `QSettings` keys named `<area>/<name>` (e.g. `layout/tree`), documented in the feature's
+  doc.

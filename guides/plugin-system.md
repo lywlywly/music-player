@@ -10,11 +10,13 @@ choice and the rejected alternatives are in
 A **plugin** is a separate library file that the app finds and loads when it
 starts: a DLL on Windows, a shared library on macOS and Linux. It adds a
 feature that the app does not know about in advance. The app is built without
-it and runs without it; with it, the app gains a tab, a Settings page or
+it and runs without it; with it, the app gains a panel, a Settings page or
 anything else the plugin offers.
 
-The **Lyrics** tab is the first, and so far only, plugin. The Properties and
-Spectrum tabs are still built into the app.
+The **Lyrics** panel was the first plugin. The Properties and Spectrum panels
+are built into the app. All of them are elements of the main window's
+editable layout, which places them where the user puts them
+([docs/layout-editing.md](../docs/layout-editing.md)).
 
 ## Background
 
@@ -61,7 +63,7 @@ function inside the app, knowing only the interface.
 
 When the app loads a plugin, it gets back one object it knows nothing about,
 the plugin's **root object**. It must ask that object what it can do: can it
-make an info panel tab? A Settings page?
+make a panel? A Settings page?
 
 Plain C++ cannot answer reliably here. The app and the plugin are compiled
 separately, so each has its own copy of every interface, and `dynamic_cast`
@@ -134,7 +136,8 @@ LyricsPlugin (root object, created by Qt)
 
 "Root" does not mean the top of a Qt parent-child tree: the root object has
 no parent, and the panel and page it creates are owned by the app's widgets
-(the info panel's tab widget, the Settings dialog), not by it.
+(the window, wherever the layout places the panel, and the Settings dialog),
+not by it.
 
 There is **one** in two senses:
 
@@ -157,7 +160,7 @@ The interfaces in `src/pluginapi/` come in three groups.
 | Group | Interface | Implemented by | Role |
 | --- | --- | --- | --- |
 | Core | `IPlugin` | plugin (root object) | `initialize(host)` after loading; `shutdown()` before the host is destroyed (the id and name are in the JSON, not in code) |
-| Capabilities | `IPanelProvider` | plugin (root object) | Makes a tab for the info panel |
+| Capabilities | `IPanelProvider` | plugin (root object) | Makes a panel, which the user places in the main window's layout |
 | | `ISettingsPageProvider` | plugin (root object) | Makes a page for the Settings dialog, as an `IPluginSettingsPage` (`widget()`, `apply()` on OK) |
 | | `IMenuProvider` | plugin (root object) | Makes a submenu for the end of the Playback menu |
 | | `ISongFieldProvider` | plugin (root object) | Song fields the plugin keeps the values of, shown as columns and usable in expressions |
@@ -192,13 +195,13 @@ Four ideas run through it:
         app (EXEC)                               lyricsplugin.dll
  ┌───────────────────────────┐            ┌───────────────────────────┐
  │ PlaybackController        │            │ LyricsPlugin (root object)│
- │        │ signals          │            │   makes the Lyrics tab    │
+ │        │ signals          │            │   makes the Lyrics panel  │
  │        ▼                  │            │   and its Settings page   │
  │ PluginPlayerHost ─────────┼── events ──┼─▶ LyricsPresenter         │
- │ PluginManager: loads,     │            │   (the tab's presenter)   │
+ │ PluginManager: loads,     │            │   (the panel's presenter) │
  │   hosts, shuts down       │            │   gets the events, seeks  │
  │ MainWindow, SettingsDialog│            │                           │
- │   add the tab and page    │            │                           │
+ │   add the panel and page  │            │                           │
  └───────────────────────────┘            └───────────────────────────┘
           both include the plugin API headers (src/pluginapi/)
 ```
@@ -207,7 +210,7 @@ The A-B Repeat plugin (`abrepeatplugin.dll`) has the same shape: its root
 object makes a submenu of Playback, and its `ABRepeat` gets the events and
 calls `seek` to jump back to A.
 
-The Play Stats plugin (`playstatsplugin.dll`) has no tab. Its listener
+The Play Stats plugin (`playstatsplugin.dll`) has no panel. Its listener
 counts plays into the plugin's own SQLite file, in its data folder, and its
 root object provides `play_count` and `last_played_timestamp` as song fields:
 the app keeps a copy of the values on each song, so the columns sort and
@@ -222,7 +225,7 @@ plugin's fields, are in
 | `pluginapi` | `src/pluginapi/` | The interfaces, header-only |
 | `PluginManager` | app | Lists the plugins and loads those not disabled, gives each its own `IPluginHost`, registers their song fields, shuts them down |
 | `PluginPlayerHost` | app | The `IPlayerHost`: turns `PlaybackController`'s signals into listener calls; and the `IPlayerControl`: queues the plugins' seeks |
-| `MainWindow`, `SettingsDialog` | app | Use the capabilities: add the plugins' tabs, menus and Settings pages |
+| `MainWindow`, `SettingsDialog` | app | Use the capabilities: add the plugins' panels to the layout, their menus and their Settings pages |
 | `PluginsPage` | app | Settings > Plugins: lists every plugin with its state, enables and disables them |
 | `mylyrics` | `src/plugins/lyrics/` | The lyrics code: panel, presenter, lyrics loading, settings page |
 | `lyricsplugin` | `src/plugins/lyrics/` | The DLL: only the root object, `LyricsPlugin`, linking `mylyrics` |
@@ -264,13 +267,15 @@ plugin's fields, are in
    (with the reason, which is also logged). The Plugins page in Settings
    shows these entries; unchecking a plugin there adds its id to the
    disabled list, which takes effect at the next startup.
-2. **Using the capabilities.** The info panel asks each loaded plugin for
-   `IPanelProvider` and adds a tab for each one, before Properties and
-   Spectrum. The Playback menu asks for `IMenuProvider` and adds each menu
+2. **Using the capabilities.** The window asks each loaded plugin for
+   `IPanelProvider` and makes each panel a layout element, named by the
+   plugin's id. The default layout holds none of them; the user inserts a
+   panel from View > Edit Layout, and a saved layout keeps it in its place.
+   The Playback menu asks for `IMenuProvider` and adds each menu
    at its end, after a separator. Each time Preferences opens, the Settings
    dialog asks for `ISettingsPageProvider` and adds a page for each one
    under Plugins in its tree, and calls each page's `apply()` on OK.
-3. **Following and controlling playback.** The Lyrics tab's presenter adds
+3. **Following and controlling playback.** The Lyrics panel's presenter adds
    itself as a listener when it is created, A-B Repeat's loop when the
    plugin is initialized. When a song starts, playback stops or the position
    moves (or a song pauses, resumes, seeks or ends), `PluginPlayerHost`
@@ -282,7 +287,7 @@ plugin's fields, are in
 4. **Shutdown.** If the library is still loading, the window first waits
    for the load, which reads the Play Stats plugin's values on a worker
    thread. The window's widgets are destroyed next, with the plugins'
-   tabs; their presenters remove themselves as listeners. Then the
+   panels; their presenters remove themselves as listeners. Then the
    `PluginManager` calls `shutdown()` on each plugin. Libraries are never
    unloaded while the app runs: objects they created may still exist, and
    their code must stay in memory.
@@ -295,7 +300,7 @@ plugin's fields, are in
   old version is refused at the label check, before any of its code runs,
   instead of calling functions that no longer match.
 * **Each capability has its own version.** Once versions count, a plugin
-  built for an older `IPanelProvider` still loads, but gets no tab.
+  built for an older `IPanelProvider` still loads, but gets no panel.
 * **For now every version is 1.** While the API is in development, plugins
   are built with the app in this repository, so each build brings them up
   to date and nothing is bumped. The catch is an old plugin file left in the
@@ -320,8 +325,8 @@ mismatch only happens with an old DLL left in the plugins folder.
    `Q_PLUGIN_METADATA(IID IPlugin_iid FILE "<name>.json")` and
    `Q_INTERFACES(...)` listing those interfaces.
 3. Next to its header, write `<name>.json` with a stable `id` and a display
-   `name`, and list it in the target's sources. The id names the plugin's tab
-   in the saved settings and its entry in the disabled list, and its own
+   `name`, and list it in the target's sources. The id names the plugin's
+   panel in the saved layout and its entry in the disabled list, and its own
    settings keys start with it (`<id>/...`).
 4. To follow playback, add a listener to `host.player()`, and remove it by the
    time `shutdown()` returns. To control it, call `host.control()`'s

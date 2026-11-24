@@ -1,14 +1,18 @@
-# Plan: Info Panel (tabs and cover art)
+# Plan: Info Panels (Properties and cover art)
 
-Status: implemented. The Spectrum tab is described in
-[spectrum.md](spectrum.md), and the Lyrics tab's classes in
-[plugins/lyrics.md](plugins/lyrics.md).
+Status: implemented. The Spectrum panel is described in
+[spectrum.md](spectrum.md), the Lyrics panel's classes in
+[plugins/lyrics.md](plugins/lyrics.md), and where the panels go in
+[layout-editing.md](layout-editing.md).
 
 ## Summary
 
-* The info panel at the top left of the main window is a tab widget:
-  **Lyrics** (`LyricsPanel`, from the lyrics plugin), **Properties** and
-  **Spectrum**, with the playing song's cover art below it.
+* The info panels are **Properties**, **Lyrics** (`LyricsPanel`, from the
+  lyrics plugin), **Spectrum** and the playing song's **cover art**. Each is
+  an element of the editable layout ([layout-editing.md](layout-editing.md)).
+  The default layout has Properties at the top left of the main window with
+  the cover below it; Lyrics and Spectrum are inserted from edit mode, for
+  example as tabs beside Properties.
 * **Properties** shows the song selected in the shown playlist: its file
   (name, folder, path, size, modified and created times), its audio
   properties, its main tags, the plugins' fields (play stats) and its
@@ -59,41 +63,35 @@ Status: implemented. The Spectrum tab is described in
 
 ### Layout
 
+The default layout ([layout-editing.md](layout-editing.md)):
+
 ```
-splitter (horizontal)
-├── frame_2
-│   └── splitter_2 (vertical)
-│       ├── infoTabs     (QTabWidget, documentMode, verstretch 3, min 120 x 240)
-│       │   ├── "Lyrics"      lyricsPanel   (LyricsPanel, from the plugin)
-│       │   ├── "Properties"  propertiesTab > songInfoPanel  (SongInfoPanel)
-│       │   └── "Spectrum"    spectrumTab   > spectrumWidget (SpectrumWidget)
-│       └── label        (cover art, verstretch 5)
+horizontal splitter [320, 960]
+├── vertical splitter [300, 500]
+│   ├── songInfoPanel (SongInfoPanel, Properties)
+│   └── coverLabel    (cover art)
 └── playlistTabs
 ```
 
-* The size policy and minimum size are on `infoTabs`, so they hold for every
-  tab, including the plugins' panels.
-* `MainWindow::setUpInfoTabs` inserts a tab per loaded plugin panel
-  (`IPanelProvider`) before Properties, in plugin load order. The lyrics
-  panel's object name is `lyricsPanel`.
-* The current tab is stored in `QSettings` as `infopanel/current_tab` (a
-  plugin's id, such as `lyrics`, or `properties` or `spectrum`; with none
-  saved, the first tab), written on `QTabWidget::currentChanged` and restored
-  in the `MainWindow` constructor (`setUpInfoTabs`), after the plugin tabs are
-  added. A saved plugin tab whose plugin is disabled leaves the first tab
-  current and the key unchanged
-  ([plugins/plugin-system.md](plugins/plugin-system.md), "Where the
-  capabilities are used").
+* `spectrumWidget` (`SpectrumWidget`) and each plugin panel (`IPanelProvider`;
+  the lyrics panel's object name is `lyricsPanel`) start outside the layout.
+* `songInfoPanel` and `spectrumWidget` have a minimum size of 120 x 240 and
+  `coverLabel` of 120 x 120, set in `mainwindow.ui`, wherever the layout
+  places them.
+* In a layout with tabs, the current tab is saved with the layout
+  (`layout/tree`). A saved layout whose plugin is disabled keeps that
+  plugin's place, with "*Name* is not available" in place of the panel.
 
 ### Lyrics while hidden
 
-`LyricsPresenter` is not told about the tab: the Lyrics tab keeps receiving
-positions while hidden, and `LyricsPanel` keeps scrolling to the current
-line. That alone would show the wrong line when the tab comes back: a
-`QTabWidget` page lives in a `QStackedLayout`, which sizes only the current
-page, so a window or splitter resize while another tab is shown leaves the
-hidden panel at its old size, and `scrollToIndexCenter` centers by the
-viewport height at the time it runs.
+`LyricsPresenter` is not told whether its panel is shown: the Lyrics panel
+keeps receiving positions while hidden (outside the layout, or on a tab not
+in front), and `LyricsPanel` keeps scrolling to the current line. That alone
+would show the wrong line when the panel comes back: a hidden panel is not
+resized (a `QTabWidget` page lives in a `QStackedLayout`, which sizes only
+the current page), so a window or splitter resize meanwhile leaves it at its
+old size, and `scrollToIndexCenter` centers by the viewport height at the
+time it runs.
 
 So `LyricsPanel` keeps the index of its current line (`currentLine_`, set by
 `scrollToIndexCenter`, reset by `setLyricsPanel`) and re-centers on it without
@@ -103,7 +101,7 @@ is resized. Not while the user holds following by scrolling
 ([plugins/lyrics.md](plugins/lyrics.md), "Scroll hold"): the view stays where
 they scrolled it.
 
-### Properties tab contents
+### Properties panel contents
 
 Read-only rows of label and value in a `QScrollArea`, grouped by section.
 Values are word-wrapped `QLabel`s with `Qt::TextSelectableByMouse`, so they
@@ -150,7 +148,7 @@ have, is left out, and so is a section with no rows.
   stacked otherwise (`SongInfoPanel::resizeEvent`); their `Ignored`
   horizontal size policy keeps them from setting the panel's minimum width,
   since the column can be 120 px wide.
-* The tab name "Properties" is shared with the Song Properties dialog; the
+* The panel name "Properties" is shared with the Song Properties dialog; the
   button says "Edit Properties..." to tell them apart.
 
 ## Classes
@@ -178,8 +176,8 @@ have, is left out, and so is a section with no rows.
 
 ### `SongInfoPanel` (frontend, `songinfopanel.{h,cpp}`)
 
-* The Properties tab's widget, promoted in `mainwindow.ui` like
-  `LyricsPanel`. Built in code (no `.ui`), since its rows depend on the
+* The Properties panel's widget, promoted in `mainwindow.ui` (in
+  `layoutElements`). Built in code (no `.ui`), since its rows depend on the
   song.
 * `setInfo(const SongInfo &)` (an empty one shows "No song selected") and
   `info()`.
@@ -207,11 +205,11 @@ have, is left out, and so is a section with no rows.
 * Rebuilds are debounced (`kRebuildDelayMs`, 100 ms, a single-shot timer), so
   holding an arrow key, or removing several selected rows (one remove pair
   per row), does one stat at the end.
-* It rebuilds whether or not the Properties tab is in front: a rebuild is one
-  `QFileInfo` and a few labels. A first version deferred rebuilds while the
-  tab was hidden, but that did not help the slow case (a stat on a slow
-  network path blocks just the same once the tab is shown), and offline
-  folders are skipped anyway.
+* It rebuilds whether or not the Properties panel is shown: a rebuild is one
+  `QFileInfo` and a few labels. Rejected: deferring rebuilds while the panel
+  is hidden, which does not help the slow case (a stat on a slow network
+  path blocks just the same once the panel is shown), and offline folders
+  are skipped anyway.
 * It does not watch `PlaylistCollection::songsRemovedFromLibrary`. A song
   leaves the library only when it is in no manual playlist and not monitored,
   so the shown song cannot: it is in the shown playlist, and an autoplaylist
@@ -220,8 +218,11 @@ have, is left out, and so is a section with no rows.
 
 ### `CoverArtPresenter` (frontend)
 
-* Shows the playing song's embedded cover in the cover label (`label`),
-  scaled to the label on resize and splitter moves.
+* Shows the playing song's embedded cover in the cover label
+  (`coverLabel`), scaled to the label on each of its resizes (an event
+  filter on the label), so it follows the label wherever the layout puts it.
+  The scaled pixmap fits the label's contents rect and the label keeps its
+  minimum size, so rescaling does not grow the label.
 * `MainWindow` calls `showSong` on `PlaybackController::songStarted`, after
   `SystemMediaPresenter::showSong` (which clears the system artwork), and
   `clear()` on stop.
@@ -259,10 +260,9 @@ have, is left out, and so is a section with no rows.
 * Creates `SongInfoPresenter`, and in `finishSetUpPlaylist` connects
   `PlaylistTabs::selectedSongChanged` to `showSong`. Nothing is selected at
   startup, so the panel starts with "No song selected".
-* `setUpInfoTabs` adds the plugin tabs, restores and saves
-  `infopanel/current_tab`, and connects
-  the panel's buttons to `revealSongFile(this, song)` and
+* Connects the panel's buttons to `revealSongFile(this, song)` and
   `openSongProperties(this, pk, songLibrary, columnRegistry_, *playlists_)`.
+  `setUpLayout` places the panels ([layout-editing.md](layout-editing.md)).
 
 ## Edge cases
 
@@ -306,7 +306,7 @@ have, is left out, and so is a section with no rows.
   resize while hidden, then show; new lyrics forget the current line. Its
   click, hover and scroll hold tests are in
   [plugins/lyrics.md](plugins/lyrics.md).
-* `tst_mainwindow`: the Lyrics (from the plugin in `Tests/plugins`),
-  Properties and Spectrum tabs exist, the saved tab is restored, the
-  Properties tab shows the selected song in the real window, and Edit
-  Properties... opens Song Properties.
+* `tst_mainwindow`: Properties in the default layout; the Lyrics (from the
+  plugin in `Tests/plugins`), Properties and Spectrum tabs of a saved
+  layout, with the saved tab restored; Properties shows the selected song in
+  the real window, and Edit Properties... opens Song Properties.

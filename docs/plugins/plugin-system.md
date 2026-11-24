@@ -13,7 +13,8 @@ Status: implemented.
 * A plugin can contribute several kinds of things, or none (a plugin with no
   UI that only follows playback). Each kind is a **capability**: an
   interface the plugin implements and the host asks for. There are four:
-  an **info panel tab**, a **Settings dialog page**, a **Playback
+  a **panel** (an element of the main window's layout), a **Settings
+  dialog page**, a **Playback
   submenu** and **song fields** (columns whose values the plugin keeps).
   Later kinds (context menu actions) are added the same way, without
   changing the existing interfaces or plugins.
@@ -90,9 +91,9 @@ plugin, two metaobjects for one class.
   (`lyricsplugin.json`). moc resolves the file next to the header and
   embeds it, so nothing new is deployed, and AUTOMOC re-runs moc when it
   changes. The JSON is listed in the target's sources for IDEs.
-* `id`: stable; names the plugin's info panel tab
-  (`infopanel/current_tab`), its settings keys (`<id>/...`) and its entry in
-  the disabled list. `name`: shown on the Plugins page. Both non-empty
+* `id`: stable; names the plugin's panel in the saved layout
+  (`layout/tree`), its settings keys (`<id>/...`) and its entry in the
+  disabled list. `name`: shown on the Plugins page. Both non-empty
   strings.
 * The host reads them from `QPluginLoader::metaData().value("MetaData")`,
   which parses the file without running any of its code. They are declared
@@ -183,7 +184,7 @@ work as usual: its `QObject`s live in the DLL only.
 
 | Interface | Role | Used by |
 |---|---|---|
-| `IPanelProvider` | `panelTitle()` (tab text), `createPanel(QWidget *parent)` | the info panel (`MainWindow`) |
+| `IPanelProvider` | `panelTitle()` (its title in the layout), `createPanel(QWidget *parent)` | the layout (`MainWindow::setUpLayout`) |
 | `ISettingsPageProvider` | `settingsPageTitle()`, `createSettingsPage(QWidget *parent)`, returning an `IPluginSettingsPage` | `SettingsDialog` |
 | `IPluginSettingsPage` | `widget()`, `apply()` (called on the Settings dialog's OK) | `SettingsDialog` |
 | `IMenuProvider` | `createMenu(QWidget *parent)`, a `QMenu` with its title set | the Playback menu (`MainWindow`) |
@@ -194,8 +195,10 @@ work as usual: its `QObject`s live in the DLL only.
   uses a capability asks each loaded plugin for it with `qobject_cast`; a
   plugin without it is skipped there.
 * `createPanel`, `createSettingsPage` and `createMenu` return widgets
-  parented to `parent`, so the tab widget, the Settings dialog and the
-  Playback menu own and delete them. The plugin keeps its open panels, so
+  parented to `parent`, so the window's UI (the layout's element store, then
+  wherever the layout places the panel), the Settings dialog and the
+  Playback menu own and delete them. `createPanel` is called once, at
+  startup. The plugin keeps its open panels, so
   `apply()` can restyle them.
 * A plugin's menu is a submenu, not actions added to Playback, so its items
   show which plugin they come from and several plugins' items do not mix.
@@ -204,8 +207,8 @@ work as usual: its `QObject`s live in the DLL only.
   comes with a plugin that needs it, as a new version of the capability.
   Plugin menu items have no keyboard shortcuts: one could clash with the
   app's or another plugin's, and nothing would arbitrate.
-* One panel per plugin, so the plugin's id names its tab in
-  `infopanel/current_tab` (`lyrics` for the lyrics plugin).
+* One panel per plugin, so the plugin's id names its panel in the layout
+  (`lyrics` for the lyrics plugin).
 
 ### Provided song fields
 
@@ -325,8 +328,8 @@ Frontend class. `MainWindow` creates it as a child `QObject` after
      `<iid>`, the app has `<IPlugin_iid>`".
   3. No `id` or `name`: skipped, "no id or name in its metadata".
   4. An id that an earlier entry, loaded or disabled, already has: skipped,
-     "same id as `<file>`". The id names the plugin's info panel tab, its
-     settings keys and its entry in the disabled list.
+     "same id as `<file>`". The id names the plugin's panel in the layout,
+     its settings keys and its entry in the disabled list.
   5. Its id is in `plugins/disabled`: `Disabled`, not loaded.
   6. `instance()` fails: skipped, "failed to load", Qt's `errorString()`.
      The root object does not implement `IPlugin` (missing from its
@@ -355,8 +358,7 @@ Frontend class. `MainWindow` creates it as a child `QObject` after
   `PluginPlayerHost` and `PluginHost` members are destroyed after that, so a
   plugin's listeners are gone before their host, and a `valuesChanged`
   still queued is dropped. Children are destroyed in creation order, so
-  the info panel and the plugin panels in it are destroyed before the
-  manager.
+  the UI and the plugin panels in it are destroyed before the manager.
 * Never unloads a plugin: its code must stay mapped while its objects live.
 
 ### `PluginPlayerHost`
@@ -381,12 +383,15 @@ Frontend class. `MainWindow` creates it as a child `QObject` after
 
 The places using a capability go through the `Loaded` entries.
 
-* **Info panel** (`MainWindow`): a tab per `IPanelProvider`, before the
-  built-in tabs, in load order, named in `infopanel/current_tab` by the
-  entry's `id`, and created before `setUpInfoTabs()` restores that key.
-  When the key names a disabled plugin, the info panel shows its first tab
-  and leaves the key as it is (it is written only when the user changes
-  tabs), so the plugin's tab is current again once it is enabled.
+* **Layout** (`MainWindow::setUpLayout`): each `IPanelProvider`'s panel is
+  a layout element named by the entry's `id`, created in the layout's
+  element store before the layout is built. The default layout holds no
+  plugin panel; the user inserts one from View > Edit Layout, where the
+  Insert menu lists it by its `panelTitle()`. A saved layout that
+  names a plugin not loaded (disabled, or skipped) keeps its node, shows
+  "*Name* is not available" there with the entry's `name`, and saves it
+  unchanged, so the panel is back in its place once the plugin is enabled
+  ([layout-editing.md](../layout-editing.md)).
 * **Settings dialog**: `MainWindow` passes the entries to `SettingsDialog`,
   which it creates each time Preferences opens. Each `ISettingsPageProvider`
   gets a page under Plugins in the dialog's tree
@@ -478,9 +483,9 @@ The places using a capability go through the `Loaded` entries.
   code the user turned off. Keeping `id()` beside the JSON id would be two
   declarations of one id that can disagree.
 * **Enabling and disabling without a restart.** Disabling needs no
-  unloading: `shutdown()` and removing the plugin's tab and page, with the
-  DLL left mapped. But the info panel and the dialog would have to add and
-  remove tabs and pages while running, and `initialize` and `shutdown`
+  unloading: `shutdown()` and removing the plugin's panel and page, with the
+  DLL left mapped. But the layout and the dialog would have to add and
+  remove panels and pages while running, and `initialize` and `shutdown`
   would become repeatable, a core API change. A restart costs the user
   little for a rare action, and live toggling can come later.
 * **The disabled list by file name.** Renaming the file would enable the
@@ -553,20 +558,21 @@ through the built plugins in `Tests/plugins`.
   the stored ids that no row with a check box has; a skipped row has no
   check box, its `reason` and its `details` as its tooltip.
 * `tst_mainwindow`:
-  * `infoTabs_restoreAndShowSelectedSong` checks the Lyrics (through the
-    plugin in `Tests/plugins`), Properties and Spectrum tabs and the
-    restored tab, and that the Lyrics tab is saved as `lyrics`.
+  * `layout_defaultAndSavedTabsAndShowSelectedSong` checks that the Lyrics
+    panel (through the plugin in `Tests/plugins`) starts outside the default
+    layout, and the Lyrics, Properties and Spectrum tabs of a saved layout
+    with the restored tab.
   * `settings_pluginPageAppliesToItsPanelOnOk` finds the Lyrics page under
     Plugins in Preferences, and checks that its size reaches the panel on
     OK. It finds the lyrics panel by object name: across a DLL, the test's
     `LyricsPanel` metaobject is not the plugin's, so
     `findChild<LyricsPanel *>` (or `<LyricsManager *>`) finds nothing, and
     the panel's lines are checked in `tst_plugins` instead.
-  * `plugins_disabledPluginsHaveNoTabPageOrMenu`: with `lyrics`, `abrepeat`
-    and `playstats` in `plugins/disabled` and `infopanel/current_tab` set to
-    `lyrics`, no Lyrics info tab, the first tab current and the key
-    unchanged, no page under Plugins, and no plugin submenu or separator in
-    Playback.
+  * `plugins_disabledPluginsHaveNoPanelPageOrMenu`: with `lyrics`,
+    `abrepeat` and `playstats` in `plugins/disabled`, no lyrics panel; with
+    a saved layout that has a Lyrics tab, the tab stays with
+    "Lyrics is not available" and is saved again; no page under Plugins,
+    and no plugin submenu or separator in Playback.
 * The plugin's `QSettings` uses the tests' QSettings folder: the folder is
   set in QtCore, which the plugin shares.
 * By hand: the Plugins page's layout, the state column following the box,
