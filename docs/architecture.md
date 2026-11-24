@@ -175,8 +175,11 @@ The SQLite database every other class reads and writes through.
 
 * `DatabaseManager`
   * Owns SQLite connection, pragmas, and schema setup.
-  * Creates tables for songs, playlists, dynamic/computed attributes, play
-    stats, and the monitored library (`library_folders`, `monitored_files`).
+  * Creates tables for songs, playlists (`playlists`, `playlist_items`,
+    `autoplaylist_order`), dynamic/computed attributes, and the monitored
+    library (`library_folders`, `monitored_files`). Play stats are in the
+    Play Stats plugin's own database
+    ([plugins/playstats.md](plugins/playstats.md)).
 
 ### Column and layout metadata
 

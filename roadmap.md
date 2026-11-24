@@ -102,8 +102,8 @@ See `docs/architecture.md` (Design Principles).
 - ⬜ Qt-free backend internals
 - ✅ Persist row removal in `playlist_items`
 - ✅ No duplicate songs within a playlist
-- ⬜ Persist sort order in `playlist_items`
-- ⬜ Batched `playlist_items` writes in one transaction
+- ✅ Persist sort order in `playlist_items`
+- ✅ Batched `playlist_items` writes in one transaction
 - ⬜ Pk-based row removal
 - ⬜ Move `getNewPlaylistName` from `PlaylistTabs` to `PlaylistCollection`
 - ⬜ `SongLibrary` field-existence check without `ColumnDefinition`
