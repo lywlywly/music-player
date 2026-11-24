@@ -14,7 +14,7 @@
    <string>myplayer</string>
   </property>
   <widget class="QWidget" name="centralWidget">
-   <layout class="QVBoxLayout" name="verticalLayout_4">
+   <layout class="QVBoxLayout" name="centralLayout" stretch="0,1">
     <property name="leftMargin">
      <number>8</number>
     </property>
@@ -27,66 +27,108 @@
     <property name="bottomMargin">
      <number>4</number>
     </property>
+    <property name="spacing">
+     <number>4</number>
+    </property>
     <item>
-     <layout class="QVBoxLayout" name="verticalLayout_3">
-      <property name="spacing">
-       <number>4</number>
+     <widget class="QWidget" name="toolbarHost" native="true"/>
+    </item>
+    <item>
+     <widget class="QFrame" name="frame">
+      <property name="frameShape">
+       <enum>QFrame::Shape::StyledPanel</enum>
       </property>
-      <item>
-       <layout class="QHBoxLayout" name="horizontalLayout">
-        <property name="spacing">
-         <number>10</number>
-        </property>
-        <item>
-         <layout class="QHBoxLayout" name="playbackButtonsLayout">
-          <property name="spacing">
-           <number>6</number>
+      <property name="frameShadow">
+       <enum>QFrame::Shadow::Raised</enum>
+      </property>
+      <layout class="QHBoxLayout" name="horizontalLayout_2">
+       <property name="leftMargin">
+        <number>0</number>
+       </property>
+       <property name="topMargin">
+        <number>0</number>
+       </property>
+       <property name="rightMargin">
+        <number>0</number>
+       </property>
+       <property name="bottomMargin">
+        <number>0</number>
+       </property>
+       <item>
+        <widget class="QWidget" name="layoutHost" native="true"/>
+       </item>
+       <item>
+        <widget class="QWidget" name="layoutElements" native="true">
+         <property name="visible">
+          <bool>false</bool>
+         </property>
+         <widget class="QWidget" name="playbackButtons" native="true">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
           </property>
-          <item>
-           <widget class="QToolButton" name="play_button">
-            <property name="text">
-             <string>Play</string>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <widget class="QToolButton" name="pause_button">
-            <property name="text">
-             <string>Pause</string>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <widget class="QToolButton" name="stop_button">
-            <property name="text">
-             <string>Stop</string>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <widget class="QToolButton" name="prev_button">
-            <property name="text">
-             <string>Previous</string>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <widget class="QToolButton" name="next_button">
-            <property name="text">
-             <string>Next</string>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <widget class="QToolButton" name="random_button">
-            <property name="text">
-             <string>Random</string>
-            </property>
-           </widget>
-          </item>
-         </layout>
-        </item>
-        <item>
+          <layout class="QHBoxLayout" name="playbackButtonsLayout">
+           <property name="spacing">
+            <number>6</number>
+           </property>
+           <property name="leftMargin">
+            <number>0</number>
+           </property>
+           <property name="topMargin">
+            <number>0</number>
+           </property>
+           <property name="rightMargin">
+            <number>0</number>
+           </property>
+           <property name="bottomMargin">
+            <number>0</number>
+           </property>
+           <item>
+            <widget class="QToolButton" name="play_button">
+             <property name="text">
+              <string>Play</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QToolButton" name="pause_button">
+             <property name="text">
+              <string>Pause</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QToolButton" name="stop_button">
+             <property name="text">
+              <string>Stop</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QToolButton" name="prev_button">
+             <property name="text">
+              <string>Previous</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QToolButton" name="next_button">
+             <property name="text">
+              <string>Next</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QToolButton" name="random_button">
+             <property name="text">
+              <string>Random</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
          <widget class="QSlider" name="volumeSlider">
           <property name="minimumSize">
            <size>
@@ -116,89 +158,53 @@
            <enum>Qt::Orientation::Horizontal</enum>
           </property>
          </widget>
-        </item>
-        <item>
-         <widget class="JumpSlider" name="horizontalSlider">
+         <widget class="JumpSlider" name="seekSlider">
           <property name="orientation">
            <enum>Qt::Orientation::Horizontal</enum>
           </property>
          </widget>
-        </item>
-       </layout>
-      </item>
-      <item>
-       <widget class="QFrame" name="frame">
-        <property name="frameShape">
-         <enum>QFrame::Shape::StyledPanel</enum>
-        </property>
-        <property name="frameShadow">
-         <enum>QFrame::Shadow::Raised</enum>
-        </property>
-        <layout class="QHBoxLayout" name="horizontalLayout_2">
-         <property name="leftMargin">
-          <number>0</number>
-         </property>
-         <property name="topMargin">
-          <number>0</number>
-         </property>
-         <property name="rightMargin">
-          <number>0</number>
-         </property>
-         <property name="bottomMargin">
-          <number>0</number>
-         </property>
-         <item>
-          <widget class="QWidget" name="layoutHost" native="true"/>
-         </item>
-         <item>
-          <widget class="QWidget" name="layoutElements" native="true">
-           <property name="visible">
-            <bool>false</bool>
-           </property>
-           <widget class="SongInfoPanel" name="songInfoPanel" native="true">
-            <property name="minimumSize">
-             <size>
-              <width>120</width>
-              <height>240</height>
-             </size>
-            </property>
-           </widget>
-           <widget class="SpectrumWidget" name="spectrumWidget" native="true">
-            <property name="minimumSize">
-             <size>
-              <width>120</width>
-              <height>240</height>
-             </size>
-            </property>
-           </widget>
-           <widget class="QLabel" name="coverLabel">
-            <property name="minimumSize">
-             <size>
-              <width>120</width>
-              <height>120</height>
-             </size>
-            </property>
-            <property name="text">
-             <string/>
-            </property>
-            <property name="alignment">
-             <set>Qt::AlignmentFlag::AlignCenter</set>
-            </property>
-           </widget>
-           <widget class="PlaylistTabs" name="playlistTabs" native="true">
-            <property name="minimumSize">
-             <size>
-              <width>300</width>
-              <height>300</height>
-             </size>
-            </property>
-           </widget>
-          </widget>
-         </item>
-        </layout>
-       </widget>
-      </item>
-     </layout>
+         <widget class="SongInfoPanel" name="songInfoPanel" native="true">
+          <property name="minimumSize">
+           <size>
+            <width>120</width>
+            <height>240</height>
+           </size>
+          </property>
+         </widget>
+         <widget class="SpectrumWidget" name="spectrumWidget" native="true">
+          <property name="minimumSize">
+           <size>
+            <width>120</width>
+            <height>240</height>
+           </size>
+          </property>
+         </widget>
+         <widget class="QLabel" name="coverLabel">
+          <property name="minimumSize">
+           <size>
+            <width>120</width>
+            <height>120</height>
+           </size>
+          </property>
+          <property name="text">
+           <string/>
+          </property>
+          <property name="alignment">
+           <set>Qt::AlignmentFlag::AlignCenter</set>
+          </property>
+         </widget>
+         <widget class="PlaylistTabs" name="playlistTabs" native="true">
+          <property name="minimumSize">
+           <size>
+            <width>300</width>
+            <height>300</height>
+           </size>
+          </property>
+         </widget>
+        </widget>
+       </item>
+      </layout>
+     </widget>
     </item>
    </layout>
   </widget>

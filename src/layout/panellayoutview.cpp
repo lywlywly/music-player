@@ -1,5 +1,6 @@
 #include "panellayoutview.h"
 
+#include <QBoxLayout>
 #include <QLabel>
 #include <QSplitter>
 #include <QTabWidget>
@@ -60,8 +61,8 @@ void PanelLayoutView::setLayout(PanelLayout layout) {
   }
   connections_.clear();
   // The elements go back to the store before the containers are deleted,
-  // since a QSplitter or QTabWidget deletes its children. Hidden explicitly,
-  // so a widget that follows its visibility sees it hide.
+  // since a container (splitter, box or tab widget) deletes its children.
+  // Hidden explicitly, so a widget that follows its visibility sees it hide.
   for (QWidget *element : std::as_const(elements_)) {
     if (element->parentWidget() != store_) {
       element->hide();
@@ -102,6 +103,31 @@ QWidget *PanelLayoutView::build(const PanelLayout::Node &node,
     // Scaled to the splitter's size by their ratio.
     splitter->setSizes({node.sizes[0], node.sizes[1]});
     widget = splitter;
+    break;
+  }
+  case PanelLayout::Kind::HBox:
+  case PanelLayout::Kind::VBox: {
+    // Each child gets what its size policy asks for: the expanding ones share
+    // the extra space, the others keep their size hint. The box is no larger
+    // than its children allow: without SetMaximumSize its widget, Preferred,
+    // would share a parent box's extra space with its siblings, so a row of
+    // fixed-height controls would grow as tall as the panel beside it.
+    auto *box = new QWidget;
+    auto *boxLayout = new QBoxLayout(node.kind == PanelLayout::Kind::HBox
+                                         ? QBoxLayout::LeftToRight
+                                         : QBoxLayout::TopToBottom,
+                                     box);
+    boxLayout->setContentsMargins(0, 0, 0, 0);
+    boxLayout->setSizeConstraint(QLayout::SetMaximumSize);
+    for (int i = 0; i < static_cast<int>(node.children.size()); ++i) {
+      PanelLayout::Path childPath = path;
+      childPath.push_back(i);
+      QWidget *child = build(node.children[i], childPath);
+      boxLayout->addWidget(child);
+      // An element parked in the store was hidden explicitly.
+      child->show();
+    }
+    widget = box;
     break;
   }
   case PanelLayout::Kind::Tabs: {

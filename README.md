@@ -32,12 +32,14 @@ A cross-platform desktop music player focused on local-library playback, lyrics,
   (GStreamer backend; the Qt backend only where Qt has its FFmpeg media
   backend)
 * Editable layout (View > Edit Layout): while it is on, right-click any part
-  of the area below the playback controls to insert, replace, delete, cut or
-  paste panels, splitters and tabs, or to add, move, rename and remove tabs;
-  Parent reaches the container around it. Splitter sizes, the current tabs
-  and tab names are kept. The default layout shows Properties, the cover and
-  the playlist; Lyrics and Spectrum are inserted from Edit Layout. View >
-  Reset Layout goes back to the default
+  of the toolbar to arrange the playback controls (buttons, seek bar,
+  volume) in rows and columns, or of the area below it to insert, replace,
+  delete, cut or paste panels, splitters and tabs, or to add, move, rename
+  and remove tabs; Parent reaches the container around it. Splitter sizes,
+  the current tabs and tab names are kept. The default layout shows
+  Properties, the cover and the playlist; Lyrics and Spectrum are inserted
+  from Edit Layout. View > Reset Layout goes back to the default toolbar
+  and layout
 * Customizable lyrics panel style
 * Customizable display expressions (status bar + window title)
 * Display theme mode: system default / light / dark

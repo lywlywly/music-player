@@ -15,8 +15,9 @@ class QWidget;
 //
 // Each element is an existing widget, registered once; the view only moves
 // it. An element not in the tree waits, hidden, in the store widget, a hidden
-// widget the caller owns. Every setLayout rebuilds the containers. The view
-// writes splitter moves and tab switches into its layout and reports them.
+// widget the caller owns. Every setLayout rebuilds the containers (splitters,
+// boxes and tab widgets). The view writes splitter moves and tab switches into
+// its layout and reports them.
 // The host must have no layout: the view gives it one for the root widget.
 //
 // A child of the host, created before the containers it builds in it, so it

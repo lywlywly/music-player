@@ -5,9 +5,11 @@ fallback, the Windows table selection fix, and the light and dark theme.
 
 ## Playback toolbar icons
 
-* `mainwindow.ui` keeps the playback buttons in a nested
-  `playbackButtonsLayout`, so the group has its own compact spacing before the
-  volume and seek sliders.
+* `mainwindow.ui` keeps the playback buttons in one widget,
+  `playbackButtons`, whose `playbackButtonsLayout` gives the group its own
+  compact spacing; the toolbar places it as one element
+  ([layout-editing.md](layout-editing.md), "The playback controls as
+  elements").
 * The SVG icons are in `src/resources/icons`, registered through
   `src/resources/resources.qrc`; their attribution is in
   `THIRD_PARTY_NOTICES.md`. `media-playback-random.svg` is our own composite:

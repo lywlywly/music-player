@@ -18,7 +18,13 @@ Node splitter(Kind kind, std::vector<int> sizes, Node first, Node second) {
 }
 } // namespace
 
-PanelLayout MainWindowLayout::defaultLayout() {
+PanelLayout MainWindowLayout::defaultToolbar() {
+  return PanelLayout({.kind = Kind::HBox,
+                      .children = {element(kPlaybackButtons), element(kVolume),
+                                   element(kSeekBar)}});
+}
+
+PanelLayout MainWindowLayout::defaultPanels() {
   // The info side starts at a quarter of the width, not at its panels' size
   // hints (docs/architecture.md, "App composition"); Properties and the cover
   // share it 3 to 5.

@@ -85,7 +85,8 @@ void TestPanelLayoutEditor::init() {
   Node root{.kind = Kind::HSplitter, .sizes = {1, 1}};
   root.children = {element("a"), std::move(tabs)};
   view_->setLayout(PanelLayout(std::move(root)));
-  editor_ = new PanelLayoutEditor(*view_);
+  editor_ = new PanelLayoutEditor(*view_, {Kind::HSplitter, Kind::VSplitter,
+                                           Kind::HBox, Kind::VBox, Kind::Tabs});
   window_->resize(400, 300);
   host->resize(400, 300);
   window_->show();
@@ -176,7 +177,8 @@ void TestPanelLayoutEditor::menu_itemsForEachKindOfNode() {
   QVERIFY(!actionNamed(menu, "Paste")->isEnabled());
   QCOMPARE(actionTexts(actionNamed(menu, "Replace with")->menu()),
            (QStringList{"C", "Splitter (Left and Right)",
-                        "Splitter (Top and Bottom)", "Tabs"}));
+                        "Splitter (Top and Bottom)", "Box (Left to Right)",
+                        "Box (Top to Bottom)", "Tabs"}));
   // Parent is the splitter's menu, which has no parent.
   QMenu *parent = actionNamed(menu, "Parent")->menu();
   QCOMPARE(actionTexts(parent),
@@ -207,12 +209,46 @@ void TestPanelLayoutEditor::menu_itemsForEachKindOfNode() {
       (QStringList{"Empty", "Insert", "Paste", "Move Tab Left",
                    "Move Tab Right", "Rename Tab...", "Remove Tab", "Parent"}));
   closeMenu(menu);
+
+  // Children of boxes: vbox(hbox(a, placeholder), b).
+  Node row{.kind = Kind::HBox, .children = {element("a"), Node{}}};
+  view_->setLayout(PanelLayout(
+      {.kind = Kind::VBox, .children = {std::move(row), element("b")}}));
+  menu = requestMenu(a_);
+  QVERIFY(menu != nullptr);
+  QCOMPARE(actionTexts(menu),
+           (QStringList{"A", "Replace with", "Delete", "Cut", "Paste",
+                        "Move Left", "Move Right", "Remove Slot", "Parent"}));
+  QVERIFY(!actionNamed(menu, "Move Left")->isEnabled());
+  QVERIFY(actionNamed(menu, "Move Right")->isEnabled());
+  // The hbox is the vbox's first child.
+  parent = actionNamed(menu, "Parent")->menu();
+  QCOMPARE(actionTexts(parent),
+           (QStringList{"Box (Left to Right)", "Replace with", "Delete", "Cut",
+                        "Paste", "Add Slot", "Move Up", "Move Down",
+                        "Remove Slot", "Parent"}));
+  QVERIFY(!actionNamed(parent, "Move Up")->isEnabled());
+  QCOMPARE(actionTexts(actionNamed(parent, "Parent")->menu()).first(),
+           QString("Box (Top to Bottom)"));
+  closeMenu(menu);
+
+  // An editor offers only the container kinds it was given.
+  delete editor_;
+  editor_ = new PanelLayoutEditor(*view_, {Kind::HBox, Kind::VBox});
+  editor_->setEnabled(true);
+  menu = requestMenu(b_);
+  QVERIFY(menu != nullptr);
+  QCOMPARE(actionTexts(actionNamed(menu, "Replace with")->menu()),
+           (QStringList{"C", "Box (Left to Right)", "Box (Top to Bottom)"}));
+  closeMenu(menu);
 }
 
 void TestPanelLayoutEditor::menuItems_applyTheirEdit() {
   editor_->setEnabled(true);
   // Each item, from the menu of the node at target, makes the same edit as
-  // the PanelLayout call (tested in tst_panellayout) and reports it once.
+  // the PanelLayout call (tested in tst_panellayout) and reports it once. A
+  // box's child items are the tab items' actions under other labels, which
+  // menu_itemsForEachKindOfNode checks.
   struct Case {
     PanelLayout::Path target;
     QStringList items;
@@ -229,17 +265,23 @@ void TestPanelLayoutEditor::menuItems_applyTheirEdit() {
        {"Replace with", "Splitter (Top and Bottom)"},
        [](PanelLayout &l) { l.split({0}, Kind::VSplitter); }},
       {{0},
+       {"Replace with", "Box (Left to Right)"},
+       [](PanelLayout &l) { l.split({0}, Kind::HBox); }},
+      {{0},
+       {"Replace with", "Box (Top to Bottom)"},
+       [](PanelLayout &l) { l.split({0}, Kind::VBox); }},
+      {{0},
        {"Replace with", "Tabs"},
        [](PanelLayout &l) { l.wrapInTabs({0}); }},
       {{0}, {"Delete"}, [](PanelLayout &l) { l.take({0}); }},
       {{1, 0},
        {"Move Tab Right"},
-       [](PanelLayout &l) { l.moveTab({1, 0}, 1); }},
+       [](PanelLayout &l) { l.moveChild({1, 0}, 1); }},
       {{1, 1},
        {"Move Tab Left"},
-       [](PanelLayout &l) { l.moveTab({1, 1}, -1); }},
-      {{1, 0}, {"Remove Tab"}, [](PanelLayout &l) { l.removeTab({1, 0}); }},
-      {{1, 0}, {"Parent", "Add Tab"}, [](PanelLayout &l) { l.addTab({1}); }},
+       [](PanelLayout &l) { l.moveChild({1, 1}, -1); }},
+      {{1, 0}, {"Remove Tab"}, [](PanelLayout &l) { l.removeChild({1, 0}); }},
+      {{1, 0}, {"Parent", "Add Tab"}, [](PanelLayout &l) { l.addChild({1}); }},
   };
   const PanelLayout start = view_->layout();
   for (const Case &c : cases) {

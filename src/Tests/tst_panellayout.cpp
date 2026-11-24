@@ -17,6 +17,10 @@ Node splitter(Kind kind, Node first, Node second,
   return node;
 }
 
+Node box(Kind kind, std::vector<Node> children) {
+  return {.kind = kind, .children = std::move(children)};
+}
+
 Node tabs(std::vector<Node> children, int current = 0) {
   return {.kind = Kind::Tabs,
           .currentTab = current,
@@ -47,7 +51,7 @@ private slots:
   void splitAndWrapInTabs_keepTheNode();
   void take_leavesAPlaceholder();
   void paste_elementPlacedSinceBecomesPlaceholder();
-  void tabs_addMoveAndRemove();
+  void children_addMoveAndRemove();
   void tabTitles_stayWithTheirTabs();
 };
 
@@ -69,13 +73,26 @@ void TestPanelLayout::json_roundTrip() {
   QVERIFY(*hand == PanelLayout(splitter(Kind::VSplitter, Node{},
                                         element("spectrum"), {2, 3})));
   QCOMPARE(hand->toJson(), json);
+
+  // Boxes have only children.
+  const QByteArray boxes = R"({"children":[{"children":[{"id":"buttons",)"
+                           R"("type":"element"},{"type":"placeholder"}],)"
+                           R"("type":"hbox"},{"id":"playlist",)"
+                           R"("type":"element"}],"type":"vbox"})";
+  const std::optional<PanelLayout> boxed = PanelLayout::fromJson(boxes);
+  QVERIFY(boxed.has_value());
+  QVERIFY(*boxed ==
+          PanelLayout(
+              box(Kind::VBox, {box(Kind::HBox, {element("buttons"), Node{}}),
+                               element("playlist")})));
+  QCOMPARE(boxed->toJson(), boxes);
 }
 
 void TestPanelLayout::fromJson_rejectsInvalidTrees_data() {
   QTest::addColumn<QByteArray>("json");
   QTest::newRow("not json") << QByteArray("{");
   QTest::newRow("array") << QByteArray("[]");
-  QTest::newRow("unknown type") << QByteArray(R"({"type":"box"})");
+  QTest::newRow("unknown type") << QByteArray(R"({"type":"grid"})");
   QTest::newRow("splitter with one child")
       << QByteArray(R"({"type":"hsplitter","sizes":[1,1],)"
                     R"("children":[{"type":"placeholder"}]})");
@@ -88,6 +105,7 @@ void TestPanelLayout::fromJson_rejectsInvalidTrees_data() {
   QTest::newRow("size not a number")
       << QByteArray(R"({"type":"hsplitter","sizes":["1",1],"children":)"
                     R"([{"type":"placeholder"},{"type":"placeholder"}]})");
+  QTest::newRow("box without children") << QByteArray(R"({"type":"hbox"})");
   QTest::newRow("tabs without children")
       << QByteArray(R"({"type":"tabs","current":0})");
   QTest::newRow("current out of range")
@@ -151,6 +169,10 @@ void TestPanelLayout::splitAndWrapInTabs_keepTheNode() {
   layout.split({1, 1}, Kind::HSplitter);
   QCOMPARE(layout.node({1, 1}), splitter(Kind::HSplitter, Node{}, Node{}));
 
+  // A box the same way, without sizes.
+  layout.split({1, 0}, Kind::HBox);
+  QCOMPARE(layout.node({1, 0}), box(Kind::HBox, {element("playlist"), Node{}}));
+
   layout.wrapInTabs({0, 1});
   QCOMPARE(layout.node({0, 1}), tabs({element("cover")}));
 }
@@ -180,33 +202,45 @@ void TestPanelLayout::paste_elementPlacedSinceBecomesPlaceholder() {
   QCOMPARE(layout.node({1}), tabs({Node{}, element("properties")}, 1));
 }
 
-void TestPanelLayout::tabs_addMoveAndRemove() {
+void TestPanelLayout::children_addMoveAndRemove() {
+  // A box's children.
+  PanelLayout row(box(Kind::HBox, {element("buttons"), element("seekbar")}));
+  row.addChild({});
+  QCOMPARE(row.root(),
+           box(Kind::HBox, {element("buttons"), element("seekbar"), Node{}}));
+  row.moveChild({0}, 1);
+  QCOMPARE(row.root(),
+           box(Kind::HBox, {element("seekbar"), element("buttons"), Node{}}));
+  row.removeChild({1});
+  QCOMPARE(row.root(), box(Kind::HBox, {element("seekbar"), Node{}}));
+
+  // A tabs node's.
   PanelLayout layout = sample();
   const PanelLayout::Path tabsPath{0, 0};
-  layout.addTab(tabsPath);
+  layout.addChild(tabsPath);
   QCOMPARE(layout.node(tabsPath),
            tabs({element("lyrics"), element("properties"), Node{}}, 1));
 
   // The current tab follows its page.
-  layout.moveTab({0, 0, 1}, -1);
+  layout.moveChild({0, 0, 1}, -1);
   QCOMPARE(layout.node(tabsPath),
            tabs({element("properties"), element("lyrics"), Node{}}, 0));
-  layout.moveTab({0, 0, 1}, 1);
+  layout.moveChild({0, 0, 1}, 1);
   QCOMPARE(layout.node(tabsPath),
            tabs({element("properties"), Node{}, element("lyrics")}, 0));
-  layout.moveTab({0, 0, 1}, -1);
+  layout.moveChild({0, 0, 1}, -1);
   QCOMPARE(layout.node(tabsPath),
            tabs({Node{}, element("properties"), element("lyrics")}, 1));
 
   // Removing the current tab makes the next one current; removing the last
   // one, the one before it.
-  layout.removeTab({0, 0, 1});
+  layout.removeChild({0, 0, 1});
   QCOMPARE(layout.node(tabsPath), tabs({Node{}, element("lyrics")}, 1));
-  layout.removeTab({0, 0, 1});
+  layout.removeChild({0, 0, 1});
   QCOMPARE(layout.node(tabsPath), tabs({Node{}}, 0));
   // Removing a tab before the current one keeps the current page.
   PanelLayout other = sample();
-  other.removeTab({0, 0, 0});
+  other.removeChild({0, 0, 0});
   QCOMPARE(other.node(tabsPath), tabs({element("properties")}, 0));
 }
 
@@ -223,11 +257,11 @@ void TestPanelLayout::tabTitles_stayWithTheirTabs() {
   layout.split({0, 0, 0}, Kind::VSplitter);
   layout.take({0, 0, 0});
   QCOMPARE(titles(), (std::vector<QString>{"Words", ""}));
-  layout.addTab(tabsPath);
+  layout.addChild(tabsPath);
   QCOMPARE(titles(), (std::vector<QString>{"Words", "", ""}));
-  layout.moveTab({0, 0, 0}, 1);
+  layout.moveChild({0, 0, 0}, 1);
   QCOMPARE(titles(), (std::vector<QString>{"", "Words", ""}));
-  layout.removeTab({0, 0, 0});
+  layout.removeChild({0, 0, 0});
   QCOMPARE(titles(), (std::vector<QString>{"Words", ""}));
 
   // Kept in the JSON.

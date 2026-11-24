@@ -5,6 +5,7 @@
 #include <QObject>
 #include <QPointer>
 #include <optional>
+#include <vector>
 
 class PanelLayoutView;
 class QMenu;
@@ -18,8 +19,10 @@ class PanelLayoutEditor : public QObject {
   Q_OBJECT
 
 public:
-  // A child of view, so it goes with it.
-  explicit PanelLayoutEditor(PanelLayoutView &view);
+  // A child of view, so it goes with it. containerKinds are the containers
+  // (splitters, boxes, Tabs) that Insert and Replace with offer, in order.
+  PanelLayoutEditor(PanelLayoutView &view,
+                    std::vector<PanelLayout::Kind> containerKinds);
 
   void setEnabled(bool enabled);
 
@@ -40,6 +43,7 @@ private:
   void showOverlay(QWidget *target);
 
   PanelLayoutView &view_;
+  const std::vector<PanelLayout::Kind> containerKinds_;
   // The subtree of the last Cut, until it is pasted.
   std::optional<PanelLayout::Node> cut_;
   QPointer<QWidget> overlay_;

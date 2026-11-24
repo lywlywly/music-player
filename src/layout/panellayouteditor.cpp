@@ -14,10 +14,53 @@ using Kind = PanelLayout::Kind;
 using Path = PanelLayout::Path;
 
 Path parentOf(const Path &path) { return Path(path.begin(), path.end() - 1); }
+
+bool isBox(Kind kind) { return kind == Kind::HBox || kind == Kind::VBox; }
+
+// A container kind's name, as a menu title and an Insert item.
+QString containerTitle(Kind kind) {
+  switch (kind) {
+  case Kind::HSplitter:
+    return PanelLayoutEditor::tr("Splitter (Left and Right)");
+  case Kind::VSplitter:
+    return PanelLayoutEditor::tr("Splitter (Top and Bottom)");
+  case Kind::HBox:
+    return PanelLayoutEditor::tr("Box (Left to Right)");
+  case Kind::VBox:
+    return PanelLayoutEditor::tr("Box (Top to Bottom)");
+  default:
+    return PanelLayoutEditor::tr("Tabs");
+  }
+}
+
+// The items that move and remove a child of a box or a tabs node.
+struct ChildItems {
+  QString back;
+  QString forward;
+  QString remove;
+};
+
+ChildItems childItems(Kind parentKind) {
+  switch (parentKind) {
+  case Kind::HBox:
+    return {PanelLayoutEditor::tr("Move Left"),
+            PanelLayoutEditor::tr("Move Right"),
+            PanelLayoutEditor::tr("Remove Slot")};
+  case Kind::VBox:
+    return {PanelLayoutEditor::tr("Move Up"),
+            PanelLayoutEditor::tr("Move Down"),
+            PanelLayoutEditor::tr("Remove Slot")};
+  default:
+    return {PanelLayoutEditor::tr("Move Tab Left"),
+            PanelLayoutEditor::tr("Move Tab Right"),
+            PanelLayoutEditor::tr("Remove Tab")};
+  }
+}
 } // namespace
 
-PanelLayoutEditor::PanelLayoutEditor(PanelLayoutView &view)
-    : QObject(&view), view_(view) {}
+PanelLayoutEditor::PanelLayoutEditor(
+    PanelLayoutView &view, std::vector<PanelLayout::Kind> containerKinds)
+    : QObject(&view), view_(view), containerKinds_(std::move(containerKinds)) {}
 
 void PanelLayoutEditor::setEnabled(bool enabled) {
   if (enabled) {
@@ -66,20 +109,14 @@ QMenu *PanelLayoutEditor::createMenu(const Path &path, QWidget *parent) {
 
   QString title;
   switch (node.kind) {
-  case Kind::HSplitter:
-    title = tr("Splitter (Left and Right)");
-    break;
-  case Kind::VSplitter:
-    title = tr("Splitter (Top and Bottom)");
-    break;
-  case Kind::Tabs:
-    title = tr("Tabs");
-    break;
   case Kind::Element:
     title = view_.title(node.elementId);
     break;
   case Kind::Placeholder:
     title = tr("Empty");
+    break;
+  default:
+    title = containerTitle(node.kind);
     break;
   }
   menu->addAction(title)->setEnabled(false);
@@ -98,15 +135,17 @@ QMenu *PanelLayoutEditor::createMenu(const Path &path, QWidget *parent) {
     }
   }
   insert->addSeparator();
-  insert->addAction(tr("Splitter (Left and Right)"), this, [this, path]() {
-    edit([&](PanelLayout &l) { l.split(path, Kind::HSplitter); });
-  });
-  insert->addAction(tr("Splitter (Top and Bottom)"), this, [this, path]() {
-    edit([&](PanelLayout &l) { l.split(path, Kind::VSplitter); });
-  });
-  insert->addAction(tr("Tabs"), this, [this, path]() {
-    edit([&](PanelLayout &l) { l.wrapInTabs(path); });
-  });
+  for (const Kind kind : containerKinds_) {
+    insert->addAction(containerTitle(kind), this, [this, path, kind]() {
+      edit([&](PanelLayout &l) {
+        if (kind == Kind::Tabs) {
+          l.wrapInTabs(path);
+        } else {
+          l.split(path, kind);
+        }
+      });
+    });
+  }
 
   if (!placeholder) {
     menu->addAction(tr("Delete"), this, [this, path]() {
@@ -121,36 +160,41 @@ QMenu *PanelLayoutEditor::createMenu(const Path &path, QWidget *parent) {
   });
   paste->setEnabled(cut_.has_value());
 
-  if (node.kind == Kind::Tabs) {
+  if (isBox(node.kind) || node.kind == Kind::Tabs) {
     menu->addSeparator();
-    menu->addAction(tr("Add Tab"), this, [this, path]() {
-      edit([&](PanelLayout &l) { l.addTab(path); });
-    });
+    menu->addAction(
+        isBox(node.kind) ? tr("Add Slot") : tr("Add Tab"), this,
+        [this, path]() { edit([&](PanelLayout &l) { l.addChild(path); }); });
   }
-  if (!path.empty() && layout.node(parentOf(path)).kind == Kind::Tabs) {
+  const PanelLayout::Node *parentNode =
+      path.empty() ? nullptr : &layout.node(parentOf(path));
+  if (parentNode != nullptr &&
+      (isBox(parentNode->kind) || parentNode->kind == Kind::Tabs)) {
     const int index = path.back();
-    const int count =
-        static_cast<int>(layout.node(parentOf(path)).children.size());
+    const int count = static_cast<int>(parentNode->children.size());
+    const ChildItems items = childItems(parentNode->kind);
     menu->addSeparator();
-    menu->addAction(tr("Move Tab Left"), this,
+    menu->addAction(items.back, this,
                     [this, path]() {
-                      edit([&](PanelLayout &l) { l.moveTab(path, -1); });
+                      edit([&](PanelLayout &l) { l.moveChild(path, -1); });
                     })
         ->setEnabled(index > 0);
-    menu->addAction(tr("Move Tab Right"), this,
+    menu->addAction(items.forward, this,
                     [this, path]() {
-                      edit([&](PanelLayout &l) { l.moveTab(path, 1); });
+                      edit([&](PanelLayout &l) { l.moveChild(path, 1); });
                     })
         ->setEnabled(index < count - 1);
-    // The dialog opens from the event loop, after the menu closed: its own
-    // event loop must not run inside the action of a menu being deleted.
-    menu->addAction(tr("Rename Tab..."), this, [this, path]() {
-      QMetaObject::invokeMethod(
-          this, [this, path]() { renameTab(path); }, Qt::QueuedConnection);
-    });
-    menu->addAction(tr("Remove Tab"), this,
+    if (parentNode->kind == Kind::Tabs) {
+      // The dialog opens from the event loop, after the menu closed: its own
+      // event loop must not run inside the action of a menu being deleted.
+      menu->addAction(tr("Rename Tab..."), this, [this, path]() {
+        QMetaObject::invokeMethod(
+            this, [this, path]() { renameTab(path); }, Qt::QueuedConnection);
+      });
+    }
+    menu->addAction(items.remove, this,
                     [this, path]() {
-                      edit([&](PanelLayout &l) { l.removeTab(path); });
+                      edit([&](PanelLayout &l) { l.removeChild(path); });
                     })
         ->setEnabled(count > 1);
   }

@@ -46,6 +46,7 @@ private slots:
   void cleanup();
 
   void setLayout_placesElementsAndLabels();
+  void box_placesChildrenAndKeepsARowsHeight();
   void setLayout_again_keepsElementsAndParksTheOthers();
   void splitterMoveAndTabSwitch_areWrittenToTheTree();
   void pathOf_findsTheNodeOfAnyWidgetInIt();
@@ -91,7 +92,7 @@ void TestPanelLayoutView::setLayout_placesElementsAndLabels() {
   layout.split({0}, Kind::VSplitter);
   // An unavailable element and one with no name either.
   layout.replaceWithElement({0, 1}, "gone");
-  layout.addTab({1});
+  layout.addChild({1});
   layout.replaceWithElement({1, 2}, "unknown");
   view_->setLayout(layout);
 
@@ -127,6 +128,29 @@ void TestPanelLayoutView::setLayout_placesElementsAndLabels() {
   layout.setTabTitle({1, 0}, "Named");
   view_->setLayout(layout);
   QCOMPARE(tabWidgetOf(b_)->tabText(0), QString("Named"));
+}
+
+void TestPanelLayoutView::box_placesChildrenAndKeepsARowsHeight() {
+  // vbox(hbox(c), a): each child placed in its box, in order, shown. The row
+  // keeps the height of its fixed-height child, though a (Preferred, like the
+  // row's own widget) does not expand either.
+  c_->setFixedHeight(20);
+  Node row{.kind = Kind::HBox, .children = {element("c")}};
+  view_->setLayout(PanelLayout(
+      {.kind = Kind::VBox, .children = {std::move(row), element("a")}}));
+  QWidget *rowWidget = view_->widgetAt({0});
+  QCOMPARE(c_->parentWidget(), rowWidget);
+  QCOMPARE(rowWidget->parentWidget(), view_->widgetAt({}));
+  QCOMPARE(a_->parentWidget(), view_->widgetAt({}));
+  QVERIFY(c_->isVisible() && a_->isVisible());
+  QTRY_COMPARE(rowWidget->height(), 20);
+  QVERIFY(rowWidget->y() < a_->y());
+  QVERIFY(a_->height() > 200);
+
+  // Deleting the boxes on a rebuild keeps c, parked in the store.
+  view_->setLayout(sample());
+  QVERIFY(c_);
+  QCOMPARE(c_->parentWidget(), store_);
 }
 
 void TestPanelLayoutView::setLayout_again_keepsElementsAndParksTheOthers() {

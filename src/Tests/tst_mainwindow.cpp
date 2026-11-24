@@ -1,6 +1,7 @@
 #include <QAbstractButton>
 #include <QAction>
 #include <QApplication>
+#include <QBoxLayout>
 #include <QContextMenuEvent>
 #include <QDir>
 #include <QElapsedTimer>
@@ -107,7 +108,7 @@ QString statusAt(const Playlist *playlist, int row, int statusCol) {
   return model->data(model->index(row, statusCol), Qt::DisplayRole).toString();
 }
 
-// The default layout with Lyrics (from the plugin in Tests/plugins),
+// The default panel layout with Lyrics (from the plugin in Tests/plugins),
 // Properties and Spectrum in tabs in place of Properties.
 PanelLayout infoTabsLayout() {
   PanelLayout::Node tabs{.kind = PanelLayout::Kind::Tabs};
@@ -117,10 +118,21 @@ PanelLayout infoTabsLayout() {
         {.kind = PanelLayout::Kind::Element, .elementId = id});
     tabs.tabTitles.emplace_back();
   }
-  PanelLayout layout = MainWindowLayout::defaultLayout();
+  PanelLayout layout = MainWindowLayout::defaultPanels();
   layout.take({0, 0});
   layout.paste({0, 0}, std::move(tabs));
   return layout;
+}
+
+// The texts of menu's actions, separators left out.
+QStringList actionTexts(const QMenu *menu) {
+  QStringList texts;
+  for (const QAction *action : menu->actions()) {
+    if (!action->isSeparator()) {
+      texts.append(action->text());
+    }
+  }
+  return texts;
 }
 
 // The tab widget whose page holds widget, or nullptr.
@@ -474,7 +486,7 @@ void TestMainWindow::backendSignals_updateUiAndSystemMedia() {
   QVERIFY(player != nullptr);
   DummyAudioPlayer *dummyPlayer = qobject_cast<DummyAudioPlayer *>(player);
   QVERIFY(dummyPlayer != nullptr);
-  QSlider *slider = window_->findChild<QSlider *>("horizontalSlider");
+  QSlider *slider = window_->findChild<QSlider *>("seekSlider");
   QVERIFY(slider != nullptr);
   QStatusBar *statusBar = window_->findChild<QStatusBar *>("statusbar");
   QVERIFY(statusBar != nullptr);
@@ -738,7 +750,7 @@ void TestMainWindow::sliderReleased_invokesSeekFlow() {
   DummySystemMediaInterface *media =
       window_->findChild<DummySystemMediaInterface *>();
   QVERIFY(media != nullptr);
-  QSlider *slider = window_->findChild<QSlider *>("horizontalSlider");
+  QSlider *slider = window_->findChild<QSlider *>("seekSlider");
   QVERIFY(slider != nullptr);
 
   slider->setMaximum(1000);
@@ -1291,8 +1303,8 @@ void TestMainWindow::play_allFilesMissing_stopsAndReportsError() {
 }
 
 void TestMainWindow::layout_defaultAndSavedTabsAndShowSelectedSong() {
-  // The default layout: Properties above the cover, beside the playlist, no
-  // tabs; Lyrics and Spectrum wait in the store.
+  // The default panel layout: Properties above the cover, beside the
+  // playlist, no tabs; Lyrics and Spectrum wait in the store.
   auto *panel = window_->findChild<SongInfoPanel *>("songInfoPanel");
   QVERIFY(panel != nullptr);
   auto *info = qobject_cast<QSplitter *>(panel->parentWidget());
@@ -1304,7 +1316,22 @@ void TestMainWindow::layout_defaultAndSavedTabsAndShowSelectedSong() {
   QVERIFY(root != nullptr);
   QCOMPARE(root->orientation(), Qt::Horizontal);
   QCOMPARE(root->widget(1), window_->findChild<QWidget *>("playlistTabs"));
+  QCOMPARE(root->parentWidget(), window_->findChild<QWidget *>("layoutHost"));
   QCOMPARE(tabWidgetOf(panel), nullptr);
+  // The default toolbar: buttons, volume, seek bar in a row.
+  auto *buttons = window_->findChild<QWidget *>("playbackButtons");
+  QWidget *row = buttons->parentWidget();
+  auto *rowLayout = qobject_cast<QBoxLayout *>(row->layout());
+  QVERIFY(rowLayout != nullptr);
+  QCOMPARE(rowLayout->direction(), QBoxLayout::LeftToRight);
+  QCOMPARE(rowLayout->indexOf(buttons), 0);
+  QCOMPARE(rowLayout->indexOf(window_->findChild<QWidget *>("volumeSlider")),
+           1);
+  QCOMPARE(rowLayout->indexOf(window_->findChild<QWidget *>("seekSlider")), 2);
+  QCOMPARE(row->parentWidget(), window_->findChild<QWidget *>("toolbarHost"));
+  // The toolbar keeps its row's height; the panel layout takes the rest.
+  window_->show();
+  QTRY_COMPARE(row->parentWidget()->height(), row->sizeHint().height());
   auto *store = window_->findChild<QWidget *>("layoutElements");
   QCOMPARE(window_->findChild<QWidget *>("lyricsPanel")->parentWidget(), store);
   QCOMPARE(
@@ -1460,7 +1487,7 @@ void TestMainWindow::abRepeatMenu_loopsThePlayingSong() {
       window_->findChild<PlaybackBackendManager *>()->player());
   QVERIFY(player != nullptr);
   player->setDurationForTest(125000);
-  auto *slider = window_->findChild<QSlider *>("horizontalSlider");
+  auto *slider = window_->findChild<QSlider *>("seekSlider");
   window_->findChild<QAction *>("actionPlay")->trigger();
   QTRY_COMPARE(slider->maximum(), 125000);
 
@@ -1487,8 +1514,8 @@ void TestMainWindow::abRepeatMenu_loopsThePlayingSong() {
 }
 
 void TestMainWindow::layout_startsAtAQuarterAndRestoresDraggedSizes() {
-  // The default layout's root splitter, and the one between the info tabs and
-  // the cover.
+  // The default panel layout's root splitter, and the one between Properties
+  // and the cover.
   const auto findSplitters = [this]() {
     auto *root = window_->findChild<QWidget *>("layoutHost")
                      ->findChild<QSplitter *>(Qt::FindDirectChildrenOnly);
@@ -1519,17 +1546,23 @@ void TestMainWindow::layout_startsAtAQuarterAndRestoresDraggedSizes() {
 }
 
 void TestMainWindow::layout_resetAndInvalidSavedLayoutGiveTheDefault() {
-  // A saved layout of the playlist alone: Properties waits in the store.
-  const PanelLayout playlistOnly(
-      PanelLayout::Node{.kind = PanelLayout::Kind::Element,
-                        .elementId = MainWindowLayout::kPlaylist});
-  QSettings().setValue("layout/tree", QString::fromUtf8(playlistOnly.toJson()));
+  // Saved layouts of the playlist alone and of the seek bar alone:
+  // Properties and the buttons wait in the store.
+  const auto only = [](const char *id) {
+    return QString::fromUtf8(
+        PanelLayout({.kind = PanelLayout::Kind::Element, .elementId = id})
+            .toJson());
+  };
+  QSettings().setValue("layout/tree", only(MainWindowLayout::kPlaylist));
+  QSettings().setValue("layout/toolbar", only(MainWindowLayout::kSeekBar));
   recreateWindow();
+  auto *store = window_->findChild<QWidget *>("layoutElements");
   auto *panel = window_->findChild<SongInfoPanel *>("songInfoPanel");
-  QCOMPARE(panel->parentWidget(),
-           window_->findChild<QWidget *>("layoutElements"));
+  auto *buttons = window_->findChild<QWidget *>("playbackButtons");
+  QCOMPARE(panel->parentWidget(), store);
+  QCOMPARE(buttons->parentWidget(), store);
 
-  // Reset Layout asks first.
+  // Reset Layout asks first, then resets both.
   QTimer::singleShot(0, []() {
     if (auto *box =
             qobject_cast<QMessageBox *>(QApplication::activeModalWidget())) {
@@ -1538,34 +1571,53 @@ void TestMainWindow::layout_resetAndInvalidSavedLayoutGiveTheDefault() {
   });
   window_->findChild<QAction *>("actionReset_layout")->trigger();
   QVERIFY(qobject_cast<QSplitter *>(panel->parentWidget()) != nullptr);
+  QVERIFY(buttons->parentWidget() != store);
   QCOMPARE(QSettings().value("layout/tree").toString().toUtf8(),
-           MainWindowLayout::defaultLayout().toJson());
+           MainWindowLayout::defaultPanels().toJson());
+  QCOMPARE(QSettings().value("layout/toolbar").toString().toUtf8(),
+           MainWindowLayout::defaultToolbar().toJson());
 
-  // A saved layout that does not parse gives the default too.
-  QSettings().setValue("layout/tree", "{");
+  // A toolbar that does not parse gives the default toolbar, and leaves the
+  // saved panel layout.
+  QSettings().setValue("layout/tree", only(MainWindowLayout::kPlaylist));
+  QSettings().setValue("layout/toolbar", "{");
   QTest::ignoreMessage(
       QtWarningMsg,
-      "MainWindow: layout/tree is not a valid layout; using the default");
+      "MainWindow: layout/toolbar is not a valid layout; using the default");
   recreateWindow();
-  panel = window_->findChild<SongInfoPanel *>("songInfoPanel");
-  QVERIFY(qobject_cast<QSplitter *>(panel->parentWidget()) != nullptr);
+  store = window_->findChild<QWidget *>("layoutElements");
+  QVERIFY(window_->findChild<QWidget *>("playbackButtons")->parentWidget() !=
+          store);
+  QCOMPARE(window_->findChild<SongInfoPanel *>("songInfoPanel")->parentWidget(),
+           store);
 }
 
 void TestMainWindow::layout_editModeIsWiredAndItsEditsAreSaved() {
   auto *editLayout = window_->findChild<QAction *>("actionEdit_layout");
   QVERIFY(editLayout != nullptr);
   QVERIFY(!editLayout->isChecked());
+  auto *store = window_->findChild<QWidget *>("layoutElements");
   auto *panel = window_->findChild<SongInfoPanel *>("songInfoPanel");
-  const auto requestMenu = [panel]() {
+  auto *seekSlider = window_->findChild<QWidget *>("seekSlider");
+  const auto requestMenu = [](QWidget *widget) {
     QContextMenuEvent event(QContextMenuEvent::Mouse, QPoint(5, 5),
-                            panel->mapToGlobal(QPoint(5, 5)));
-    QApplication::sendEvent(panel, &event);
+                            widget->mapToGlobal(QPoint(5, 5)));
+    QApplication::sendEvent(widget, &event);
     return qobject_cast<QMenu *>(QApplication::activePopupWidget());
   };
+  const auto replaceWithItems = [](QMenu *menu) {
+    for (QAction *action : menu->actions()) {
+      if (action->text() == "Replace with") {
+        return actionTexts(action->menu());
+      }
+    }
+    return QStringList();
+  };
 
-  // View > Edit Layout turns edit mode on; Delete's edit is saved.
+  // View > Edit Layout turns edit mode on in both layouts; an edit is saved
+  // in its layout's key.
   editLayout->setChecked(true);
-  QMenu *menu = requestMenu();
+  QMenu *menu = requestMenu(seekSlider);
   QVERIFY(menu != nullptr);
   for (QAction *action : menu->actions()) {
     if (action->text() == "Delete") {
@@ -1573,16 +1625,30 @@ void TestMainWindow::layout_editModeIsWiredAndItsEditsAreSaved() {
     }
   }
   menu->close();
-  QCOMPARE(panel->parentWidget(),
-           window_->findChild<QWidget *>("layoutElements"));
+  QCOMPARE(seekSlider->parentWidget(), store);
   QVERIFY(!QSettings()
-               .value("layout/tree")
+               .value("layout/toolbar")
                .toString()
-               .contains(MainWindowLayout::kProperties));
+               .contains(MainWindowLayout::kSeekBar));
+
+  // Each layout offers only its own elements and containers: the seek bar,
+  // out of the toolbar, is not offered in the panel layout.
+  menu = requestMenu(panel);
+  QVERIFY(menu != nullptr);
+  QCOMPARE(replaceWithItems(menu),
+           (QStringList{"Spectrum", "Lyrics", "Splitter (Left and Right)",
+                        "Splitter (Top and Bottom)", "Tabs"}));
+  menu->close();
+  menu = requestMenu(window_->findChild<QWidget *>("playbackButtons"));
+  QVERIFY(menu != nullptr);
+  QCOMPARE(
+      replaceWithItems(menu),
+      (QStringList{"Seek Bar", "Box (Left to Right)", "Box (Top to Bottom)"}));
+  menu->close();
 
   // And off again.
   editLayout->setChecked(false);
-  QCOMPARE(requestMenu(), nullptr);
+  QCOMPARE(requestMenu(panel), nullptr);
 }
 
 void TestMainWindow::spectrum_tapGoesToThePlayerWhileShown() {

@@ -6,6 +6,7 @@
 #include "databasemanager.h"
 #include "efswfilesystemmonitor.h"
 #include "globalcolumnlayoutmanager.h"
+#include "layout/panellayout.h"
 #include "monitoredlibrary.h"
 #include "playbackcontroller.h"
 #include "playlist.h"
@@ -17,6 +18,8 @@
 #include <QMainWindow>
 #include <QPointer>
 #include <QString>
+#include <functional>
+#include <vector>
 
 class NowPlayingPresenter;
 class PanelLayoutView;
@@ -74,10 +77,17 @@ private:
   // Refreshes the plugins' song fields when their values change.
   void setUpProvidedFields();
   void setUpMenuBar();
-  // Registers the layout's elements (the plugins' panels among them), builds
-  // the saved or default layout, saves its changes, and wires View > Edit
-  // Layout and Reset Layout (docs/layout-editing.md).
+  // Registers the toolbar's controls and the panel layout's panels (the
+  // plugins' among them), sets up both layouts, and wires View > Reset
+  // Layout to reset both (docs/layout-editing.md).
   void setUpLayout();
+  // Builds the layout saved at key, or defaultLayout; saves it at key on each
+  // change; gives it an editor offering containerKinds, turned on by View >
+  // Edit Layout. Returns what resets it to defaultLayout.
+  std::function<void()>
+  setUpLayoutView(PanelLayoutView &view, const char *key,
+                  const PanelLayout &defaultLayout,
+                  std::vector<PanelLayout::Kind> containerKinds);
   // Adds the plugins' menus to the Playback menu.
   void setUpPluginMenus();
   void openLibrarySearchDialog();
@@ -102,8 +112,6 @@ private:
   SpectrumPresenter *spectrum_ = nullptr;
   SystemMediaPresenter *systemMedia_ = nullptr;
   NowPlayingPresenter *nowPlaying_ = nullptr;
-  // A child of ui->layoutHost (see PanelLayoutView).
-  PanelLayoutView *layoutView_ = nullptr;
   QActionGroup *playbackOrderMenuActionGroup;
   // The startup load's worker; finished once it ran.
   QFuture<void> libraryLoad_;

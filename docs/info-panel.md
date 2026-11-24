@@ -63,7 +63,7 @@ Status: implemented. The Spectrum panel is described in
 
 ### Layout
 
-The default layout ([layout-editing.md](layout-editing.md)):
+The default panel layout ([layout-editing.md](layout-editing.md)):
 
 ```
 horizontal splitter [320, 960]

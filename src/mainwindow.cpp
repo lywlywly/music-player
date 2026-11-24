@@ -48,8 +48,10 @@ constexpr const char *kPlaybackFollowsCursorSettingsKey =
     "playback/playback_follows_cursor";
 constexpr const char *kCursorFollowsPlaybackSettingsKey =
     "playback/cursor_follows_playback";
-// The central area's layout, as PanelLayout::toJson (docs/layout-editing.md).
-constexpr const char *kLayoutSettingsKey = "layout/tree";
+// The toolbar's and the panel layout's trees, as PanelLayout::toJson
+// (docs/layout-editing.md).
+constexpr const char *kToolbarLayoutSettingsKey = "layout/toolbar";
+constexpr const char *kPanelLayoutSettingsKey = "layout/tree";
 
 int clampVolumePercent(int volumePercent) {
   return std::clamp(volumePercent, kMinVolumePercent, kMaxVolumePercent);
@@ -257,18 +259,31 @@ void MainWindow::setUpPluginMenus() {
 }
 
 void MainWindow::setUpLayout() {
-  layoutView_ =
+  // Each view is a child of its host. Both park their elements in
+  // layoutElements; each moves only its own.
+  auto *toolbarView =
+      new PanelLayoutView(ui->toolbarHost, ui->layoutElements,
+                          tr("Empty. Turn on View > Edit Layout, then "
+                             "right-click here to insert a control."));
+  toolbarView->addElement(MainWindowLayout::kPlaybackButtons,
+                          tr("Playback Buttons"), ui->playbackButtons);
+  toolbarView->addElement(MainWindowLayout::kSeekBar, tr("Seek Bar"),
+                          ui->seekSlider);
+  toolbarView->addElement(MainWindowLayout::kVolume, tr("Volume"),
+                          ui->volumeSlider);
+
+  auto *panelView =
       new PanelLayoutView(ui->layoutHost, ui->layoutElements,
                           tr("Empty. Turn on View > Edit Layout, then "
                              "right-click here to insert a panel."));
-  layoutView_->addElement(MainWindowLayout::kPlaylist, tr("Playlist"),
-                          ui->playlistTabs);
-  layoutView_->addElement(MainWindowLayout::kProperties, tr("Properties"),
-                          ui->songInfoPanel);
-  layoutView_->addElement(MainWindowLayout::kSpectrum, tr("Spectrum"),
-                          ui->spectrumWidget);
-  layoutView_->addElement(MainWindowLayout::kCover, tr("Cover Art"),
-                          ui->coverLabel);
+  panelView->addElement(MainWindowLayout::kPlaylist, tr("Playlist"),
+                        ui->playlistTabs);
+  panelView->addElement(MainWindowLayout::kProperties, tr("Properties"),
+                        ui->songInfoPanel);
+  panelView->addElement(MainWindowLayout::kSpectrum, tr("Spectrum"),
+                        ui->spectrumWidget);
+  panelView->addElement(MainWindowLayout::kCover, tr("Cover Art"),
+                        ui->coverLabel);
   // The loaded plugins' panels, in load order, each named by its plugin's id.
   // A plugin not loaded only names its node, if the layout has one. Only a
   // Loaded entry has a root object; qobject_cast of the others' null root is
@@ -276,46 +291,61 @@ void MainWindow::setUpLayout() {
   // are destroyed before plugins_ shuts the plugins down.
   for (const PluginEntry &entry : plugins_->plugins()) {
     if (entry.state != PluginEntry::State::Loaded && !entry.id.isEmpty()) {
-      layoutView_->setUnavailableTitle(entry.id, entry.name);
+      panelView->setUnavailableTitle(entry.id, entry.name);
     }
     auto *provider = qobject_cast<IPanelProvider *>(entry.root);
     if (provider == nullptr) {
       continue;
     }
-    layoutView_->addElement(entry.id, provider->panelTitle(),
-                            provider->createPanel(ui->layoutElements));
+    panelView->addElement(entry.id, provider->panelTitle(),
+                          provider->createPanel(ui->layoutElements));
   }
 
-  const PanelLayout defaultLayout = MainWindowLayout::defaultLayout();
-  const QVariant saved = QSettings().value(kLayoutSettingsKey);
+  using Kind = PanelLayout::Kind;
+  const std::function<void()> resetToolbar = setUpLayoutView(
+      *toolbarView, kToolbarLayoutSettingsKey,
+      MainWindowLayout::defaultToolbar(), {Kind::HBox, Kind::VBox});
+  const std::function<void()> resetPanels = setUpLayoutView(
+      *panelView, kPanelLayoutSettingsKey, MainWindowLayout::defaultPanels(),
+      {Kind::HSplitter, Kind::VSplitter, Kind::Tabs});
+  connect(ui->actionReset_layout, &QAction::triggered, this,
+          [this, resetToolbar, resetPanels]() {
+            if (QMessageBox::question(
+                    this, tr("Reset Layout"),
+                    tr("Replace the toolbar and the layout with the default "
+                       "ones? Your changes to them are lost.")) !=
+                QMessageBox::Yes) {
+              return;
+            }
+            resetToolbar();
+            resetPanels();
+          });
+}
+
+std::function<void()>
+MainWindow::setUpLayoutView(PanelLayoutView &view, const char *key,
+                            const PanelLayout &defaultLayout,
+                            std::vector<PanelLayout::Kind> containerKinds) {
+  const QVariant saved = QSettings().value(key);
   std::optional<PanelLayout> layout =
       PanelLayout::fromJson(saved.toString().toUtf8());
   if (saved.isValid() && !layout) {
-    qWarning("MainWindow: %s is not a valid layout; using the default",
-             kLayoutSettingsKey);
+    qWarning("MainWindow: %s is not a valid layout; using the default", key);
   }
-  layoutView_->setLayout(layout.value_or(defaultLayout));
+  view.setLayout(layout.value_or(defaultLayout));
 
-  const auto save = [this]() {
-    QSettings().setValue(kLayoutSettingsKey,
-                         QString::fromUtf8(layoutView_->layout().toJson()));
+  const auto save = [&view, key]() {
+    QSettings().setValue(key, QString::fromUtf8(view.layout().toJson()));
   };
-  connect(layoutView_, &PanelLayoutView::layoutChanged, this, save);
-  auto *editor = new PanelLayoutEditor(*layoutView_);
+  connect(&view, &PanelLayoutView::layoutChanged, this, save);
+  auto *editor = new PanelLayoutEditor(view, std::move(containerKinds));
   connect(editor, &PanelLayoutEditor::layoutChanged, this, save);
   connect(ui->actionEdit_layout, &QAction::toggled, editor,
           &PanelLayoutEditor::setEnabled);
-  connect(ui->actionReset_layout, &QAction::triggered, this,
-          [this, defaultLayout, save]() {
-            if (QMessageBox::question(
-                    this, tr("Reset Layout"),
-                    tr("Replace the layout with the default one? Your "
-                       "changes to it are lost.")) != QMessageBox::Yes) {
-              return;
-            }
-            layoutView_->setLayout(defaultLayout);
-            save();
-          });
+  return [&view, defaultLayout, save]() {
+    view.setLayout(defaultLayout);
+    save();
+  };
 }
 
 void MainWindow::setUpPlaylist() {
@@ -520,8 +550,8 @@ void MainWindow::setUpPlaybackActions() {
           &PlaybackController::prev);
   connect(ui->random_button, &QAbstractButton::clicked, playback_,
           &PlaybackController::playRandom);
-  connect(ui->horizontalSlider, &QSlider::sliderReleased, playback_,
-          [this]() { playback_->seek(ui->horizontalSlider->value()); });
+  connect(ui->seekSlider, &QSlider::sliderReleased, playback_,
+          [this]() { playback_->seek(ui->seekSlider->value()); });
 }
 
 void MainWindow::initVolumeControl() {
@@ -571,12 +601,12 @@ bool MainWindow::event(QEvent *event) {
 }
 
 void MainWindow::durationChanged(qint64 newDuration) {
-  ui->horizontalSlider->setMaximum(newDuration);
+  ui->seekSlider->setMaximum(newDuration);
 }
 
 void MainWindow::positionChanged(qint64 progress) {
-  if (!ui->horizontalSlider->isSliderDown())
-    ui->horizontalSlider->setValue(progress);
+  if (!ui->seekSlider->isSliderDown())
+    ui->seekSlider->setValue(progress);
   spectrum_->setPosition(progress);
 }
 

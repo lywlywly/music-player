@@ -86,9 +86,10 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
     `docs/plugins/abrepeat.md` and `docs/plugins/playstats.md`
 - ✅ Settings dialog navigation tree instead of tabs
   - See `docs/settings-dialog.md`
-- ✅ Custom layout editing: splitters, tabs and panels in the central area,
+- ✅ Custom layout editing: splitters, tabs and panels below the toolbar,
   edited from View > Edit Layout
-  - ⬜ The playback buttons, seek bar and volume as layout elements
+  - ✅ The toolbar as its own layout: the playback buttons, seek bar and
+    volume in rows and columns
   - See `docs/layout-editing.md`
 - ⬜ CLI tool and headless mode
 

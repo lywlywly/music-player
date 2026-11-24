@@ -78,8 +78,10 @@ fit the rest of the app is in [architecture.md](architecture.md).
   * `bitrateChanged(bitsPerSecond)` reports the bitrate while playing.
   * `setReplayGainMode(mode)`: see "ReplayGain". `PlaybackController` keeps
     the mode for a new backend, like the volume.
-* Volume slider (`volumeSlider`, frontend): between the playback buttons and
-  the seek slider; stored in `playback/volume_percent` (default `100`).
+* Volume slider (`volumeSlider`, frontend): a toolbar element, by default
+  between the playback buttons and the seek slider
+  ([layout-editing.md](layout-editing.md)); stored in
+  `playback/volume_percent` (default `100`).
 
 ## ReplayGain
 

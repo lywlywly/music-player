@@ -148,15 +148,16 @@ The top-level window and what it owns.
     loaded plugins' panels to the layout, their menus to the Playback menu,
     and the manager's entries to `SettingsDialog`. See
     [plugins/plugin-system.md](plugins/plugin-system.md).
-  * The central area below the playback controls is an editable layout
-    (`PanelLayout`, `PanelLayoutView`, `PanelLayoutEditor`): splitters and
-    tabs holding the Playlist, Properties, Spectrum and Cover Art elements
-    and each loaded plugin's panel (Lyrics), saved in `layout/tree` and
-    edited from View > Edit Layout. `setUpLayout` registers the elements and
-    builds the saved or default layout. The default
-    (`MainWindowLayout::defaultLayout`) is Properties above the cover on the
-    left and the playlist on the right; Spectrum and the plugin panels start
-    outside it. See
+  * The central widget holds two editable layouts (`PanelLayout`,
+    `PanelLayoutView`, `PanelLayoutEditor`), edited from View > Edit
+    Layout: the toolbar, boxes of the Playback Buttons, Seek Bar and Volume
+    (`layout/toolbar`), and below it the panel layout, splitters and tabs of
+    the Playlist, Properties, Spectrum and Cover Art elements and each
+    loaded plugin's panel (Lyrics) (`layout/tree`). `setUpLayout` registers
+    each layout's elements and builds the saved or default layouts
+    (`MainWindowLayout`): the controls in a row, and Properties above the
+    cover on the left and the playlist on the right; Spectrum and the
+    plugin panels start outside the panel layout. See
     [layout-editing.md](layout-editing.md).
   * `MainWindow` connects `PlaylistTabs::selectedSongChanged` to
     `SongInfoPresenter::showSong`, and the Properties panel's buttons to

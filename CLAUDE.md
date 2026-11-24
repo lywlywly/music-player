@@ -121,8 +121,9 @@ Without Qt's `bin` on `PATH`, the app and tests exit with `0xc0000135`.
 - Play stats are the Play Stats plugin's (`src/plugins/playstats/`, its own SQLite file): they belong to a
   song's identity (normalized `title|artist|album`), so songs with the same identity share them. The app
   keeps no play stats; it shows a plugin's fields through `ISongFieldProvider`.
-- The main window's fixed parts live in `src/mainwindow.ui`; its central area is the editable layout
-  (`PanelLayout`, docs/layout-editing.md), whose element widgets (`SongInfoPanel`, `SpectrumWidget`, ...)
-  are still declared and promoted in `mainwindow.ui` (`<customwidget>`), in `layoutElements`.
+- The main window's fixed parts (menu bar, status bar) live in `src/mainwindow.ui`; its central widget
+  holds two editable layouts, the toolbar and the panel layout (`PanelLayout`, docs/layout-editing.md),
+  whose element widgets (`SongInfoPanel`, `SpectrumWidget`, the playback controls, ...) are still
+  declared and promoted in `mainwindow.ui` (`<customwidget>`), in `layoutElements`.
 - Settings are `QSettings` keys named `<area>/<name>` (e.g. `layout/tree`), documented in the feature's
   doc.

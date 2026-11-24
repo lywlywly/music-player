@@ -23,6 +23,8 @@ struct TypeName {
 constexpr TypeName kTypeNames[] = {
     {PanelLayout::Kind::HSplitter, "hsplitter"},
     {PanelLayout::Kind::VSplitter, "vsplitter"},
+    {PanelLayout::Kind::HBox, "hbox"},
+    {PanelLayout::Kind::VBox, "vbox"},
     {PanelLayout::Kind::Tabs, "tabs"},
     {PanelLayout::Kind::Element, "element"},
     {PanelLayout::Kind::Placeholder, "placeholder"},
@@ -37,9 +39,9 @@ PanelLayout::Node elementNode(const QString &id) {
   return {.kind = PanelLayout::Kind::Element, .elementId = id};
 }
 
-PanelLayout::Node splitterNode(PanelLayout::Kind kind, std::vector<int> sizes,
-                               PanelLayout::Node first,
-                               PanelLayout::Node second) {
+PanelLayout::Node containerNode(PanelLayout::Kind kind, std::vector<int> sizes,
+                                PanelLayout::Node first,
+                                PanelLayout::Node second) {
   PanelLayout::Node node{.kind = kind, .sizes = std::move(sizes)};
   node.children.push_back(std::move(first));
   node.children.push_back(std::move(second));
@@ -88,6 +90,12 @@ std::optional<PanelLayout::Node> nodeFromJson(const QJsonValue &value) {
     }
     break;
   }
+  case PanelLayout::Kind::HBox:
+  case PanelLayout::Kind::VBox:
+    if (childCount == 0) {
+      return std::nullopt;
+    }
+    break;
   case PanelLayout::Kind::Tabs: {
     node.currentTab = object.value(kCurrentKey).toInt(-1);
     if (childCount == 0 || node.currentTab < 0 ||
@@ -225,9 +233,12 @@ void PanelLayout::replaceWithElement(const Path &path,
   at(path) = elementNode(elementId);
 }
 
-void PanelLayout::split(const Path &path, Kind splitterKind) {
+void PanelLayout::split(const Path &path, Kind kind) {
   Node &node = at(path);
-  node = splitterNode(splitterKind, {1, 1}, std::move(node), Node{});
+  // A box has no sizes: its children take their widgets' size hints.
+  node = containerNode(
+      kind, isSplitter(kind) ? std::vector<int>{1, 1} : std::vector<int>{},
+      std::move(node), Node{});
 }
 
 void PanelLayout::wrapInTabs(const Path &path) {
@@ -251,34 +262,44 @@ void PanelLayout::paste(const Path &path, Node subtree) {
   at(path) = std::move(subtree);
 }
 
-void PanelLayout::addTab(const Path &path) {
-  Node &tabs = at(path);
-  tabs.children.push_back({});
-  tabs.tabTitles.push_back({});
-}
-
-void PanelLayout::moveTab(const Path &path, int delta) {
-  Node &tabs = at(Path(path.begin(), path.end() - 1));
-  const int from = path.back();
-  const int to = from + delta;
-  std::swap(tabs.children[from], tabs.children[to]);
-  std::swap(tabs.tabTitles[from], tabs.tabTitles[to]);
-  if (tabs.currentTab == from) {
-    tabs.currentTab = to;
-  } else if (tabs.currentTab == to) {
-    tabs.currentTab = from;
+// The tabs-only fields (titles, current) are kept in step with the children;
+// a box has none.
+void PanelLayout::addChild(const Path &path) {
+  Node &parent = at(path);
+  parent.children.push_back({});
+  if (parent.kind == Kind::Tabs) {
+    parent.tabTitles.push_back({});
   }
 }
 
-void PanelLayout::removeTab(const Path &path) {
-  Node &tabs = at(Path(path.begin(), path.end() - 1));
+void PanelLayout::moveChild(const Path &path, int delta) {
+  Node &parent = at(Path(path.begin(), path.end() - 1));
+  const int from = path.back();
+  const int to = from + delta;
+  std::swap(parent.children[from], parent.children[to]);
+  if (parent.kind != Kind::Tabs) {
+    return;
+  }
+  std::swap(parent.tabTitles[from], parent.tabTitles[to]);
+  if (parent.currentTab == from) {
+    parent.currentTab = to;
+  } else if (parent.currentTab == to) {
+    parent.currentTab = from;
+  }
+}
+
+void PanelLayout::removeChild(const Path &path) {
+  Node &parent = at(Path(path.begin(), path.end() - 1));
   const int index = path.back();
-  tabs.children.erase(tabs.children.begin() + index);
-  tabs.tabTitles.erase(tabs.tabTitles.begin() + index);
+  parent.children.erase(parent.children.begin() + index);
+  if (parent.kind != Kind::Tabs) {
+    return;
+  }
+  parent.tabTitles.erase(parent.tabTitles.begin() + index);
   // The tab after the removed one becomes current, as in QTabWidget.
-  if (tabs.currentTab > index ||
-      tabs.currentTab == static_cast<int>(tabs.children.size())) {
-    --tabs.currentTab;
+  if (parent.currentTab > index ||
+      parent.currentTab == static_cast<int>(parent.children.size())) {
+    --parent.currentTab;
   }
 }
 
