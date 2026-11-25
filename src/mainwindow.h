@@ -19,9 +19,9 @@
 #include <QPointer>
 #include <QString>
 #include <functional>
-#include <vector>
 
 class NowPlayingPresenter;
+class PanelLayoutEditor;
 class PanelLayoutView;
 class PlaylistSearchDialog;
 class PluginManager;
@@ -81,13 +81,13 @@ private:
   // plugins' among them), sets up both layouts, and wires View > Reset
   // Layout to reset both (docs/layout-editing.md).
   void setUpLayout();
-  // Builds the layout saved at key, or defaultLayout; saves it at key on each
-  // change; gives it an editor offering containerKinds, turned on by View >
-  // Edit Layout. Returns what resets it to defaultLayout.
-  std::function<void()>
-  setUpLayoutView(PanelLayoutView &view, const char *key,
-                  const PanelLayout &defaultLayout,
-                  std::vector<PanelLayout::Kind> containerKinds);
+  // Builds the layout saved at key, or defaultLayout; saves it at key after
+  // each change, the view's and the editor's; View > Edit Layout turns the
+  // editor on. Returns what resets it to defaultLayout.
+  std::function<void()> setUpLayoutView(PanelLayoutView &view,
+                                        PanelLayoutEditor &editor,
+                                        const char *key,
+                                        const PanelLayout &defaultLayout);
   // Adds the plugins' menus to the Playback menu.
   void setUpPluginMenus();
   void openLibrarySearchDialog();

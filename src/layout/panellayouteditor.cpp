@@ -17,8 +17,7 @@ Path parentOf(const Path &path) { return Path(path.begin(), path.end() - 1); }
 
 bool isBox(Kind kind) { return kind == Kind::HBox || kind == Kind::VBox; }
 
-// A container kind's name, as a menu title and an Insert item.
-QString containerTitle(Kind kind) {
+QString defaultContainerTitle(Kind kind) {
   switch (kind) {
   case Kind::HSplitter:
     return PanelLayoutEditor::tr("Splitter (Left and Right)");
@@ -61,6 +60,19 @@ ChildItems childItems(Kind parentKind) {
 PanelLayoutEditor::PanelLayoutEditor(
     PanelLayoutView &view, std::vector<PanelLayout::Kind> containerKinds)
     : QObject(&view), view_(view), containerKinds_(std::move(containerKinds)) {}
+
+void PanelLayoutEditor::setContainerTitle(PanelLayout::Kind kind,
+                                          const QString &title) {
+  containerTitles_[kind] = title;
+}
+
+void PanelLayoutEditor::fixRoot() { rootFixed_ = true; }
+
+QString PanelLayoutEditor::containerTitle(PanelLayout::Kind kind) const {
+  const auto it = containerTitles_.find(kind);
+  return it != containerTitles_.end() ? it->second
+                                      : defaultContainerTitle(kind);
+}
 
 void PanelLayoutEditor::setEnabled(bool enabled) {
   if (enabled) {
@@ -122,43 +134,9 @@ QMenu *PanelLayoutEditor::createMenu(const Path &path, QWidget *parent) {
   menu->addAction(title)->setEnabled(false);
   menu->addSeparator();
 
-  // The elements not in the tree, then the containers. A new container holds
-  // the node (a placeholder stays one), so splitting keeps what was there.
-  QMenu *insert =
-      menu->addMenu(placeholder ? tr("Insert") : tr("Replace with"));
-  const QStringList placed = layout.placedElements();
-  for (const QString &id : view_.elementIds()) {
-    if (!placed.contains(id)) {
-      insert->addAction(view_.title(id), this, [this, path, id]() {
-        edit([&](PanelLayout &l) { l.replaceWithElement(path, id); });
-      });
-    }
+  if (!(rootFixed_ && path.empty())) {
+    addNodeItems(menu, path, placeholder);
   }
-  insert->addSeparator();
-  for (const Kind kind : containerKinds_) {
-    insert->addAction(containerTitle(kind), this, [this, path, kind]() {
-      edit([&](PanelLayout &l) {
-        if (kind == Kind::Tabs) {
-          l.wrapInTabs(path);
-        } else {
-          l.split(path, kind);
-        }
-      });
-    });
-  }
-
-  if (!placeholder) {
-    menu->addAction(tr("Delete"), this, [this, path]() {
-      edit([&](PanelLayout &l) { l.take(path); });
-    });
-    menu->addAction(tr("Cut"), this, [this, path]() {
-      edit([&](PanelLayout &l) { cut_ = l.take(path); });
-    });
-  }
-  QAction *paste = menu->addAction(tr("Paste"), this, [this, path]() {
-    edit([&](PanelLayout &l) { l.paste(path, *std::exchange(cut_, {})); });
-  });
-  paste->setEnabled(cut_.has_value());
 
   if (isBox(node.kind) || node.kind == Kind::Tabs) {
     menu->addSeparator();
@@ -207,6 +185,51 @@ QMenu *PanelLayoutEditor::createMenu(const Path &path, QWidget *parent) {
     menu->addMenu(parentMenu);
   }
   return menu;
+}
+
+void PanelLayoutEditor::addNodeItems(QMenu *menu, const Path &path,
+                                     bool placeholder) {
+  // The elements not in the tree, then the containers. A new container holds
+  // the node (a placeholder stays one), so splitting keeps what was there.
+  QMenu *insert =
+      menu->addMenu(placeholder ? tr("Insert") : tr("Replace with"));
+  const QStringList placed = view_.layout().placedElements();
+  for (const QString &id : view_.elementIds()) {
+    if (!placed.contains(id)) {
+      insert->addAction(view_.title(id), this, [this, path, id]() {
+        edit([&](PanelLayout &l) { l.replaceWithElement(path, id); });
+      });
+    }
+  }
+  if (!containerKinds_.empty()) {
+    insert->addSeparator();
+  }
+  for (const Kind kind : containerKinds_) {
+    insert->addAction(containerTitle(kind), this, [this, path, kind]() {
+      edit([&](PanelLayout &l) {
+        if (kind == Kind::Tabs) {
+          l.wrapInTabs(path);
+        } else {
+          l.split(path, kind);
+        }
+      });
+    });
+  }
+  // Nothing to offer: every element is placed and no container is offered.
+  insert->menuAction()->setEnabled(!insert->isEmpty());
+
+  if (!placeholder) {
+    menu->addAction(tr("Delete"), this, [this, path]() {
+      edit([&](PanelLayout &l) { l.take(path); });
+    });
+    menu->addAction(tr("Cut"), this, [this, path]() {
+      edit([&](PanelLayout &l) { cut_ = l.take(path); });
+    });
+  }
+  QAction *paste = menu->addAction(tr("Paste"), this, [this, path]() {
+    edit([&](PanelLayout &l) { l.paste(path, *std::exchange(cut_, {})); });
+  });
+  paste->setEnabled(cut_.has_value());
 }
 
 void PanelLayoutEditor::renameTab(const Path &path) {

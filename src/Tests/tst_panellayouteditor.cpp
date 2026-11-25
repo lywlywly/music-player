@@ -232,14 +232,34 @@ void TestPanelLayoutEditor::menu_itemsForEachKindOfNode() {
            QString("Box (Top to Bottom)"));
   closeMenu(menu);
 
-  // An editor offers only the container kinds it was given.
+  // An editor offers only the container kinds it was given, under the names
+  // it was given; a fixed root has only its own items.
   delete editor_;
-  editor_ = new PanelLayoutEditor(*view_, {Kind::HBox, Kind::VBox});
+  editor_ = new PanelLayoutEditor(*view_, {Kind::HBox});
+  editor_->setContainerTitle(Kind::HBox, "Row");
+  editor_->fixRoot();
   editor_->setEnabled(true);
-  menu = requestMenu(b_);
+  menu = requestMenu(a_);
   QVERIFY(menu != nullptr);
   QCOMPARE(actionTexts(actionNamed(menu, "Replace with")->menu()),
-           (QStringList{"C", "Box (Left to Right)", "Box (Top to Bottom)"}));
+           (QStringList{"C", "Row"}));
+  parent = actionNamed(menu, "Parent")->menu();
+  QCOMPARE(actionTexts(parent).first(), QString("Row"));
+  QCOMPARE(actionTexts(actionNamed(parent, "Parent")->menu()),
+           (QStringList{"Box (Top to Bottom)", "Add Slot"}));
+  closeMenu(menu);
+
+  // With every element placed and no container offered, Replace with has
+  // nothing and is disabled.
+  delete editor_;
+  editor_ = new PanelLayoutEditor(*view_, {});
+  editor_->setEnabled(true);
+  view_->setLayout(
+      PanelLayout({.kind = Kind::HBox,
+                   .children = {element("a"), element("b"), element("c")}}));
+  menu = requestMenu(a_);
+  QVERIFY(menu != nullptr);
+  QVERIFY(!actionNamed(menu, "Replace with")->isEnabled());
   closeMenu(menu);
 }
 

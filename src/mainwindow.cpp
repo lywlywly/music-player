@@ -302,12 +302,19 @@ void MainWindow::setUpLayout() {
   }
 
   using Kind = PanelLayout::Kind;
-  const std::function<void()> resetToolbar = setUpLayoutView(
-      *toolbarView, kToolbarLayoutSettingsKey,
-      MainWindowLayout::defaultToolbar(), {Kind::HBox, Kind::VBox});
+  // The toolbar is one row that stays: its controls are placed, moved and
+  // removed in it, and it holds no other container.
+  auto *toolbarEditor = new PanelLayoutEditor(*toolbarView, {});
+  toolbarEditor->setContainerTitle(Kind::HBox, tr("Toolbar"));
+  toolbarEditor->fixRoot();
+  const std::function<void()> resetToolbar =
+      setUpLayoutView(*toolbarView, *toolbarEditor, kToolbarLayoutSettingsKey,
+                      MainWindowLayout::defaultToolbar());
   const std::function<void()> resetPanels = setUpLayoutView(
-      *panelView, kPanelLayoutSettingsKey, MainWindowLayout::defaultPanels(),
-      {Kind::HSplitter, Kind::VSplitter, Kind::Tabs});
+      *panelView,
+      *new PanelLayoutEditor(*panelView,
+                             {Kind::HSplitter, Kind::VSplitter, Kind::Tabs}),
+      kPanelLayoutSettingsKey, MainWindowLayout::defaultPanels());
   connect(ui->actionReset_layout, &QAction::triggered, this,
           [this, resetToolbar, resetPanels]() {
             if (QMessageBox::question(
@@ -323,9 +330,8 @@ void MainWindow::setUpLayout() {
 }
 
 std::function<void()>
-MainWindow::setUpLayoutView(PanelLayoutView &view, const char *key,
-                            const PanelLayout &defaultLayout,
-                            std::vector<PanelLayout::Kind> containerKinds) {
+MainWindow::setUpLayoutView(PanelLayoutView &view, PanelLayoutEditor &editor,
+                            const char *key, const PanelLayout &defaultLayout) {
   const QVariant saved = QSettings().value(key);
   std::optional<PanelLayout> layout =
       PanelLayout::fromJson(saved.toString().toUtf8());
@@ -338,9 +344,8 @@ MainWindow::setUpLayoutView(PanelLayoutView &view, const char *key,
     QSettings().setValue(key, QString::fromUtf8(view.layout().toJson()));
   };
   connect(&view, &PanelLayoutView::layoutChanged, this, save);
-  auto *editor = new PanelLayoutEditor(view, std::move(containerKinds));
-  connect(editor, &PanelLayoutEditor::layoutChanged, this, save);
-  connect(ui->actionEdit_layout, &QAction::toggled, editor,
+  connect(&editor, &PanelLayoutEditor::layoutChanged, this, save);
+  connect(ui->actionEdit_layout, &QAction::toggled, &editor,
           &PanelLayoutEditor::setEnabled);
   return [&view, defaultLayout, save]() {
     view.setLayout(defaultLayout);

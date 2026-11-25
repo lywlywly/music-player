@@ -89,7 +89,7 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
 - ✅ Custom layout editing: splitters, tabs and panels below the toolbar,
   edited from View > Edit Layout
   - ✅ The toolbar as its own layout: the playback buttons, seek bar and
-    volume in rows and columns
+    volume in one row
   - See `docs/layout-editing.md`
 - ⬜ CLI tool and headless mode
 

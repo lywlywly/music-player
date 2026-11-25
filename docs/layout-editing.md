@@ -6,8 +6,9 @@ Status: implemented.
 
 * The main window's central widget holds two **layouts**, each a tree of
   containers whose leaves are **elements**:
-  * the **toolbar**, on top: boxes (rows and columns) of the playback
-    controls (Playback Buttons, Seek Bar, Volume);
+  * the **toolbar**, on top: one row of the playback controls (Playback
+    Buttons, Seek Bar, Volume), which stays while they are placed, moved
+    and removed in it;
   * the **panel layout** below it: splitters and tabs of the panels
     (Playlist, Properties, Spectrum, Cover Art, and each plugin panel).
 
@@ -76,7 +77,7 @@ widget. Each element appears at most once.
 
 | Layout | Host (`mainwindow.ui`) | Elements | Containers offered | Key |
 | --- | --- | --- | --- | --- |
-| Toolbar | `toolbarHost` | Playback Buttons, Seek Bar, Volume | boxes | `layout/toolbar` |
+| Toolbar | `toolbarHost` | Playback Buttons, Seek Bar, Volume | none: one fixed row (an `hbox`) | `layout/toolbar` |
 | Panel layout | `layoutHost`, in `frame` | Playlist, Properties, Spectrum, Cover Art, plugin panels | splitters, tabs | `layout/tree` |
 
 Each is a `PanelLayoutView` with its own `PanelLayoutEditor`, tree, key and
@@ -93,11 +94,25 @@ and moves only the elements registered with it.
     and the label shows it. Rejected: dropping such a node, or the whole
     key, which needs a check of its own for that one case.
 * **The containers each editor offers** are a constructor argument of
-  `PanelLayoutEditor`. A splitter's handle or a tab bar has no use in a row
-  of controls, and a panel in a box would keep its size hint (see
-  "Boxes"), which a splitter or a tab doesn't. `PanelLayout` and the view
-  still accept every kind, so a hand-edited key with tabs in the toolbar is
-  built as written.
+  `PanelLayoutEditor`: splitters and tabs in the panel layout, none in the
+  toolbar. `PanelLayout` and the view still accept every kind, so a
+  hand-edited key with tabs in the toolbar is built as written.
+* **The toolbar is one row that stays.** Its root is an `hbox`, which its
+  editor fixes (`fixRoot`): the row's menu has no Replace with, Delete, Cut
+  or Paste, only Add Slot. Its menus call the row "Toolbar"
+  (`setContainerTitle`); "box" is the implementation, and the layout module
+  keeps its own name, "Box (Left to Right)", for everywhere else. So the
+  toolbar's menus edit only the controls in the row: Replace with (the
+  controls not in it), Delete, Cut, Paste, Move Left and Right, Remove Slot.
+  * Rejected: columns and nested rows in the toolbar (a `vbox` of the
+    buttons and the volume beside the seek bar). A toolbar is one line of
+    controls; a column doubles its height for two controls, and the menus
+    would offer two more containers. Cost: the controls are always side by
+    side.
+  * Rejected: splitters and tabs in the toolbar. A handle or a tab bar has
+    no use in a row of controls.
+  * A hand-edited `layout/toolbar` whose root is not an `hbox` is built as
+    written, with that root fixed; Reset Layout brings the row back.
 * **The toolbar keeps its height:** `toolbarHost` has stretch 0 and `frame`
   1 in `centralWidget`'s layout. With a stretch set, `qGeomCalc` gives a
   stretch-0 item its size hint and the rest to the others, so the toolbar
@@ -108,11 +123,12 @@ and moves only the elements registered with it.
   above the playlist in a `vbox`). Keeping controls out of panel containers
   would need a per-element flag checked by every edit that moves a subtree
   (Paste, Replace with).
-* Rejected: a `QToolBar`. It can hold the element widgets (`addWidget`),
-  but it lays them out itself in one line, so boxes would not apply, and it
-  brings what edit mode would have to work around: dragging to other window
-  edges, an overflow menu that hides what doesn't fit, and `QMainWindow`'s
-  show-or-hide-toolbars context menu.
+* Rejected: a `QToolBar`. It can hold the element widgets in a line
+  (`addWidget`), but the row as a `PanelLayoutView` shares the panel
+  layout's editor, storage and rebuild, which a `QToolBar` would need its
+  own of. It also brings what edit mode would have to work around: dragging
+  to other window edges, an overflow menu that hides what doesn't fit, and
+  `QMainWindow`'s show-or-hide-toolbars context menu.
 * Cost: a control can't sit beside a panel, for example the seek bar under
   the spectrum.
 
@@ -164,8 +180,9 @@ and moves only the elements registered with it.
 ### Boxes: rows and columns without handles
 
 A box lines its children up, each at the size its widget asks for, with no
-handles: the toolbar's containers, where a splitter would let the buttons be
-dragged wider. It is DeaDBeeF's `hbox` and `vbox` (`w_hvbox.c`).
+handles: the toolbar's row is one, where a splitter would let the buttons be
+dragged wider. It is DeaDBeeF's `hbox` and `vbox` (`w_hvbox.c`). The layout
+module has both directions, and boxes nest; the app uses the one row.
 
 * Built as a `QWidget` with a `QBoxLayout`, left to right or top to bottom,
   no margins, the style's spacing. Each child is shown, as in a splitter.
@@ -184,14 +201,15 @@ dragged wider. It is DeaDBeeF's `hbox` and `vbox` (`w_hvbox.c`).
 * **A box is no larger than its children allow**: its layout's size
   constraint is `QLayout::SetMaximumSize`, so the box's widget takes the
   maximum its layout computes. Without it a box's widget, Preferred like
-  any `QWidget`, would take a share of its parent box's extra space. For
-  example, a column of the buttons and the volume beside the seek bar
-  expands sideways (through the volume) and would take half the row,
-  leaving a gap beside the buttons. With it the column's maximum width is
-  its expanding child's maximum (`qMaxExpCalc`), raised to its minimum
-  width (the buttons' fixed width) where that is larger, and the seek bar
-  takes the rest. For a row, the maximum height is the controls' height: the
-  sliders' vertical policy is Fixed and the buttons are fixed size.
+  any `QWidget`, would take a share of its parent's extra space. For
+  example, a column of a fixed-width widget and a slider beside an
+  expanding widget in a row expands sideways (through the slider) and would
+  take half the row. With it the column's maximum width is its expanding
+  child's maximum (`qMaxExpCalc`), raised to its minimum width where that
+  is larger, and the expanding widget takes the rest. For the toolbar's
+  row, the maximum height is the controls' height (the sliders' vertical
+  policy is Fixed and the buttons are fixed size), so the row never grows
+  taller than them.
 * A placeholder in a box is the same word-wrapped label as elsewhere, so a
   new slot in the toolbar, or a control deleted from it, makes the toolbar
   a few lines taller until the slot is filled or removed. Accepted: a
@@ -216,13 +234,10 @@ dragged wider. It is DeaDBeeF's `hbox` and `vbox` (`w_hvbox.c`).
   `playbackButtonsLayout`, so the buttons keep their 6-pixel spacing
   ([ui-styling.md](ui-styling.md)). Its size policy is Fixed, so a box
   never gives it more than its size hint: without the grow flag,
-  `qSmartMaxSize` caps it there. With the default Preferred, a box without
-  an expanding child, for example the buttons in a column, would widen it,
-  and its layout would spread the fixed-size buttons apart.
-* Both sliders are horizontal wherever they are placed. Rejected: turning
-  them vertical in a `vbox`; a vertical slider in a column would be a
-  different control. Cost: a tall slot gives a horizontal slider a lot of
-  empty space.
+  `qSmartMaxSize` caps it there. With the default Preferred, a row whose
+  expanding children are at their maximum, for example the buttons and the
+  volume without the seek bar, would widen it, and its layout would spread
+  the fixed-size buttons apart.
 * The six buttons are one element. Rejected: one element per button. The
   menu would list six entries instead of one, and the default row would
   have eight slots instead of three. Cost: the buttons can't be reordered
@@ -289,9 +304,10 @@ dragged wider. It is DeaDBeeF's `hbox` and `vbox` (`w_hvbox.c`).
 * The menu for a node:
   1. its title, disabled;
   2. **Insert** (on a placeholder) or **Replace with** (otherwise): the
-     layout's elements not in its tree, then its containers: Box (Left to
-     Right) and Box (Top to Bottom) in the toolbar; Splitter (Left and
-     Right), Splitter (Top and Bottom) and Tabs in the panel layout. A new
+     layout's elements not in its tree, then its containers (in the panel
+     layout Splitter (Left and Right), Splitter (Top and Bottom) and Tabs;
+     none in the toolbar). It is disabled when it has nothing to offer: in
+     the toolbar, once every control is in the row. A new
      splitter's or box's first child is the replaced node and its second is
      a placeholder; DeaDBeeF starts a box with three placeholders instead.
      A new tabs node holds the replaced node. On a placeholder, a new
@@ -317,6 +333,9 @@ dragged wider. It is DeaDBeeF's `hbox` and `vbox` (`w_hvbox.c`).
      through a placeholder; ours mirror the tab items;
   7. **Parent**: the parent's menu, as a submenu, when the node has a parent.
      It reaches a container whose children cover it, as in DeaDBeeF.
+
+  Items 2 to 4 are left out for a fixed root: the toolbar's menu is
+  "Toolbar" and Add Slot.
 * The menu is opened with `popup()`, not `exec()`, so the event filter
   returns at once. The chosen action runs from the menu's own event, never
   while an event is being delivered to a layout widget that the action's
@@ -444,8 +463,10 @@ ids, no default layout and no app menu; the app passes them in.
 ### `PanelLayoutEditor` (frontend; `layout/panellayouteditor.{h,cpp}`)
 
 * A child of the view, given the container kinds its Insert and Replace
-  with offer. `setEnabled(bool)` installs or removes its event filter on
-  the application.
+  with offer. `setContainerTitle(kind, title)` names a kind in its menus in
+  place of the default name; `fixRoot()` keeps the root from being
+  replaced, deleted, cut or pasted over. `setEnabled(bool)` installs or
+  removes its event filter on the application.
 * Builds the menu for a path, shows the overlay, applies the chosen edit to
   a copy of the view's layout, calls `setLayout`, and emits
   `layoutChanged()`.
@@ -464,11 +485,12 @@ ids, no default layout and no app menu; the app passes them in.
   1. Registers the controls with the toolbar's view, and the built-in
      panels and each loaded plugin's panel, created in `layoutElements`,
      with the panel layout's; names the plugins not loaded.
-  2. Calls `setUpLayoutView` for each layout: it builds the key, or the
-     default when the key is missing or invalid; saves the key on the
-     view's and the editor's `layoutChanged`; creates the editor with the
-     layout's container kinds and connects View > Edit Layout to it; and
-     returns the layout's reset.
+  2. Creates each layout's editor with its container kinds (for the
+     toolbar none, its row fixed and named "Toolbar"), then calls
+     `setUpLayoutView` for each: it builds the key, or the default when the
+     key is missing or invalid; saves the key on the view's and the
+     editor's `layoutChanged`; connects View > Edit Layout to the editor;
+     and returns the layout's reset.
   3. Connects View > Reset Layout... to a confirmation and both resets.
 * The Properties panel's buttons are connected where `SongInfoPresenter` is
   created. The controls are connected in `setUpPlaybackActions` and
@@ -488,8 +510,12 @@ ids, no default layout and no app menu; the app passes them in.
   the panel again after the restart that enabling needs.
 * **Cut, then another Cut:** the first subtree is dropped. Its elements are
   out of the tree and can be inserted again.
-* **Delete or Replace on the root:** the root becomes a placeholder, or the
-  new node. An element as the root is placed in the host directly.
+* **Delete or Replace on the panel layout's root:** the root becomes a
+  placeholder, or the new node. An element as the root is placed in the
+  host directly. The toolbar's root offers neither.
+* **Every control removed from the toolbar:** the row stays with its
+  slots; Remove Slot is disabled on the last one, so the row is never
+  empty.
 * **Right-click with the Menu key:** it sends `QEvent::ContextMenu` too, to
   the focus widget, so it opens the same menu for that widget's node.
 
@@ -533,7 +559,8 @@ ids, no default layout and no app menu; the app passes them in.
   * the menu's items for an element, its parent splitter, a tab, a
     placeholder tab, a child of an `hbox` and an `hbox` in a `vbox`, and
     which are enabled; an editor offering only the container kinds it was
-    given;
+    given, under the names it was given; a fixed root's menu (its title and
+    its own items); Replace with disabled when it has nothing to offer;
   * each item without state of its own (Replace with an element, both
     splitters, both boxes, Tabs, Delete, Move Tab Left and Right, Remove
     Tab, Add Tab) makes the same edit as its `PanelLayout` call, and reports
@@ -553,15 +580,17 @@ ids, no default layout and no app menu; the app passes them in.
   * `layout_startsAtAQuarterAndRestoresDraggedSizes`: the quarter width,
     and both splitters' dragged sizes restored;
   * `layout_resetAndInvalidSavedLayoutGiveTheDefault`: saved layouts of the
-    playlist alone and the seek bar alone, with Properties and the buttons
-    in the store; Reset Layout after its confirmation resets and saves
+    playlist alone and a row of the seek bar alone, with Properties and the
+    buttons in the store; Reset Layout after its confirmation resets and saves
     both; an invalid `layout/toolbar`, with its warning, gives the default
     toolbar and leaves the saved panel layout;
   * `layout_editModeIsWiredAndItsEditsAreSaved`: View > Edit Layout turns
     the layout menus on and off; an edit in the toolbar is saved in its
     key; each layout's Replace with offers only its own elements and
     containers (the seek bar deleted from the toolbar is offered in the
-    toolbar, not in the panel layout);
+    toolbar, not in the panel layout; the toolbar offers no container, so
+    its Replace with is empty while every control is placed); the row's
+    menu is "Toolbar" and Add Slot;
   * `plugins_disabledPluginsHaveNoPanelPageOrMenu`: a disabled plugin's
     node shown as not available and kept in `layout/tree`;
   * the button, seek and volume tests, with the controls placed by the
@@ -570,9 +599,8 @@ ids, no default layout and no app menu; the app passes them in.
   widget's own menu opens in edit mode; the cover rescaling in a splitter
   and in a tab; the look of the default toolbar (the row's spacing, the
   buttons' and volume's widths, the seek bar filling the rest) and the
-  panels' frame below it; a column of the buttons and the volume beside the
-  seek bar (the column stays narrow, the buttons packed); seeking and
-  volume after moving the controls.
+  panels' frame below it; the toolbar's menus (the row titled "Toolbar",
+  with Add Slot only); seeking and volume after moving the controls.
 
 ## Out of scope
 

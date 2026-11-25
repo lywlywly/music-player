@@ -54,6 +54,7 @@
 #include "../spectrum/spectrumwidget.h"
 #include "scopedhomedir.h"
 #include "testaudiofiles.h"
+#include <algorithm>
 #include <optional>
 
 namespace {
@@ -1546,15 +1547,21 @@ void TestMainWindow::layout_startsAtAQuarterAndRestoresDraggedSizes() {
 }
 
 void TestMainWindow::layout_resetAndInvalidSavedLayoutGiveTheDefault() {
-  // Saved layouts of the playlist alone and of the seek bar alone:
-  // Properties and the buttons wait in the store.
+  // Saved layouts of the playlist alone and of a toolbar of the seek bar
+  // alone: Properties and the buttons wait in the store.
+  using Kind = PanelLayout::Kind;
   const auto only = [](const char *id) {
     return QString::fromUtf8(
-        PanelLayout({.kind = PanelLayout::Kind::Element, .elementId = id})
-            .toJson());
+        PanelLayout({.kind = Kind::Element, .elementId = id}).toJson());
   };
   QSettings().setValue("layout/tree", only(MainWindowLayout::kPlaylist));
-  QSettings().setValue("layout/toolbar", only(MainWindowLayout::kSeekBar));
+  QSettings().setValue(
+      "layout/toolbar",
+      QString::fromUtf8(
+          PanelLayout({.kind = Kind::HBox,
+                       .children = {{.kind = Kind::Element,
+                                     .elementId = MainWindowLayout::kSeekBar}}})
+              .toJson()));
   recreateWindow();
   auto *store = window_->findChild<QWidget *>("layoutElements");
   auto *panel = window_->findChild<SongInfoPanel *>("songInfoPanel");
@@ -1619,6 +1626,13 @@ void TestMainWindow::layout_editModeIsWiredAndItsEditsAreSaved() {
   editLayout->setChecked(true);
   QMenu *menu = requestMenu(seekSlider);
   QVERIFY(menu != nullptr);
+  // Every control is placed, and the toolbar offers no container: Replace
+  // with is disabled.
+  const QList<QAction *> actions = menu->actions();
+  const auto replaceWith =
+      std::ranges::find(actions, QString("Replace with"), &QAction::text);
+  QVERIFY(replaceWith != actions.end());
+  QVERIFY(!(*replaceWith)->isEnabled());
   for (QAction *action : menu->actions()) {
     if (action->text() == "Delete") {
       action->trigger();
@@ -1641,9 +1655,10 @@ void TestMainWindow::layout_editModeIsWiredAndItsEditsAreSaved() {
   menu->close();
   menu = requestMenu(window_->findChild<QWidget *>("playbackButtons"));
   QVERIFY(menu != nullptr);
-  QCOMPARE(
-      replaceWithItems(menu),
-      (QStringList{"Seek Bar", "Box (Left to Right)", "Box (Top to Bottom)"}));
+  QCOMPARE(replaceWithItems(menu), QStringList{"Seek Bar"});
+  // The row is the Toolbar, which stays: it can only get another slot.
+  QCOMPARE(actionTexts(menu->actions().last()->menu()),
+           (QStringList{"Toolbar", "Add Slot"}));
   menu->close();
 
   // And off again.

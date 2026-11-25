@@ -150,8 +150,8 @@ The top-level window and what it owns.
     [plugins/plugin-system.md](plugins/plugin-system.md).
   * The central widget holds two editable layouts (`PanelLayout`,
     `PanelLayoutView`, `PanelLayoutEditor`), edited from View > Edit
-    Layout: the toolbar, boxes of the Playback Buttons, Seek Bar and Volume
-    (`layout/toolbar`), and below it the panel layout, splitters and tabs of
+    Layout: the toolbar, one row of the Playback Buttons, Seek Bar and
+    Volume (`layout/toolbar`), and below it the panel layout, splitters and tabs of
     the Playlist, Properties, Spectrum and Cover Art elements and each
     loaded plugin's panel (Lyrics) (`layout/tree`). `setUpLayout` registers
     each layout's elements and builds the saved or default layouts
