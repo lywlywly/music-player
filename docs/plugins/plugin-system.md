@@ -1,6 +1,4 @@
-# Plan: Plugin system
-
-Status: implemented.
+# Plugin system
 
 ## Summary
 
@@ -124,8 +122,8 @@ belong to one plugin each, and a host shared by every plugin could not tell
 which plugin calls. So `PluginManager` gives each loaded plugin its own
 `PluginHost` (in `pluginmanager.cpp`), which knows the plugin's id; its
 `player()` and `control()` are the manager's shared `PluginPlayerHost`.
-Rejected: passing the plugin's id to each call: a plugin could pass
-another's, and every call would repeat what the host knows.
+Rejected: passing the plugin's id (or its provider) to each call: a plugin
+could pass another's, and every call would repeat what the host knows.
 
 **`dataFolder()`** is `<data root>/<id>/`. `MainWindow` passes the data root
 to `PluginManager`: `<AppDataLocation>/plugins`, beside `myplayer.db`; the
@@ -513,8 +511,6 @@ The places using a capability go through the `Loaded` entries.
 * A command takes effect one event-loop turn later, and a plugin seek can
   land in the next song until the generation check ("Commands").
 * Plugin menu items have no shortcuts.
-* Plugin tabs always come before the built-in ones until those are plugins
-  too.
 * A plugin's name is not translatable: JSON has no `tr()`. A translated app
   would need per-language keys in it.
 * Enabling or disabling takes a restart.

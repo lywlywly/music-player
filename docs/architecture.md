@@ -23,9 +23,10 @@ GStreamer) plays it. Qt models, widgets and dialogs
 * Adding files: parse tags, store the song, append it to the playlist; or a
   scan finds the file in a watched folder ("Song ingest and metadata
   refresh").
-* Playback: pick the next song, play it, follow its position to update the
-  status bar, lyrics and system media, and count the play once it is mostly
-  listened to ([playback.md](playback.md)).
+* Playback: pick the next song, play it, and follow its position to update
+  the status bar, lyrics and system media ([playback.md](playback.md)); the
+  Play Stats plugin counts the play once it is mostly listened to
+  ([plugins/playstats.md](plugins/playstats.md)).
 
 ## Design Principles
 
@@ -50,8 +51,8 @@ The backend must not depend on how (or whether) it is displayed.
 * The layout module (`src/layout/`, library `mylayout`: `PanelLayout`,
   `PanelLayoutView`, `PanelLayoutEditor`) depends on Qt only, never on app
   classes; its tests link it without the app, so using an app class fails
-  to link them. The app gives it the panels and their ids, the default
-  layout (`MainWindowLayout`) and the empty-slot text. See
+  to link them. The app gives it the elements and their ids, the default
+  layouts (`MainWindowLayout`) and the empty-slot text. See
   [layout-editing.md](layout-editing.md).
 * A plugin (`src/plugins/<name>/`) depends on Qt and the plugin API
   (`src/pluginapi/`) only. The app never links it: `PluginManager` loads it
@@ -426,8 +427,8 @@ is ready.
   `NowPlayingPresenter`.
   Field names are resolved at parse time, so `finishSetUpPlaylist` re-parses
   them (`NowPlayingPresenter::reloadExpressions()`); without that, a custom field
-  showed its name inside `${}` (`[mood]` instead of `[happy]`), or the
-  expression fell back to the default, until Settings was applied.
+  would show its name inside `${}` (`[mood]` instead of `[happy]`), or the
+  expression would fall back to the default, until Settings is applied.
   See [expressions.md](expressions.md) for how display expressions resolve
   fields.
 * Startup-sensitive handlers are guarded in addition to disabling actions, so

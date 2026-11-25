@@ -1,8 +1,6 @@
-# Plan: Monitored Library, Autoplaylists and Playlist Search
+# Monitored Library, Autoplaylists and Playlist Search
 
-Status: implemented (phases 1-6). The watcher uses efsw 1.7.3 from
-`third_party/efsw`. Where the code differs from the first plan, this file
-was updated to match it.
+The watcher uses efsw 1.7.3 from `third_party/efsw`.
 
 ## Summary
 
@@ -11,11 +9,11 @@ was updated to match it.
   changed files are re-read, deleted files leave.
 * **Autoplaylists**: playlists defined by a library expression. Their rows
   are the monitored songs that match it, kept up to date as songs change.
-* **Playlist Search**: a new search panel over the playlist shown in the UI.
-  The existing Library Search now covers the monitored library only.
+* **Playlist Search**: a search panel over the playlist shown in the UI.
+  Library Search covers the monitored library only.
 
-The existing behaviour (manual playlists filled with Open / Add Folder) stays
-as it is. It is called the **manual library** below.
+Manual playlists, filled with Open / Add Folder, are the **manual library**
+below.
 
 ## Key decisions
 
@@ -31,8 +29,9 @@ as it is. It is called the **manual library** below.
   that deletes songs.
 * **Watched folders cannot be nested or overlap.** Adding one that is inside,
   or contains, a watched folder is rejected with a message.
-* **No DB migration.** The schema is created on a fresh database (delete the
-  old one during development).
+* **No schema migrations.** `DatabaseManager` creates its tables with
+  `CREATE TABLE IF NOT EXISTS`, so a new table reaches an existing database.
+  Cost: changing an existing table needs a fresh database.
 
 ### Change detection
 
@@ -69,19 +68,19 @@ as it is. It is called the **manual library** below.
   rows work and, as for manual playlists, the order is saved.
 * **If the playing song stops matching, it keeps playing.**
 * **No "whole monitored library" view.** Use an autoplaylist with the
-  expression `true` (verified: it parses as a boolean expression).
+  expression `true`.
 
 ### Search
 
-* **Library Search covers the monitored library only** and stays
-  expression-only.
+* **Library Search covers the monitored library only** and takes only
+  expressions.
 * **Playlist Search is a separate results panel** over the playlist shown in
   the UI (not the playing one). It accepts plain text or an expression.
   Double-click plays a result; "Show in playlist" only selects it.
 
 ### UI
 
-* Watched folders are managed on a new **Settings > Library** page.
+* Watched folders are managed on the **Settings > Library** page.
 * Autoplaylists are created from `File > New Autoplaylist…` or from Library
   Search ("Save as autoplaylist"), and edited from the tab context menu.
 
@@ -122,14 +121,14 @@ as it is. It is called the **manual library** below.
    deleted if and only if the other library does not hold it:
    `delete(pk) <=> pk not in playlist_items and pk not in monitored_files`.
 4. **One delete path.** All deletes go through
-   `PlaylistCollection::releaseSongs(pks)` (formerly
-   `removeSongsInNoPlaylist`, extended to ask `MonitoredLibrary::holds`). It is the only caller of
+   `PlaylistCollection::releaseSongs(pks)`, which asks
+   `MonitoredLibrary::holds`. It is the only caller of
    `SongLibrary::removeSongs` and the only emitter of
    `songsRemovedFromLibrary`.
 5. **Views first, then delete.** A song leaves every view (playlist rows,
    autoplaylist rows) before `releaseSongs` deletes it, so no view ever
-   holds a deleted pk. Manual removals already work this way (rows removed,
-   then `songPksRemoved`); for monitored songs, `PlaylistCollection` handles
+   holds a deleted pk. A manual removal removes the rows, then sends
+   `songPksRemoved`; for monitored songs, `PlaylistCollection` handles
    `songsLeft` by first removing autoplaylist rows, then calling
    `releaseSongs`.
 6. **Autoplaylists own nothing.** They never write `playlist_items`, never
@@ -153,7 +152,7 @@ as it is. It is called the **manual library** below.
 | Grain | (playlist, song); a song can be in many playlists | one row per song |
 | Joins by | Open, Add Folder, Create playlist from Library Search | a scan finds a readable file under an online watched folder |
 | Leaves by | Remove from Playlist, Clear Playlist, Remove Tab; released when the song is in no manual playlist | a scan of an online folder no longer finds the file (deleted, moved out, renamed to an unsupported extension) or can't read it any more, or the folder is removed |
-| File missing on disk | row kept with its last tags, skipped on play (today's behaviour; there is no "missing" marker) | leaves on the next scan, unless its folder is offline (then kept, skipped on play) |
+| File missing on disk | row kept with its last tags, skipped on play (there is no "missing" marker) | leaves on the next scan, unless its folder is offline (then kept, skipped on play) |
 | Appears in autoplaylists | no | yes, when the expression matches |
 
 ### Events and transitions
@@ -178,7 +177,7 @@ Signals are listed in the order they are emitted.
 | "Remove missing songs" on a folder offline because empty | W or M+W | - or M | scan that skips the availability check: every file counts as gone |
 | App writes tags (Song Properties save) | W or M+W | same | refresh row, store new file stats; the watcher event that follows finds no change |
 | Last manual reference removed | M+W | W | delete `playlist_items` row, `releaseSongs`: row kept, still in autoplaylists |
-| same | M | - | `releaseSongs`: row deleted (today's behaviour) |
+| same | M | - | `releaseSongs`: row deleted |
 | New file unreadable by TagLib | - | - | not added; kept in the failed set (see "Unreadable files") |
 
 A deleted and re-added file gets a new pk (`song_id` is `AUTOINCREMENT`), and
@@ -220,8 +219,8 @@ can count as gone.
 3. **Walk** (worker): recursively list regular files whose suffix
    (case-insensitive) is a supported audio extension, without following
    symlinks and skipping hidden files and directories, and `stat` each one.
-   Metadata only. The extension list moves from `playlistdialogs.cpp` to a
-   backend header (`audiofileformats.h`) shared with Open and Add Folder.
+   Metadata only. The extension list is in a backend header
+   (`audiofileformats.h`), shared with Open and Add Folder.
 4. **Classify** (worker):
 
    | On disk | Snapshot | Result |
@@ -301,6 +300,10 @@ efsw thread --handleMissedFileActions(dir)--> folderNeedsRescan (queued) --> sca
   because the root is missing is not marked: the next scan marks the folder
   offline. The watch is tried again when the folder is added, at startup, and
   when the folder comes back online.
+* Rejected: `QFileSystemWatcher`. It is not recursive: each directory needs
+  a watch of its own, added for every new subfolder as it appears, so a
+  library of thousands of folders holds thousands of watches against the
+  system's limits. efsw watches a folder tree with one recursive watch.
 
 ### Offline folders
 
@@ -317,8 +320,8 @@ files is online, and its missing files leave normally.
 While offline:
 
 * Nothing is released. Its songs stay in the library and in autoplaylists,
-  and Library Search still finds them. Playing one hits the existing
-  missing-file skip.
+  and Library Search still finds them. Playing one hits the missing-file
+  skip.
 * The state is in memory only and re-evaluated by every scan.
 * It has no watch. `MonitoredLibrary` checks offline roots every 60 s (one
   `stat` or directory listing each, `checkOfflineFolders()`); when one is
@@ -335,7 +338,7 @@ While offline:
 Song Properties writes tags with `SongParser::writeTags`, which changes the
 file's mtime and size and fires the watcher.
 
-* `SongPropertiesDialog` already calls `SongLibrary::refreshSongFromFile`
+* `SongPropertiesDialog` calls `SongLibrary::refreshSongFromFile`
   after `writeTags` and then emits `songUpdated(pk)`. `openSongProperties`
   (`songdialogs.cpp`) connects that signal to
   `MonitoredLibrary::noteSongWritten(pk)` (reached through
@@ -374,11 +377,10 @@ file's mtime and size and fires the watcher.
     changes, Song Properties, and `notifySongsChanged` for the songs a
     plugin's values reached (play stats). So `play_count > 10` gains a song
     as soon as its count passes 10;
-  * the pks of a "Refresh Playlist Metadata" run: `Playlist` gets a new
-    signal `songsRefreshed(pks)`, emitted after `songsReset`, which
-    `PlaylistCollection` handles like `notifySongChanged` for each pk (this
-    also refreshes the same songs in other playlists, which used to stay
-    stale);
+  * the pks of a "Refresh Playlist Metadata" run: `Playlist` emits
+    `songsRefreshed(pks)` after `songsReset`, which `PlaylistCollection`
+    handles like `notifySongChanged` for each pk, so the same songs in other
+    playlists refresh too;
   * all monitored pks when the expression is edited, and when custom fields
     change: `MainWindow`'s `customFieldsChanged` handler calls
     `PlaylistCollection::reloadAutoPlaylistExpressions()`, which re-parses
@@ -404,9 +406,6 @@ file's mtime and size and fires the watcher.
 * A song that stops matching loses its saved place: if it matches again, it
   is appended. So an expression that becomes invalid (no rows) discards the
   saved order.
-* Autoplaylists created before `autoplaylist_order` existed have no saved
-  order; their first load appends every song in `filepath` order and saves
-  that.
 
 ### Invalid expression
 
@@ -420,11 +419,9 @@ never fails because of an invalid expression; the playlist is just empty.
 * `last_played` (the resume pointer, a pk) is saved as for manual playlists.
 * If the playing song stops matching (or leaves the monitored library while
   its row survives), it keeps playing. Next/Prev treat it as "current song
-  not in the playlist", as they already do for removed songs, and queued
-  entries for rows that left are skipped (`PlaybackManager::next` already
-  checks `containsPk`).
-* If the song row is deleted, `songsRemovedFromLibrary` stops playback, as it
-  does today.
+  not in the playlist", as for removed songs, and queued entries for rows
+  that left are skipped (`PlaybackManager::next` checks `containsPk`).
+* If the song row is deleted, `songsRemovedFromLibrary` stops playback.
 
 ### Operations by playlist kind
 
@@ -438,8 +435,7 @@ never fails because of an invalid expression; the playlist is just empty.
 | Play Next / Add to Playback Queue / play / follows-cursor | yes | yes |
 | Edit Autoplaylist… (name and expression) | - | yes |
 
-The existing rule that the last playlist can't be removed applies to both
-kinds.
+The last playlist can't be removed, of either kind.
 
 `Playlist` refuses the write operations for an auto playlist (`addFiles`
 returns no pks, `addSong` / `addSongByPk` return false, `removeSongs` and
@@ -447,24 +443,24 @@ returns no pks, `addSong` / `addSongByPk` return false, `removeSongs` and
 
 ## Search
 
-| | Library Search (existing, changed) | Playlist Search (new) |
+| | Library Search | Playlist Search |
 |---|---|---|
 | Scope | monitored library | rows of the playlist shown in the UI, manual or auto |
 | Input | boolean library expression | plain text or boolean library expression |
 | Results | songs, in `filepath` order | rows, in the playlist's current order |
 | Actions | Create playlist (manual), Save as autoplaylist | Play, Show in playlist, Add to Playback Queue, Properties |
-| Opens from | `Library > Search` (existing) | `Edit > Search Playlist…` (`QKeySequence::Find`: `Ctrl+F`, `Cmd+F` on macOS; the only Edit menu item) |
+| Opens from | `Library > Search` | `Edit > Search Playlist…` (`QKeySequence::Find`: `Ctrl+F`, `Cmd+F` on macOS; the only Edit menu item) |
 
 ### Library Search
 
 * `SongLibrary::search(expr, candidatePks)` takes the candidate set and
   returns the matches in `filepath` order. `LibrarySearchDialog` passes
   `MonitoredLibrary::songPks()`.
-* It uses the shared boolean check, so `davis` now shows "Expression must be
-  a condition" instead of a meaningless result.
+* It uses the shared boolean check, so `davis` shows "Expression must be a
+  condition" instead of a meaningless result.
 * With no watched folders, the dialog shows "No watched folders. Add one in
   Settings > Library." instead of an empty result.
-* "Create playlist" still creates a manual playlist from the results, so
+* "Create playlist" creates a manual playlist from the results, so
   those songs become `M+W`.
 * "Save as autoplaylist" opens `AutoPlaylistDialog` with the expression
   filled in. Both use the same scope, so the autoplaylist shows exactly the
@@ -479,8 +475,8 @@ returns no pks, `addSong` / `addSongByPk` return false, `removeSongs` and
   results.
 * **Target**: the playlist shown in the UI (`PlaylistTabs::currentPlaylist()`),
   not the playing one. The title ("Search Playlist: <name>") shows its name.
-  * Switching tabs re-targets the panel and re-runs the query. `PlaylistTabs`
-    gets a `currentPlaylistChanged(Playlist *)` signal for this.
+  * Switching tabs re-targets the panel and re-runs the query, on
+    `PlaylistTabs::currentPlaylistChanged(Playlist *)`.
   * Starting playback in another playlist does not.
   * If the target playlist is removed, the tab shown next becomes the target
     (through the same signal).
@@ -524,9 +520,9 @@ returns no pks, `addSong` / `addSongByPk` return false, `removeSongs` and
 
 ## Schema
 
-Created fresh in `DatabaseManager` (`PRAGMA foreign_keys = ON` is already
-set, which the cascades need). New tables, and `playlists` with its two new
-columns (`kind`, `expression`):
+Created by `DatabaseManager`, which sets `PRAGMA foreign_keys = ON` for the
+cascades. The monitored library's tables, and `playlists` with `kind` and
+`expression`:
 
 ```sql
 CREATE TABLE IF NOT EXISTS library_folders (
@@ -553,9 +549,8 @@ CREATE TABLE IF NOT EXISTS playlists (
 );
 ```
 
-* `playlist_items` is unchanged and holds rows for manual playlists only.
-* Autoplaylist row order (added later; `CREATE TABLE IF NOT EXISTS`, so
-  existing databases get it without a migration):
+* `playlist_items` holds rows for manual playlists only.
+* Autoplaylist row order:
   ```sql
   CREATE TABLE IF NOT EXISTS autoplaylist_order (
     playlist_id INTEGER NOT NULL REFERENCES playlists(playlist_id) ON DELETE CASCADE,
@@ -565,8 +560,8 @@ CREATE TABLE IF NOT EXISTS playlists (
   );
   CREATE INDEX IF NOT EXISTS idx_autoplaylist_order_songid ON autoplaylist_order(song_id);
   ```
-* `songs.filepath` is already `NOT NULL UNIQUE`; it now always holds the
-  canonical path (invariant 1).
+* `songs.filepath` is `NOT NULL UNIQUE` and always holds the canonical path
+  (invariant 1).
 * The `songs` cascade never removes a monitored song in practice: only
   `releaseSongs` deletes song rows, and it skips monitored ones.
 * The release check (invariant 3) as SQL, for tests:
@@ -582,7 +577,7 @@ CREATE TABLE IF NOT EXISTS playlists (
 
 ### Backend (follows "Backend classes do not leak UI")
 
-* `MonitoredLibrary` (new, owned by `MainWindow`, constructed before
+* `MonitoredLibrary` (owned by `MainWindow`, constructed before
   `PlaylistCollection`)
   * Constructor: `SongLibrary &`, `const ColumnRegistry &`,
     `DatabaseManager &`, a parse function (defaults to
@@ -606,7 +601,7 @@ CREATE TABLE IF NOT EXISTS playlists (
     offline roots.
   * Does not know about playlists; `releaseSongs` is called by
     `PlaylistCollection` in reaction to `songsLeft`.
-* `LibraryScanner` (new): the worker-side steps 2-5 of "Scan", as a free
+* `LibraryScanner`: the worker-side steps 2-5 of "Scan", as a free
   function or a stateless class. Input is plain data (folders and scope,
   snapshot, failed set, registry copy) plus a parse function (defaults to
   `SongParser::parse`; tests inject one, like `SongParseFn`). Output is plain
@@ -616,14 +611,14 @@ CREATE TABLE IF NOT EXISTS playlists (
   * `search(expr, candidatePks)`, in `filepath` order; also fills
     autoplaylists.
   * `matches(expr, pk)`, for autoplaylist membership.
-  * `prepareParsedSong(MSong &) const`: computed fields, split out of
-    `loadPreparedSongFromFile`.
+  * `prepareParsedSong(MSong &) const`: a parsed song's computed fields,
+    for `loadPreparedSongFromFile` and for the scanner's songs.
   * `addTolibrary` canonicalises `filepath` (invariant 1).
-* `parseSongFilter(const SongLibrary &, const QString &)` (new, next to
+* `parseSongFilter(const SongLibrary &, const QString &)` (next to
   `parseLibraryExpression`): parse plus the boolean check, with the error
   "Expression must be a condition". Used by Library Search, autoplaylists,
   `AutoPlaylistDialog` and `SongMatcher`.
-* `IFileSystemMonitor` (rewritten)
+* `IFileSystemMonitor`
   * QObject API: `addPath` (returns whether the recursive watch was added),
     `removePath` (returns whether the path was watched); signals `pathsChanged(QStringList)` and
     `folderNeedsRescan(QString)`, always delivered on the main thread.
@@ -632,52 +627,50 @@ CREATE TABLE IF NOT EXISTS playlists (
     `handleMissedFileActions` maps to `folderNeedsRescan`.
   * `DummyFileSystemMonitor` for tests: records watches and lets the test
     emit events.
-* `Playlist` gets a kind (`Manual` / `Auto`) from `playlists.kind`.
+* `Playlist` has a kind (`Manual` / `Auto`) from `playlists.kind`.
   * Auto: `loadState` reads `last_played` and the saved order
     (`autoplaylist_order`); the write operations are refused (see
     "Operations by playlist kind").
-  * New, for auto playlists only: `resetRows(pks)` (reset signals),
+  * For auto playlists only: `resetRows(pks)` (reset signals),
     `appendRows(pks)` (insert signals) and `removeRowsByPk(pks)` (the same
     remove signals as `removeSongs`). None of them emits `songPksRemoved`,
     so they never cause a release.
-  * New signal `songsRefreshed(pks)` after `refreshMetadataFromFiles`.
+  * Signal `songsRefreshed(pks)` after `refreshMetadataFromFiles`.
 * `PlaylistCollection`
-  * Constructor adds `MonitoredLibrary &` (existing tests construct one with
-    no monitor), exposed as `monitoredLibrary()` for `openSongProperties`.
-  * Adds `createAutoPlaylist(name, expression)`,
+  * Constructor takes `MonitoredLibrary &` (tests construct one with no
+    monitor), exposed as `monitoredLibrary()` for `openSongProperties`.
+  * `createAutoPlaylist(name, expression)`,
     `setAutoPlaylistExpression(id, expression)`, `isAuto(id)`,
     `autoPlaylistExpression(id)`, `autoPlaylistError(id)` and
     `reloadAutoPlaylistExpressions()`, and the signal
     `autoPlaylistExpressionChanged(id)` after either of the setters.
   * `notifySongsChanged(pks)` (public), used for a plugin's values.
-  * `releaseSongs(pks)` replaces `removeSongsInNoPlaylist`: keeps pks in no
-    manual playlist and not `MonitoredLibrary::holds`, calls
-    `SongLibrary::removeSongs`, emits `songsRemovedFromLibrary` (signal
-    unchanged, so `PlaybackController` keeps its connection). Called for
-    `songPksRemoved` of manual playlists, removing a manual playlist, and
-    `songsLeft`.
+  * `releaseSongs(pks)`: keeps pks in no manual playlist and not
+    `MonitoredLibrary::holds`, calls `SongLibrary::removeSongs`, emits
+    `songsRemovedFromLibrary`. Called for `songPksRemoved` of manual
+    playlists, removing a manual playlist, and `songsLeft`.
   * `loadAll()` loads both kinds; auto playlists are filled from
     `MonitoredLibrary::songPks()`.
   * Keeps auto playlists current (see "Autoplaylists > Membership").
-* `PlaybackController`: no new logic; `PlaybackManager` and the policies
-  already handle pks that are no longer in the playlist.
+* `PlaybackController`: nothing of its own; `PlaybackManager` and the
+  policies handle pks that are no longer in the playlist.
 
 ### Frontend
 
-* `SettingsDialog`, new "Library" page (`LibraryFoldersPage`): watched
+* `SettingsDialog`, "Library" page (`LibraryFoldersPage`): watched
   folders with "Offline" and "Live updates unavailable" markers; Add…,
   Remove, Rescan now; "Remove missing songs" for a
   folder offline because empty (offline although its root exists); scan
   progress. The page calls `MonitoredLibrary` directly, and its actions apply
   at once, not on the dialog's OK.
-* `AutoPlaylistDialog` (new): name and expression editor with parse errors
+* `AutoPlaylistDialog`: name and expression editor with parse errors
   and a live match count over the monitored library. Opens from
   `File > New Autoplaylist…`, Library Search's "Save as autoplaylist" (the
   last searched expression), and the tab context menu's "Edit
   Autoplaylist…". OK needs a name and a valid expression.
 * `LibrarySearchDialog`: monitored scope, boolean check, no-watched-folders
   hint, "Save as autoplaylist".
-* `PlaylistSearchDialog` (new): see "Playlist Search".
+* `PlaylistSearchDialog`: see "Playlist Search".
 * `PlaylistTabs`: `currentPlaylistChanged` signal; autoplaylist tabs get a
   distinct icon (and the warning icon, with the error as tooltip, for an
   invalid expression), updated on
@@ -687,13 +680,13 @@ CREATE TABLE IF NOT EXISTS playlists (
   while an autoplaylist tab is shown.
 * Status bar: a permanent label shows "Scanning library… 120 / 3000" during
   a scan, then "1 library folder offline" if any folder is offline, and is
-  hidden otherwise. The playback message beside it is unchanged.
+  hidden otherwise. The playback message is beside it.
 
 ## Startup and shutdown
 
 Startup:
 
-1. `loadLibrary` (worker), unchanged.
+1. `loadLibrary` (worker).
 2. In `finishSetUpPlaylist`: `MonitoredLibrary::load()`, which also adds a
    watch for every watched folder, then `PlaylistCollection::loadAll()`
    (manual playlists, then autoplaylists filled from the stored monitored
@@ -710,42 +703,25 @@ Shutdown: a running scan's results are dropped (its `QFutureWatcher` is a
 child of `MonitoredLibrary`, as `loadLibrary`'s is of `MainWindow`). Nothing
 is lost: the next startup scan redoes the work.
 
-## Phases
+## Tests
 
-Each phase is separately testable and committable.
-
-1. **Monitored library, without the watcher.** Schema, path canonicalisation
-   in `addTolibrary`, `audiofileformats.h`, `releaseSongs`,
-   `MonitoredLibrary` (no monitor), `LibraryScanner`; startup scan and
-   `rescan()`; `noteSongWritten`. Tests: every row of "Events and
-   transitions"; scan classification; walk rules (symlinks, hidden files,
-   extension case); overlapping folders rejected; queued and merged scans;
-   stale results skipped at apply; offline cases 1 and 2 release nothing;
-   "Remove missing songs". Existing `PlaylistCollection` tests are updated
-   for the new constructor.
-2. **Autoplaylist backend.** `parseSongFilter`, `Playlist` kind and row
-   methods, membership and re-evaluation (including `songsRefreshed` and
-   a plugin's values reaching every song of a key), row order, invalid
-   expressions. Tests in
-   `tst_playlistcollection` and a new `tst_autoplaylist`.
-3. **UI.** Settings Library page, `AutoPlaylistDialog`, Library Search scope,
-   boolean check and "Save as autoplaylist", tab behaviour, action enabling.
-   UI tests in the style of `tst_settingsdialog_ui`.
-4. **Playlist Search.** `SongMatcher` / `matchPlaylistRows` with tests for the
-   three modes (using the inputs listed under "Mode"), then
-   `PlaylistSearchDialog` with a UI test. Needs `parseSongFilter` from
-   phase 2, nothing else.
-5. **Live watcher.** `IFileSystemMonitor` rewrite, `EfswFileSystemMonitor`,
-   `DummyFileSystemMonitor`, debouncing and the offline poll in
-   `MonitoredLibrary`. The rewrite breaks the unused prototype, so it is
-   deleted here: `QFileSystemMonitor`, `FileSystemComparer`,
-   `ChecksumCalculator`, `tst_fsmonitor`, `tst_checksum` (already disabled),
-   and `find_package(OpenSSL)` if nothing else uses it. (efsw itself is
-   already set up as the `third_party/efsw` submodule, built statically on
-   all platforms.) `tst_efswfilesystemmonitor` checks the real watcher on a
-   temporary directory.
-6. **Docs.** Update `docs/architecture.md`, `docs/expressions.md` (boolean
-   check), `README.md` (features) and `roadmap.md`.
+* `tst_monitoredlibrary`: every row of "Events and transitions"; scan
+  classification; walk rules (symlinks, hidden files, extension case);
+  overlapping folders rejected; queued and merged scans; stale results
+  skipped at apply; offline cases 1 and 2 release nothing; "Remove missing
+  songs"; debouncing and the offline poll, with `DummyFileSystemMonitor`.
+* `tst_playlistcollection`, `tst_autoplaylist`: `parseSongFilter`, the
+  `Playlist` kind and row methods, membership and re-evaluation (including
+  `songsRefreshed` and a plugin's values reaching every song of a key), row
+  order, invalid expressions.
+* `tst_settingsdialog_ui`: the Library page. `tst_librarysearchdialog_ui`:
+  Library Search's scope, boolean check and "Save as autoplaylist".
+  `tst_playlisttabs` and `tst_mainwindow`: `AutoPlaylistDialog`, tab
+  behaviour, action enabling.
+* `tst_playlistsearch`: `SongMatcher` / `matchPlaylistRows` in the three
+  modes (the inputs under "Mode"); `tst_playlistsearchdialog_ui`:
+  `PlaylistSearchDialog`.
+* `tst_efswfilesystemmonitor`: the real watcher on a temporary directory.
 
 ## Not covered
 
@@ -754,8 +730,8 @@ Each phase is separately testable and committable.
 * A list of unreadable files in the UI.
 * Watching network shares reliably. Native events may not arrive for remote
   changes; the startup scan and "Rescan now" still pick them up.
-* Recomputing stored computed values after custom fields change (the existing
-  `TODO` in `MainWindow`'s `customFieldsChanged` handler). Autoplaylists
+* Recomputing stored computed values after custom fields change (the `TODO`
+  in `MainWindow`'s `customFieldsChanged` handler). Autoplaylists
   re-parse their expressions then, but evaluate the stored values.
 * Filling in a new `attr:` column for songs parsed before it existed. The
   scan only re-parses files whose stats changed (Add Folder doesn't re-parse

@@ -16,8 +16,10 @@ macOS, Windows and Linux.
 
 - Commit and push only when asked. Commit messages start with the history's prefixes: `feat:`, `fix:`,
   `refactor:`, `test:`, `docs:`, `build:`, `chore:`.
-- A feature larger than a few classes starts with a plan in `docs/<topic>.md` (titled "Plan: ...",
-  marked "Status: implemented" once done), reviewed before building.
+- A feature larger than a few classes starts with a plan in `docs/<topic>.md`, reviewed before
+  building. Once built, the doc describes the design as it is, with no "Plan:" title or status
+  line; a part not yet built stays a plan section ("Plan: ...", with what is built and what is
+  not).
 - Before calling a change done: build the app and the tests, run the whole test suite, and pass
   `scripts/format.sh --check` (commands below). For playback, audio output or UI, also run the app and
   check the change by hand. Then review the whole diff against this file: no stale code or docs, and

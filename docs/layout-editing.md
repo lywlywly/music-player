@@ -1,6 +1,4 @@
-# Plan: Custom layout editing
-
-Status: implemented.
+# Custom layout editing
 
 ## Summary
 
@@ -32,6 +30,17 @@ Status: implemented.
   why, are in "Key decisions".
 
 ## Key decisions
+
+### An editable layout, not a fixed one
+
+* Rejected: a fixed layout in `mainwindow.ui`: the controls above, and
+  the info panels as tabs of one `QTabWidget` above the cover, beside the
+  playlist. The app would decide every panel's place, so a plugin panel
+  could only be added where the app put plugins (its tabs, before or after
+  the built-in ones), and nothing could sit side by side with the playlist
+  or the other panels.
+* Cost: the layout module, edit mode and two saved trees, for what a fixed
+  layout gets from `mainwindow.ui` alone.
 
 ### Elements are single, existing widgets that the layout places
 
@@ -276,10 +285,6 @@ module has both directions, and boxes nest; the app uses the one row.
 * An incompatible format change later gets a new key, as DeaDBeeF's
   `gtkui.layout.<version>` does, rather than a version field and migration
   code now.
-* Rejected: converting the keys of the earlier fixed layout
-  (`layout/main_splitter`, `layout/info_splitter`, `infopanel/current_tab`)
-  into the first tree. Cost: an existing user's splitter sizes and current
-  info tab are reset once.
 * A plugin's panel, like any element not in the tree, is shown only once
   the user inserts it. Both reference players behave the same way. Adding
   it automatically would mean guessing where it belongs.

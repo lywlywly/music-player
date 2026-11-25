@@ -1,6 +1,4 @@
-# Plan: Settings dialog navigation tree
-
-Status: implemented.
+# Settings dialog navigation tree
 
 `SettingsDialog` (Preferences) shows its pages in a **navigation tree**, so
 a page can have child pages: the Plugins page and, under it, each loaded

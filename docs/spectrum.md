@@ -1,6 +1,4 @@
-# Plan: Spectrum panel
-
-Status: implemented.
+# Spectrum panel
 
 ## Summary
 
@@ -19,7 +17,7 @@ Status: implemented.
   backend: `QAudioBufferOutput` is implemented only there. Homebrew's Qt on
   macOS ships only the `darwin` (AVFoundation) backend, whose
   `setAudioBufferOutput` is the base class's no-op, so no buffer arrives.
-  When no audio arrives while playing, the tab says so and points to
+  When no audio arrives while playing, the panel says so and points to
   Settings > Playback > Playback backend.
 
 ## Look
@@ -128,7 +126,7 @@ swapped later.
 * Active while the widget is shown. It emits `tapChanged(tap)` on becoming
   active and `tapChanged(nullptr)` on becoming hidden, when it also clears
   the tap and the bars. `MainWindow` connects it to
-  `PlaybackController::setPcmTap`, so no audio is copied while the tab is
+  `PlaybackController::setPcmTap`, so no audio is copied while the panel is
   hidden.
 * Inputs: `setPosition(ms)` and `setState(Stopped | Paused | Playing)`.
 * Timing: the players decode ahead of what is heard (the GStreamer probe
@@ -141,7 +139,7 @@ swapped later.
   reach the floor. Paused, it stops, so the bars freeze.
 * `setNoAudioMessage(text)`: shown when no audio was read for 1.5 s while
   playing (shorter gaps, after a seek or past the end of a song, are
-  normal). Audio, stop or hiding the tab clears it. The default says "No
+  normal). Audio, stop or hiding the panel clears it. The default says "No
   audio from the playback backend."; `MainWindow` sets one that points to
   the backend setting.
 
@@ -251,4 +249,4 @@ send no buffers.
   machine without one.
 * Check by hand: a high-rate file (96 kHz 24-bit FLAC) shows on the
   GStreamer backend; on the Qt backend without Qt's FFmpeg media backend, the
-  tab shows the no-audio message.
+  panel shows the no-audio message.

@@ -1,12 +1,10 @@
-# Plan: Play stats plugin
-
-Status: implemented.
+# Play stats plugin
 
 Play counts, last played times and their cloud sync are a plugin with its own
 database. The app keeps no play stats and no song identity; it has a generic
 way for a plugin to provide song fields, which columns, sorting, expressions
-and autoplaylists use like any other field. The plugin system this extends is
-in [plugin-system.md](plugin-system.md).
+and autoplaylists use like any other field. The plugin system it is built on
+is in [plugin-system.md](plugin-system.md).
 
 ## Summary
 
@@ -14,18 +12,19 @@ in [plugin-system.md](plugin-system.md).
   Stats") decides when a play counts, stores `play_count` and
   `last_played_timestamp` per song identity in its own SQLite file, and
   syncs the counts with the cloud.
-* **Its fields reach the host through a new capability**,
+* **Its fields reach the host through a capability**,
   `ISongFieldProvider`: the plugin declares its fields and the song fields
   its grouping key is computed from, turns those into a key, and gives the
   values for a batch of keys or for all of them. `SongLibrary` keeps a copy
   of the values on each song, so everything that reads song fields works
-  unchanged. The plugin reports changed keys through a new host service,
+  unchanged. The plugin reports changed keys through a host service,
   `ISongFieldHost::valuesChanged(keys)`; songs added, re-tagged songs and
   those changes all go through one batched refresh.
 * **Each plugin gets its own `IPluginHost`**, so the host knows which plugin
   calls `dataFolder()` and `valuesChanged`.
-* **Playback reaches the plugin through new listener events**:
-  `durationChanged`, `paused`, `resumed`, `seeked`, `finished`.
+* **Playback reaches the plugin through listener events**, five of them
+  for counting: `durationChanged`, `paused`, `resumed`, `seeked`,
+  `finished`.
 * **No I/O while plugins load**: `initialize` and the capability calls made
   while the window is built read and write no file, database or network.
   The plugin's rows are read on the library load's worker thread.
@@ -42,8 +41,8 @@ in [plugin-system.md](plugin-system.md).
   columns) and change without touching the app's schema.
 * Identity exists only for play stats. With them in the plugin, the app has
   no concept it does not use.
-* Cost: a new capability, new host services, one host object per plugin and
-  five listener events (see "Costs").
+* Cost: a capability, a host service, one host object per plugin and five
+  listener events in the plugin API (see "Costs").
 
 ## Storage
 
@@ -63,8 +62,8 @@ CREATE TABLE song_play_stats (
 * **Keyed by the identity key, not an id.** The key is what the plugin
   computes from a song's tags and what the cloud stores, so local and cloud
   name an identity the same way, and nothing stored can disagree with the
-  tags. Rejected: an integer `identity_id` with a link on each song (the
-  app's design before the plugin): the link would be a foreign key into another file,
+  tags. Rejected: an integer `identity_id` with a link on each song in the
+  app's database: the link would be a foreign key into another file,
   which SQLite cannot enforce, and it is derived data the app has no use
   for. Cost: a text primary key, about 40 bytes per identity, stored once.
 * **Rows are never deleted.** A row outlives the songs that have its key,
@@ -130,16 +129,14 @@ CREATE TABLE song_play_stats (
 
 ### The app's database
 
-`myplayer.db` has no play stats and no identity: no `song_identities`, no
-`song_play_stats`, no `songs.identity_id`. A database from before the plugin
-is migrated once (see "Migration").
+`myplayer.db` has no play stats and no identity.
 
 ## Counting plays
 
 ### Events
 
-`IPlayerListener` gains five events, each forwarded by `PluginPlayerHost`
-from a `PlaybackController` signal:
+Five `IPlayerListener` events serve counting, each forwarded by
+`PluginPlayerHost` from a `PlaybackController` signal:
 
 | Event | From | Used for |
 | --- | --- | --- |
@@ -149,7 +146,6 @@ from a `PlaybackController` signal:
 | `seeked(ms)` | `seeking` (before the backend is told) | a seek adds no listened time |
 | `finished()` | `songFinished` (before Next) | count at the end of the song |
 
-* A core API change; versions stay at 1 (plugin-system.md, "Versions").
 * A song start sends `trackStarted`, not `resumed`, as `PlaybackController`
   sends `songStarted` instead of `playbackStateChanged`.
 
@@ -292,17 +288,6 @@ public:
   the plugin's own fields in the input, and no way to know when to
   recompute).
 
-### One `IPluginHost` per plugin
-
-Some services belong to one plugin each (its data folder, its fields'
-changes), and a host shared by every plugin could not tell which plugin
-calls. So `PluginManager` gives each loaded plugin its own host object
-(`PluginHost`, in `pluginmanager.cpp`), which knows the plugin's id and
-forwards `player()` and `control()` to the shared ones. Rejected: passing the
-plugin's id or
-provider to each call: a plugin could pass another's, and every call would
-repeat what the host already knows.
-
 ### The host service: `ISongFieldHost`
 
 `IPluginHost::songFieldHost()` returns it; `valuesChanged(const QStringList
@@ -313,7 +298,7 @@ repeat what the host already knows.
   and runs it on the main thread. The plugin calls it inside `trackStarted`,
   which runs inside `PlaybackController::playSong`; refreshing rows and
   autoplaylists there would nest inside starting a song
-  ([event-ordering.md](../event-ordering.md), "Who queues each edge": a new
+  ([event-ordering.md](../event-ordering.md), "Who queues each edge": a
   plugin edge, queued by the host). Cost: rows repaint at the queued refresh
   ("What `SongLibrary` keeps"), not at once.
 * **Keys only, never values.** The host reads the values when it refreshes,
@@ -322,21 +307,16 @@ repeat what the host already knows.
   `providedValuesChanged(pluginId, keys)`, which `MainWindow` connects to
   `SongLibrary::markStale` (below).
 
-### `IPluginHost::dataFolder()`
-
-The plugin's own folder: `<data root>/<id>/`. `MainWindow` passes the data
-root to `PluginManager` beside the plugin folder: `<AppDataLocation>/plugins`
-in the app, beside `myplayer.db`. The tests give a temporary folder:
-`MainWindow`'s test constructor (database and connection name) gains a data
-root parameter, and `tst_plugins` passes one to `PluginManager`, so no
-plugin touches the developer's data. The host returns the path only; the
-plugin creates the folder on its first write.
+The plugin's file is in its data folder, and `valuesChanged` names the
+plugin through its own host object: both come from
+[plugin-system.md](plugin-system.md), "Core: every plugin" (one host object
+per plugin, `dataFolder()`).
 
 ### Registration (`PluginManager` and `ColumnRegistry`)
 
 At plugin load, for each provider:
 
-* Each field goes into `ColumnRegistry` with a new source,
+* Each field goes into `ColumnRegistry` with the source
   `ColumnSource::Plugin`: a column and an expression symbol (name and
   resolved id both the field id, so `play_count` reads `song["play_count"]`,
   as custom fields do), in `FieldTypePool`; not a `songs` column, kept by
@@ -539,8 +519,8 @@ a move would take plays that may be theirs.
 | Call | Direction | Thread |
 | --- | --- | --- |
 | `songFields`, `keyFields` | host → plugin | main |
-| `songKey`, `values`, `allValues` | host → plugin | main or the library load's workers (new exceptions, documented in the header) |
-| New listener events | host → plugin | main, synchronous |
+| `songKey`, `values`, `allValues` | host → plugin | main or the library load's workers (exceptions, documented in the header) |
+| Listener events | host → plugin | main, synchronous |
 | `valuesChanged` | plugin → host | any, deferred |
 | `dataFolder`, `songFieldHost` | plugin → host | main |
 
@@ -550,34 +530,10 @@ that lifetime rule, and **no I/O while plugins load**. The
 plugin's `initialize`, `shutdown` and the capability calls made while the
 window is built (`createPanel`, `createMenu`, `songFields`, `keyFields`) do
 no file, database or network I/O; reading QSettings is allowed (QSettings
-reads its store once). Loading the library files themselves is the host's,
-and is unchanged. Work that needs I/O starts later: on a listener event,
-from the event loop, on the plugin's own thread, or in the provider's
-reads, which the host makes only from the library load's workers or the
-event loop. The existing plugins already follow it.
-
-## Migration
-
-A one-off script, run once on copies, not kept in the app:
-
-1. Copy the stats into the plugin's file:
-   `ATTACH` both databases, create the plugin's table, `INSERT INTO
-   song_play_stats SELECT i.song_identity_key, s.play_count,
-   s.last_played_timestamp FROM song_play_stats s JOIN song_identities i
-   USING (identity_id)`, set `user_version = 1`.
-2. Rebuild the app's `songs` without `identity_id`, with foreign keys off:
-   create the new table with the current columns, copy, drop the old one,
-   rename; then restore `songs`' `sqlite_sequence` value, so removed song ids
-   are never reused; drop `song_identities` and `song_play_stats`; run
-   `PRAGMA foreign_key_check`. SQLite refuses `DROP COLUMN` on a column in a
-   foreign key, hence the rebuild.
-3. Copy the `cloud_sync/*` settings to `playstats/*` and remove the old
-   keys (on Windows they are in the registry, under
-   `HKCU\Software\Example\myplayer`). The UUID is copied, never printed.
-
-The keys are unchanged, so the cloud needs nothing. Rejected: deleting
-`myplayer.db`: it would lose playlists, watched folders,
-custom fields and every last played time.
+reads its store once). Loading the library files themselves is the host's.
+Work that needs I/O starts later: on a listener event, from the event loop,
+on the plugin's own thread, or in the provider's reads, which the host makes
+only from the library load's workers or the event loop.
 
 ## Rejected
 
@@ -594,9 +550,9 @@ custom fields and every last played time.
 
 ## Costs
 
-* A larger plugin API: `ISongFieldProvider`, `ISongFieldHost`,
-  `dataFolder`, five listener events, three calls also made off the main
-  thread, whose rules the host cannot enforce.
+* Plugin API for it: `ISongFieldProvider`, `ISongFieldHost`, `dataFolder`,
+  five listener events, three calls also made off the main thread, whose
+  rules the host cannot enforce.
 * A host copy of the values, current as of the last refresh.
 * Disabling the plugin breaks expressions that use its fields, and its
   columns lose their place.
@@ -619,7 +575,6 @@ custom fields and every last played time.
   and `waitForDelay`) is not checked; the dummy cloud the tests use has no
   retries.
 * Manual rebase is in the Playback menu, not Library.
-* A one-off migration of the database and the settings.
 
 ## Tests
 
@@ -632,7 +587,7 @@ custom fields and every last played time.
   main thread for a file database), `tst_columnregistry` (plugin fields as
   symbols, kept by `loadDynamicColumns`, reserving their names),
   `tst_columnlayout` (a column registered after the layout loads keeps its
-  saved width), `tst_plugins` (the new listener events; the fields
+  saved width), `tst_plugins` (the counting's listener events; the fields
   registered, a provider whose id clashes refused; `valuesChanged` deferred;
   the plugin's file under the data root the test gives, none created while
   loading), `tst_autoplaylist` and `tst_songinfo` (a refresh reaches

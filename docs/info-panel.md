@@ -1,6 +1,6 @@
-# Plan: Info Panels (Properties and cover art)
+# Info Panels (Properties and cover art)
 
-Status: implemented. The Spectrum panel is described in
+The Spectrum panel is described in
 [spectrum.md](spectrum.md), the Lyrics panel's classes in
 [plugins/lyrics.md](plugins/lyrics.md), and where the panels go in
 [layout-editing.md](layout-editing.md).
@@ -56,8 +56,8 @@ Status: implemented. The Spectrum panel is described in
   titles (`ColumnDefinition::title`), `FieldValue::display()` and locale
   formatting, which backend classes must not use (see "Backend classes do
   not leak UI" in [architecture.md](architecture.md)). So the row builder is
-  a frontend free function, tested without widgets. The only backend change
-  is `MonitoredLibrary::folderOf`.
+  a frontend free function, tested without widgets. Its backend side is
+  one query, `MonitoredLibrary::folderOf`.
 
 ## UI
 
@@ -143,7 +143,7 @@ have, is left out, and so is a section with no rows.
   creation time, hence "Unknown".
 * Two buttons below the rows: **Open Containing Folder** (`revealSongFile`,
   which already warns for a missing file) and **Edit Properties...**
-  (`openSongProperties`, the existing Song Properties dialog). Both are
+  (`openSongProperties`, the Song Properties dialog). Both are
   disabled with no song shown. They sit side by side when both fit and are
   stacked otherwise (`SongInfoPanel::resizeEvent`); their `Ignored`
   horizontal size policy keeps them from setting the panel's minimum width,
@@ -157,8 +157,8 @@ have, is left out, and so is a section with no rows.
 
 * `std::optional<Folder> folderOf(int songPk) const`: the watched folder
   holding the song (`entries_` gives its `folderId`, `folders_` the
-  `Folder`), or none for a song it does not hold. `Entry` is private, so
-  `holds` was not enough to tell the folder or whether it is online.
+  `Folder`), or none for a song it does not hold. `holds` tells neither the
+  folder nor whether it is online, and `Entry` is private.
 
 ### `SongInfo`, `buildSongInfo` (frontend, `songinfo.{h,cpp}`)
 
@@ -273,8 +273,7 @@ have, is left out, and so is a section with no rows.
   manual playlist, so never the shown song of a manual playlist; an
   autoplaylist removes the row first, so the selection has already moved.
 * **Refresh** (tab context menu): the playlist is reset, which clears the
-  selection, so the panel shows "No song selected" afterwards. This follows
-  the existing reset behaviour.
+  selection, so the panel shows "No song selected" afterwards.
 * **Shown playlist removed**: the tab change sends `selectedSongChanged` for
   the new tab; the presenter's `QPointer` covers the time in between.
 * **File changed on disk**: for a monitored song, the scan re-reads it and
@@ -282,7 +281,7 @@ have, is left out, and so is a section with no rows.
   only in manual playlists, they update on the next rebuild (selection
   change, or a song-data change such as a play count).
 * **File moved or deleted**: "File not found"; Open Containing Folder shows
-  the existing warning from `revealSongFile`.
+  the warning from `revealSongFile`.
 * **Startup**: tabs exist only after `finishSetUpPlaylist`; until then the
   panel shows "No song selected".
 

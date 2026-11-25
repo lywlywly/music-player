@@ -1,6 +1,4 @@
-# Plan: A-B Repeat plugin
-
-Status: implemented.
+# A-B Repeat plugin
 
 Loops a section of the playing song: the user marks A and B in a submenu of
 Playback, and playback jumps back to A each time it reaches B. The plugin

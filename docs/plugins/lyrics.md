@@ -1,6 +1,4 @@
-# Plan: Lyrics plugin
-
-Status: implemented.
+# Lyrics plugin
 
 The Lyrics panel (an info panel, inserted into the layout from View > Edit
 Layout): the playing song's lyrics, with the line for the play position highlighted and
@@ -27,16 +25,18 @@ Built and deployed as every plugin is ([plugin-system.md](plugin-system.md),
   `IPlayerControl`. The presenter implements `IPlayerListener`, adds itself
   in its constructor and removes itself in its destructor, so it listens for
   the panel's lifetime, while the host exists. The plugin keeps the
-  presenters (`QPointer`s, as the panels are deleted by the tab widget).
+  presenters (`QPointer`s, as the panels are deleted by the window that
+  holds them).
 * `LyricsPresenter` owns the `LyricsManager`, shows the playing song's lyrics
   in its `LyricsPanel`, plays from a clicked line, and applies the style
   settings to the panel. `LyricsManager` holds the lyrics, moves the current
   line with the play position, and gives a line's timestamp
   (`lineStartMs`).
 * `LyricsPanel` keeps the index of its current line and re-centers on it,
-  without animation, in `showEvent` and `resizeEvent`: the tab keeps getting
-  positions while hidden, but a `QTabWidget` sizes only its current page, so
-  the hidden panel can be resized later ([info-panel.md](../info-panel.md)).
+  without animation, in `showEvent` and `resizeEvent`: the panel keeps getting
+  positions while hidden, but a hidden panel is not resized (a `QTabWidget`
+  sizes only its current page), so it can be resized later
+  ([info-panel.md](../info-panel.md)).
   It handles the hover, the click and the scroll hold ("Seeking from a line,
   hover and the scroll hold").
 

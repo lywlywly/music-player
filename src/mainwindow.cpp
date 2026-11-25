@@ -81,7 +81,7 @@ QString pluginFolder() {
 }
 
 // The folder the plugins' data folders are in: plugins/ beside the app's
-// database (docs/plugins/plugin-system.md, "Data folders").
+// database (docs/plugins/plugin-system.md, "Core: every plugin").
 QString defaultPluginDataRoot() {
   return QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation))
       .filePath("plugins");
