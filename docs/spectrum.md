@@ -5,8 +5,10 @@
 * A **Spectrum** panel, one of the info panels, inserted into the layout from
   View > Edit Layout (see [info-panel.md](info-panel.md) and
   [layout-editing.md](layout-editing.md)).
-* It shows the spectrum of the playing song as 20 bars, log-spaced from 50 Hz
-  to 20 kHz, on a 0 dB to -60 dB scale, with peak marks.
+* It shows the spectrum of the playing song as 10, 20 (the default), 40 or 80
+  bars: the octave, half-, quarter- and eighth-octave bands of IEC 61260-1
+  over the ten octaves from 22.4 Hz to 22.4 kHz, on a 0 dB to -60 dB scale,
+  with peak marks. The panel's context menu picks the count.
 * The analysis and the widget are a separate module, `src/spectrum/`, built
   as its own static library (`myspectrum`). It depends on Qt only, not on
   any app class. The app depends on it, never the other way round.
@@ -30,14 +32,23 @@
   | || |  | |_   _                         -40dB
   | || |_ | | | | |_                       -50dB
   |_||_|_||_|_|_|_|_|______________________ -60dB
-  50 69 94 ... 1.2K ... 11K 15K 20K
+  27 38 53 ... 1.2K ... 9.4K 13K 19K
 ```
 
-* 20 bars, one per band. Band centers are log-spaced from 50 Hz to 20 kHz
-  (50, 69, 94, 129, 177, ... 7.8K, 11K, 15K, 20K). Labels below the bars:
+* One bar per band, 20 by default (27, 38, 53, 75, 106, ... 6.7K, 9.4K, 13K,
+  19K); the bands are described in "Bands". Labels below the
+  bars: a center on an ISO 266 preferred frequency shows its preferred value
+  (with 10 bands: 31.5, 63, 125, 250, 500, 1K, 2K, 4K, 8K, 16K); others show
   whole hertz under 1 kHz, one decimal with `K` under 10 kHz (`1.2K`), whole
   `K` above. When the bars are too narrow for every label, every second (or
-  third) one is drawn.
+  third, ...) one is drawn. Bars are 2 px apart, 1 px when a bar's step is
+  under 8 px, so many narrow bars keep their width.
+* **Band count.** Right-click the panel: "10 Bands", "20 Bands", "40 Bands",
+  "80 Bands", the current one checked. A fixed set rather than a free number:
+  each doubling halves the band width, which is the visible difference, and
+  a menu needs no settings page. The choice is saved in the `spectrum/bands`
+  setting (an unknown saved value reads as 20). Changing it drops the bars
+  and peaks to the floor; while playing, the next frame raises them.
 * Scale: 0 dB at the top, -60 dB at the bottom; a grid line and a label on
   the right every 10 dB. 0 dB is a full-scale sine.
 * Each bar has a vertical gradient (palette highlight to a mix of highlight
@@ -47,16 +58,77 @@
 * Colors come from the widget palette, so the panel follows the light and
   dark themes.
 
+## Bands
+
+The bands are the fractional-octave bands of IEC 61260-1:2014, with
+b = count / 10 bands per octave:
+
+* Base 10, the standard's choice: the octave ratio is G = 10^0.3 (1.9953),
+  the reference f_r = 1 kHz.
+* Centers `f_r G^(x/b)` for odd b, `f_r G^((2x+1)/(2b))` for even b; edges
+  `center * G^(±1/(2b))`. The half-step for even b makes b bands fill one
+  octave band exactly.
+* Ten octaves, from 5.5 below 1 kHz to 4.5 above: edges at
+  `1000 * G^(j/b - 5.5)` for j = 0 ... count, 22.4 Hz to 22.4 kHz: the
+  audible range, ending just above 44.1 kHz's Nyquist (22.05 kHz). 10, 20, 40
+  and 80 bands are then the octave, half-, quarter- and eighth-octave bands.
+* Labels: ISO 266's preferred frequencies are the third-octave centers
+  `f_r 10^(n/10)`, named by the R10 series (1, 1.25, 1.6, 2, 2.5, 3.15, 4, 5,
+  6.3, 8); the octave centers are among them. The other counts' centers fall
+  between them and are rounded as above, not by the standard's rule for
+  nominal half- to 24th-octave values (Annex E, seen only in python-acoustics'
+  implementation), which can differ in the last digit.
+
+What is standard and what is not:
+
+* Standard: the band centers and edges, and the 10-band labels.
+* Not standard: the levels. IEC 61260-1 defines a band as a filter, with
+  attenuation limits and tolerances (classes 1 and 2). A band here sums the
+  FFT bins between its edges, as a brick-wall filter at the FFT's
+  resolution. That is a common way to show octave bands and reads close to a
+  filter on music, but it is not a conforming filter; it is furthest off in
+  bands holding one bin or none (see the cost below). A conforming filter
+  bank would buy measurement accuracy a music player does not need.
+* Not standard: the labels of 20, 40 and 80 bands (above), and the range:
+  the standard allows any run of bands; ten octaves from 22.4 Hz is our
+  choice.
+
+Why the standard: every count covers the same range, and the bands of one
+count split those of the next coarser one, so changing the count splits or
+merges bars instead of moving them; the octave bars are the ones on graphic
+equalizers. Rejected: bands log-spaced to fit fixed outer centers (such as
+50 Hz to 20 kHz), whose counts do not line up; and foobar2000's spacing, a
+fixed ratio per count from 50 Hz, whose top band moves with the count (14 kHz
+with 10 bands, 25 kHz with 80) and which follows no standard.
+
+The cost: the 4096-point FFT has 10.8 Hz bins at 44.1 kHz, so bands narrower
+than a bin hold one bin or none (and then take their nearest one), and
+neighbors can show the same level: the lowest band with 20 bands, those below
+about 60 Hz with 40, and below about 125 Hz with 80. A larger FFT would
+resolve them but respond more slowly (8192 samples is 186 ms) at every count,
+so it was not taken. With 80 bands the top band (20.5 to 22.4 kHz) is partly
+above Nyquist at 44.1 kHz and reads low.
+
+Sources. The standards' texts are paid and were not read; the formulas come
+from:
+
+* python-acoustics, an open-source implementation of IEC 61260-1:2014 that
+  cites its equation numbers (centers, edges, G, f_r, the nominal values):
+  <https://python-acoustics.github.io/python-acoustics/_modules/acoustics/standards/iec_61260_1_2014.html>
+* The ISO 266:1997 sample, for the preferred frequencies (31.5, 63, 125 Hz
+  against their exact 31.623, 63.096, 125.89 Hz):
+  <https://cdn.standards.iteh.ai/samples/1350/dee3c3da72b444efae95d47dbe35d8fb/ISO-266-1997.pdf>
+
 ## Module: `src/spectrum/`
 
 | File | Qt | Role |
 |---|---|---|
 | `fft.{h,cpp}` | no | `fft`: in-place radix-2 FFT on `std::complex<float>`. |
-| `spectrumbands.{h,cpp}` | no | `SpectrumBands::logSpaced`: band centers and edges; `frequencyLabel(hz)`. |
+| `spectrumbands.{h,cpp}` | no | `SpectrumBands::fractionalOctave(count)`: band centers and edges (see "Bands"); `frequencyLabel(hz)`. |
 | `spectrumanalyzer.{h,cpp}` | no | `SpectrumAnalyzer`: samples to band levels (dB). |
 | `spectrumsmoother.{h,cpp}` | no | `SpectrumSmoother`: shown levels and peaks over time. Time is passed in. |
 | `pcmtap.{h,cpp}` | no | `PcmTap`: thread-safe store of the last 2 s of decoded audio, mixed to mono, with stream times. |
-| `spectrumwidget.{h,cpp}` | Widgets | `SpectrumWidget`: paints bars, peaks, grid, labels and a message. |
+| `spectrumwidget.{h,cpp}` | Widgets | `SpectrumWidget`: paints bars, peaks, grid, labels and a message; the band count menu. |
 | `spectrumpresenter.{h,cpp}` | Core | `SpectrumPresenter`: drives the widget from the tap at about 30 fps. |
 
 `src/spectrum/CMakeLists.txt` builds `myspectrum` (linking `Qt6::Widgets`);
@@ -91,11 +163,10 @@ For `fftSize = 4096` samples (93 ms at 44.1 kHz, 10.8 Hz per bin):
 3. Power of bin k: `|X[k]|^2 * 4 / (N * sum(w^2))`. By Parseval, the bins of
    a sine of amplitude A then add up to `A^2`, wherever the sine falls
    between bins, so a full-scale sine reads 0 dB.
-4. Each band sums the power of the bins between its edges (an edge is the
-   geometric mean of the centers around it). A band with no bin inside
-   takes the bin nearest its center: at 44.1 kHz every band holds a bin, but
-   at 192 kHz (47 Hz per bin) the lowest ones do not. A band whose center is
-   above Nyquist reads the floor.
+4. Each band sums the power of the bins between its edges. A band with no
+   bin inside (the lowest ones, see "Bands"; more at 192 kHz, 47 Hz per bin)
+   takes the bin nearest its center. A band whose center is above Nyquist
+   reads the floor.
 5. `10 log10(power)`, clamped to [-60, 0] dB.
 
 A library FFT (KissFFT, FFTW, vDSP) is not needed at this size (0.1 ms per
@@ -114,6 +185,9 @@ swapped later.
 * `setBandLabels(labels, floorDb)`, `setLevels(levels, peaks)`,
   `setMessage(text)` (drawn over the bars when not empty), and their
   getters for tests.
+* `kBandCounts` (10, 20, 40, 80): the counts its context menu offers. A pick
+  emits `bandCountRequested(count)`; the widget changes nothing itself, and
+  checks the count matching its number of labels.
 * Emits `shownChanged(bool)` from `showEvent` / `hideEvent`, so it tells
   whether the panel can be seen: it is hidden while out of the layout, and
   on a tab that is not in front (a `QTabWidget` shows only its current
@@ -129,6 +203,9 @@ swapped later.
   `PlaybackController::setPcmTap`, so no audio is copied while the panel is
   hidden.
 * Inputs: `setPosition(ms)` and `setState(Stopped | Paused | Playing)`.
+* `setBandCount(count)`, connected to the widget's `bandCountRequested`:
+  saves `spectrum/bands`, replaces the analyzer and the smoother, and sends
+  the new labels. The constructor reads the saved count.
 * Timing: the players decode ahead of what is heard (the GStreamer probe
   sees audio about 300 ms ahead). So each frame analyzes the 4096 samples
   ending at the estimated play position: the last reported position plus
@@ -215,9 +292,9 @@ swapped later.
 
 ## Out of scope
 
-Band count, range or speed settings; separate left and right channels; an
-oscilloscope; a detachable window; a decoder of our own for backends that
-send no buffers.
+Band counts other than the four, range or speed settings; separate left and
+right channels; an oscilloscope; a detachable window; a decoder of our own for
+backends that send no buffers.
 
 ## Tests
 
@@ -225,7 +302,8 @@ send no buffers.
   analyzer's levels (full scale reads 0 dB, bins narrower than a band,
   above Nyquist), the smoother, and `PcmTap`.
 * `tst_spectrumpresenter` (offscreen): the tap only while shown, the
-  position estimate, pause, stop and the no-audio message.
+  position estimate, pause, stop, the no-audio message, and the context
+  menu changing and saving the band count.
 * `tst_audiotaps`: every format the `volume` element can output through a
   real pipeline and a `QAudioBuffer`, and what is skipped.
 * `tst_playbackcontroller`: the tap moving to a new player.

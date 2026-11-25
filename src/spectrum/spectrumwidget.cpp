@@ -1,6 +1,8 @@
 #include "spectrumwidget.h"
 
+#include <QContextMenuEvent>
 #include <QLinearGradient>
+#include <QMenu>
 #include <QPainter>
 #include <algorithm>
 #include <cmath>
@@ -56,6 +58,18 @@ void SpectrumWidget::hideEvent(QHideEvent *event) {
   emit shownChanged(false);
 }
 
+void SpectrumWidget::contextMenuEvent(QContextMenuEvent *event) {
+  QMenu menu(this);
+  for (int count : kBandCounts) {
+    QAction *action = menu.addAction(tr("%1 Bands").arg(count));
+    action->setCheckable(true);
+    action->setChecked(count == labels_.size());
+    connect(action, &QAction::triggered, this,
+            [this, count] { emit bandCountRequested(count); });
+  }
+  menu.exec(event->globalPos());
+}
+
 void SpectrumWidget::paintEvent(QPaintEvent *) {
   QPainter painter(this);
   const QFontMetrics metrics = fontMetrics();
@@ -92,6 +106,8 @@ void SpectrumWidget::paintEvent(QPaintEvent *) {
 
   const int count = static_cast<int>(labels_.size());
   const double barStep = static_cast<double>(plot.width()) / std::max(1, count);
+  // Narrow bars (many bands, a small panel) keep more of their width.
+  const int barGap = barStep >= 4 * kBarGap ? kBarGap : 1;
   // Every labelStep-th band label, so they do not overlap.
   int widestLabel = 0;
   for (const QString &label : labels_) {
@@ -110,9 +126,8 @@ void SpectrumWidget::paintEvent(QPaintEvent *) {
 
   for (int i = 0; i < count; ++i) {
     const int left = plot.left() + static_cast<int>(std::lround(i * barStep));
-    const int right = plot.left() +
-                      static_cast<int>(std::lround((i + 1) * barStep)) -
-                      kBarGap;
+    const int right =
+        plot.left() + static_cast<int>(std::lround((i + 1) * barStep)) - barGap;
     const int width = std::max(1, right - left);
     const int y = yForDb(levels_[i]);
     painter.fillRect(QRect(left, y, width, plot.bottom() - y + 1), gradient);

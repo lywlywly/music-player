@@ -48,7 +48,8 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
     modified/created times, audio properties, main tags, play stats
   - See `docs/info-panel.md`
 - ✅ Spectrum tab (`src/spectrum/` module, library `myspectrum`)
-  - ✅ 20 log-spaced bands, 0 to -60 dB, peak hold, own FFT
+  - ✅ 10, 20, 40 or 80 bands (context menu): IEC 61260-1 octave to
+    eighth-octave bands, 0 to -60 dB, peak hold, own FFT
   - ✅ GStreamer backend; Qt backend only with Qt's FFmpeg media backend
   - See `docs/spectrum.md`
 - ✅ Playback statistics, in the Play Stats plugin with its own database

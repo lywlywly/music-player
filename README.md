@@ -28,7 +28,8 @@ A cross-platform desktop music player focused on local-library playback, lyrics,
 * Properties panel (top left by default): the selected song's file name,
   folder, path, size, modified/created times, audio properties, tags and
   play stats
-* Spectrum panel: the playing song's spectrum, 20 bands with peak marks
+* Spectrum panel: the playing song's spectrum, 10, 20, 40 or 80 bands
+  (right-click to choose) with peak marks
   (GStreamer backend; the Qt backend only where Qt has its FFmpeg media
   backend)
 * Editable layout (View > Edit Layout): while it is on, right-click any part

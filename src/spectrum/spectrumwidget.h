@@ -3,16 +3,20 @@
 
 #include <QStringList>
 #include <QWidget>
+#include <array>
 #include <vector>
 
 // The Spectrum panel: one bar per band, with a peak mark above it, on a dB
 // scale from 0 at the top to floorDb at the bottom, with a grid line and a
 // label every 10 dB on the right and the band labels below. Paints what it is
 // given; SpectrumPresenter decides what. Colors come from the palette.
+// Its context menu offers the band counts in kBandCounts.
 class SpectrumWidget : public QWidget {
   Q_OBJECT
 
 public:
+  static constexpr std::array kBandCounts{10, 20, 40, 80};
+
   explicit SpectrumWidget(QWidget *parent = nullptr);
 
   void setBandLabels(const QStringList &labels, float floorDb);
@@ -30,8 +34,11 @@ signals:
   // or on a tab that is not in front (a QTabWidget shows only its current
   // page).
   void shownChanged(bool shown);
+  // A band count chosen from the context menu, one of kBandCounts.
+  void bandCountRequested(int count);
 
 protected:
+  void contextMenuEvent(QContextMenuEvent *event) override;
   void paintEvent(QPaintEvent *event) override;
   void showEvent(QShowEvent *event) override;
   void hideEvent(QHideEvent *event) override;

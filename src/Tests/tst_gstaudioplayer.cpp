@@ -37,7 +37,7 @@ void TestGstAudioPlayer::playing24BitAudio_fillsTheTapAtThePosition() {
   // 24-bit: the audio filter passes it on as S24LE.
   QTemporaryDir dir;
   const QString path = dir.filePath("tone.wav");
-  QVERIFY(writeToneWav(path, 1170.8, 3.0)); // the center of the 1.2K band
+  QVERIFY(writeToneWav(path, 1188.5, 3.0)); // the center of the 1.2K band
 
   // The manager runs the GLib loop the player needs on macOS and Windows.
   PlaybackBackendManager backend(PlaybackBackendManager::Backend::GStreamer);
@@ -52,7 +52,7 @@ void TestGstAudioPlayer::playing24BitAudio_fillsTheTapAtThePosition() {
   player->setSource(QUrl(path));
   player->play();
 
-  SpectrumAnalyzer analyzer(SpectrumBands::logSpaced(50.0, 20000.0, 20));
+  SpectrumAnalyzer analyzer(SpectrumBands::fractionalOctave(20));
   std::vector<float> samples(analyzer.fftSize());
   const auto readsTheToneAt = [&](qint64 ms) {
     if (tap->read(ms * 1000, samples) != 44100) {
@@ -60,7 +60,7 @@ void TestGstAudioPlayer::playing24BitAudio_fillsTheTapAtThePosition() {
     }
     const std::vector<float> levels = analyzer.analyze(samples, 44100);
     const auto loudest = std::max_element(levels.begin(), levels.end());
-    return loudest - levels.begin() == 10 && std::abs(*loudest + 6.0f) < 1.0f;
+    return loudest - levels.begin() == 11 && std::abs(*loudest + 6.0f) < 1.0f;
   };
   // The decoder runs ahead of the position, so the tap holds the audio
   // there (from 200 ms, a whole window).
@@ -79,7 +79,7 @@ void TestGstAudioPlayer::replayGain_appliesTheModesGain() {
   // tap, after the ReplayGain volume, reads it with the gain.
   QTemporaryDir dir;
   const QString path = dir.filePath("tagged.wav");
-  QVERIFY(writeToneWavWithReplayGain(path, 1170.8, 10.0, -4.0, -10.0));
+  QVERIFY(writeToneWavWithReplayGain(path, 1188.5, 10.0, -4.0, -10.0));
 
   PlaybackBackendManager backend(PlaybackBackendManager::Backend::GStreamer);
   AudioPlayer *player = backend.player();
@@ -90,7 +90,7 @@ void TestGstAudioPlayer::replayGain_appliesTheModesGain() {
   player->setPcmTap(tap);
   player->setVolume(0);
 
-  SpectrumAnalyzer analyzer(SpectrumBands::logSpaced(50.0, 20000.0, 20));
+  SpectrumAnalyzer analyzer(SpectrumBands::fractionalOctave(20));
   std::vector<float> samples(analyzer.fftSize());
   const auto readsTheToneAt = [&](float db) {
     if (positionMs < 200 || tap->read(positionMs * 1000, samples) != 44100) {
@@ -98,7 +98,7 @@ void TestGstAudioPlayer::replayGain_appliesTheModesGain() {
     }
     const std::vector<float> levels = analyzer.analyze(samples, 44100);
     const auto loudest = std::max_element(levels.begin(), levels.end());
-    return loudest - levels.begin() == 10 && std::abs(*loudest - db) < 1.0f;
+    return loudest - levels.begin() == 11 && std::abs(*loudest - db) < 1.0f;
   };
 
   // The mode set before the song applies from its start.
@@ -118,7 +118,7 @@ void TestGstAudioPlayer::replayGain_appliesTheModesGain() {
 
   // The next song starts from its own tags: an untagged tone at -6 dB.
   const QString untagged = dir.filePath("untagged.wav");
-  QVERIFY(writeToneWav(untagged, 1170.8, 3.0));
+  QVERIFY(writeToneWav(untagged, 1188.5, 3.0));
   player->stop();
   positionMs = 0;
   player->setSource(QUrl(untagged));

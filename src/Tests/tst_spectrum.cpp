@@ -27,8 +27,14 @@ std::vector<float> sine(double hz, double amplitude, int count,
   return samples;
 }
 
-SpectrumBands defaultBands() {
-  return SpectrumBands::logSpaced(50.0, 20000.0, 20);
+SpectrumBands defaultBands() { return SpectrumBands::fractionalOctave(20); }
+
+QStringList labelsOf(const SpectrumBands &bands) {
+  QStringList labels;
+  for (double center : bands.centers) {
+    labels << QString::fromStdString(frequencyLabel(center));
+  }
+  return labels;
 }
 
 int loudestBand(const std::vector<float> &levels) {
@@ -42,7 +48,7 @@ class TestSpectrum : public QObject {
 
 private slots:
   void fft_matchesDft();
-  void bands_logSpacedWithLabels();
+  void bands_fractionalOctavesWithLabels();
 
   void analyzer_fullScaleSineReadsZeroDbInItsBand();
   void analyzer_halfAmplitudeReadsMinusSixDb();
@@ -77,32 +83,46 @@ void TestSpectrum::fft_matchesDft() {
   }
 }
 
-void TestSpectrum::bands_logSpacedWithLabels() {
-  const SpectrumBands bands = defaultBands();
-  QCOMPARE(bands.count(), 20);
-  QCOMPARE(bands.edges.size(), size_t{21});
-  QVERIFY(std::abs(bands.centers.front() - 50.0) < 1e-9);
-  QVERIFY(std::abs(bands.centers.back() - 20000.0) < 1e-6);
-  for (int i = 0; i < bands.count(); ++i) {
-    // Each center is the geometric middle of its edges.
-    QVERIFY(std::abs(bands.centers[i] -
-                     std::sqrt(bands.edges[i] * bands.edges[i + 1])) < 1e-6);
+void TestSpectrum::bands_fractionalOctavesWithLabels() {
+  // Octave bands: IEC 61260-1's base-10 midbands, 1 kHz * 10^(0.3 x), with
+  // ISO 266's preferred values as labels.
+  const SpectrumBands octaves = SpectrumBands::fractionalOctave(10);
+  QCOMPARE(octaves.edges.size(), size_t{11});
+  QVERIFY(std::abs(octaves.centers[5] - 1000.0) < 1e-9);
+  QVERIFY(std::abs(octaves.centers[0] - 1000.0 * std::pow(10.0, -1.5)) < 1e-9);
+  QVERIFY(std::abs(octaves.edges.front() - 22.387) < 1e-3);
+  QVERIFY(std::abs(octaves.edges.back() - 22387.2) < 0.1);
+  QCOMPARE(labelsOf(octaves), QStringList({"31.5", "63", "125", "250", "500",
+                                           "1K", "2K", "4K", "8K", "16K"}));
+
+  // Every count tiles the same ten octaves; b bands split each octave band,
+  // and each center is the geometric middle of its edges.
+  for (int count : {20, 40, 80}) {
+    const SpectrumBands bands = SpectrumBands::fractionalOctave(count);
+    QCOMPARE(bands.count(), count);
+    const int perOctave = count / 10;
+    for (int i = 0; i <= 10; ++i) {
+      QVERIFY(std::abs(bands.edges[i * perOctave] - octaves.edges[i]) <
+              1e-9 * octaves.edges[i]);
+    }
+    for (int i = 0; i < count; ++i) {
+      QVERIFY(std::abs(bands.centers[i] -
+                       std::sqrt(bands.edges[i] * bands.edges[i + 1])) <
+              1e-9 * bands.centers[i]);
+    }
   }
 
-  QStringList labels;
-  for (double center : bands.centers) {
-    labels << QString::fromStdString(frequencyLabel(center));
-  }
-  QCOMPARE(labels,
-           QStringList({"50",   "69",   "94",   "129",  "177",  "242",  "332",
-                        "455",  "623",  "854",  "1.2K", "1.6K", "2.2K", "3.0K",
-                        "4.1K", "5.7K", "7.8K", "11K",  "15K",  "20K"}));
+  // Half-octave centers fall between preferred frequencies: rounded.
+  QCOMPARE(labelsOf(defaultBands()),
+           QStringList({"27",   "38",   "53",   "75",   "106",  "150",  "211",
+                        "299",  "422",  "596",  "841",  "1.2K", "1.7K", "2.4K",
+                        "3.3K", "4.7K", "6.7K", "9.4K", "13K",  "19K"}));
   QCOMPARE(QString::fromStdString(frequencyLabel(9990.0)), QString("10K"));
 }
 
 void TestSpectrum::analyzer_fullScaleSineReadsZeroDbInItsBand() {
   SpectrumAnalyzer analyzer(defaultBands());
-  const int band = 10; // 1.2K
+  const int band = 11; // 1.2K
   // Between two bins: the band still holds the sine's whole power.
   const std::vector<float> levels =
       analyzer.analyze(sine(analyzer.bands().centers[band], 1.0, 4096), kRate);
@@ -131,7 +151,7 @@ void TestSpectrum::analyzer_silenceReadsFloor() {
 
 void TestSpectrum::analyzer_bandNarrowerThanBinUsesNearestBin() {
   SpectrumAnalyzer analyzer(defaultBands());
-  // At 192 kHz a bin is 46.9 Hz wide, wider than the 69 band (58-80 Hz),
+  // At 192 kHz a bin is 46.9 Hz wide, wider than the 38 band (32-45 Hz),
   // which holds no bin; it takes the nearest one.
   const int rate = 192000;
   const std::vector<float> levels = analyzer.analyze(

@@ -2,14 +2,27 @@
 
 #include "pcmtap.h"
 #include "spectrumwidget.h"
+#include <QSettings>
+#include <algorithm>
 
 namespace {
 constexpr int kFrameIntervalMs = 33;
+constexpr int kDefaultBandCount = 20;
+constexpr auto kBandCountKey = "spectrum/bands";
+
+// The saved band count, or the default when none (or an unknown one) is saved.
+int savedBandCount() {
+  const int saved = QSettings().value(kBandCountKey, kDefaultBandCount).toInt();
+  return std::ranges::find(SpectrumWidget::kBandCounts, saved) !=
+                 SpectrumWidget::kBandCounts.end()
+             ? saved
+             : kDefaultBandCount;
+}
 } // namespace
 
 SpectrumPresenter::SpectrumPresenter(SpectrumWidget *widget, QObject *parent)
     : QObject(parent), widget_(widget), tap_(std::make_shared<PcmTap>()),
-      analyzer_(SpectrumBands::logSpaced(50.0, 20000.0, 20)),
+      analyzer_(SpectrumBands::fractionalOctave(savedBandCount())),
       smoother_(analyzer_.bands().count(), SpectrumAnalyzer::kFloorDb),
       samples_(analyzer_.fftSize()),
       noAudioMessage_(tr("No audio from the playback backend.")) {
@@ -17,16 +30,35 @@ SpectrumPresenter::SpectrumPresenter(SpectrumWidget *widget, QObject *parent)
   frameTimer_.setInterval(kFrameIntervalMs);
   connect(&frameTimer_, &QTimer::timeout, this, &SpectrumPresenter::showFrame);
 
+  showBandLabels();
+  connect(widget_, &SpectrumWidget::shownChanged, this,
+          &SpectrumPresenter::setActive);
+  connect(widget_, &SpectrumWidget::bandCountRequested, this,
+          &SpectrumPresenter::setBandCount);
+}
+
+SpectrumPresenter::~SpectrumPresenter() = default;
+
+void SpectrumPresenter::setBandCount(int count) {
+  if (count == bandCount()) {
+    return;
+  }
+  QSettings().setValue(kBandCountKey, count);
+  // The bars restart from the floor; while playing, the next frame raises
+  // them to the new bands' levels.
+  analyzer_ = SpectrumAnalyzer(SpectrumBands::fractionalOctave(count));
+  smoother_ = SpectrumSmoother(count, SpectrumAnalyzer::kFloorDb);
+  showBandLabels();
+  updateTimer();
+}
+
+void SpectrumPresenter::showBandLabels() {
   QStringList labels;
   for (double center : analyzer_.bands().centers) {
     labels << QString::fromStdString(frequencyLabel(center));
   }
   widget_->setBandLabels(labels, SpectrumAnalyzer::kFloorDb);
-  connect(widget_, &SpectrumWidget::shownChanged, this,
-          &SpectrumPresenter::setActive);
 }
-
-SpectrumPresenter::~SpectrumPresenter() = default;
 
 void SpectrumPresenter::setNoAudioMessage(const QString &message) {
   noAudioMessage_ = message;

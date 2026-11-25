@@ -1,6 +1,11 @@
+#include <QApplication>
+#include <QContextMenuEvent>
+#include <QMenu>
 #include <QObject>
+#include <QSettings>
 #include <QSignalSpy>
 #include <QTest>
+#include <QTimer>
 #include <algorithm>
 #include <cmath>
 #include <numbers>
@@ -14,8 +19,8 @@
 namespace {
 constexpr float kFloor = SpectrumAnalyzer::kFloorDb;
 // The center of the 1.2K band.
-constexpr double kToneHz = 1170.8;
-constexpr int kToneBand = 10;
+constexpr double kToneHz = 1188.5;
+constexpr int kToneBand = 11;
 
 // seconds of a full-scale tone at 44.1 kHz, from stream time 0.
 void pushTone(PcmTap &tap, double seconds) {
@@ -39,9 +44,11 @@ class TestSpectrumPresenter : public QObject {
   Q_OBJECT
 
 private slots:
+  void init() { QSettings().clear(); }
   void tap_offeredOnlyWhileShown();
   void playing_showsTheToneThenPauseFreezesAndStopFalls();
   void noAudioWhilePlaying_showsTheMessage();
+  void contextMenu_setsAndSavesTheBandCount();
 };
 
 void TestSpectrumPresenter::tap_offeredOnlyWhileShown() {
@@ -116,6 +123,57 @@ void TestSpectrumPresenter::noAudioWhilePlaying_showsTheMessage() {
   QTRY_COMPARE(widget.message(), QString("No audio"));
   presenter.setState(SpectrumPresenter::State::Stopped);
   QVERIFY(widget.message().isEmpty());
+}
+
+void TestSpectrumPresenter::contextMenu_setsAndSavesTheBandCount() {
+  SpectrumWidget widget;
+  widget.resize(400, 300);
+  SpectrumPresenter presenter(&widget);
+  widget.show();
+  QVERIFY(QTest::qWaitForWindowExposed(&widget));
+  pushTone(*presenter.tap(), 2.0);
+  presenter.setPosition(500);
+  presenter.setState(SpectrumPresenter::State::Playing);
+  QTRY_VERIFY(widget.levels()[kToneBand] > -1.0f);
+
+  // The menu lists every count, the current one checked; pick 80.
+  QStringList shown;
+  QString checked;
+  QTimer::singleShot(0, [&] {
+    auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+    QVERIFY(menu);
+    for (QAction *action : menu->actions()) {
+      shown << action->text();
+      if (action->isChecked()) {
+        checked = action->text();
+      }
+    }
+    menu->actions().last()->trigger();
+    menu->close();
+  });
+  QContextMenuEvent event(QContextMenuEvent::Mouse, QPoint(10, 10),
+                          widget.mapToGlobal(QPoint(10, 10)));
+  QApplication::sendEvent(&widget, &event);
+  QCOMPARE(shown,
+           (QStringList{"10 Bands", "20 Bands", "40 Bands", "80 Bands"}));
+  QCOMPARE(checked, QString("20 Bands"));
+
+  // 80 bars, and the tone loudest in its band. The narrower bands split its
+  // power with a neighbor, so it reads below 0 dB.
+  QCOMPARE(presenter.bandCount(), 80);
+  QCOMPARE(widget.levels().size(), size_t{80});
+  QTRY_VERIFY(*std::max_element(widget.levels().begin(),
+                                widget.levels().end()) > -10.0f);
+  const SpectrumBands bands = SpectrumBands::fractionalOctave(80);
+  const int loudest = loudestBand(widget.levels());
+  QVERIFY(bands.edges[loudest] <= kToneHz &&
+          kToneHz < bands.edges[loudest + 1]);
+
+  // Saved: the next presenter starts with 80.
+  QCOMPARE(QSettings().value("spectrum/bands").toInt(), 80);
+  SpectrumWidget other;
+  SpectrumPresenter next(&other);
+  QCOMPARE(other.levels().size(), size_t{80});
 }
 
 QTEST_MAIN(TestSpectrumPresenter)

@@ -4,22 +4,23 @@
 #include <string>
 #include <vector>
 
-// Frequency bands of the spectrum, log-spaced: centers[i] is the band's
-// center, and band i covers [edges[i], edges[i + 1]) (edges has one more
-// element). An edge is the geometric mean of the centers around it; the outer
-// edges are half a step beyond the outer centers.
+// Frequency bands of the spectrum: centers[i] is the band's center, and band i
+// covers [edges[i], edges[i + 1]) (edges has one more element).
 struct SpectrumBands {
   std::vector<double> centers;
   std::vector<double> edges;
 
   int count() const { return static_cast<int>(centers.size()); }
 
-  // count (at least 2) bands with centers from lowHz to highHz.
-  static SpectrumBands logSpaced(double lowHz, double highHz, int count);
+  // The fractional-octave bands of IEC 61260-1 (base 10, reference 1 kHz),
+  // count / 10 bands per octave over the ten octaves from 22.4 Hz to
+  // 22.4 kHz. count is a positive multiple of 10. See docs/spectrum.md.
+  static SpectrumBands fractionalOctave(int count);
 };
 
-// The label under a band: "69" under 1 kHz, "1.2K" under 10 kHz, "14K"
-// above.
+// The label under a band. A center on an ISO 266 preferred frequency (one
+// third of an octave apart) shows its preferred value: "31.5", "1K", "16K".
+// Others are rounded: "841" under 1 kHz, "1.2K" under 10 kHz, "13K" above.
 std::string frequencyLabel(double hz);
 
 #endif // SPECTRUMBANDS_H

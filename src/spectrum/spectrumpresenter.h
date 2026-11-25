@@ -32,6 +32,11 @@ public:
   void setPosition(qint64 positionMs);
   void setState(State state);
 
+  // The number of bands, one of SpectrumWidget::kBandCounts, saved in the
+  // spectrum/bands setting. The widget's context menu sets it.
+  void setBandCount(int count);
+  int bandCount() const { return analyzer_.bands().count(); }
+
   const std::shared_ptr<PcmTap> &tap() const { return tap_; }
   // Shown when no audio reaches the tap while playing, for kNoAudioDelayMs:
   // the playback backend does not feed it.
@@ -44,6 +49,8 @@ signals:
 
 private:
   void setActive(bool active);
+  // Sends the band labels to the widget, which puts its bars at the floor.
+  void showBandLabels();
   void updateTimer();
   void showFrame();
   // Shows or clears the no-audio message, after a frame that had audio or

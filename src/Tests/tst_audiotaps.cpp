@@ -56,7 +56,7 @@ void TestAudioTaps::gstBuffers_fillTheTapWithStreamTimes() {
   GError *error = nullptr;
   const QByteArray description =
       QStringLiteral(
-          "audiotestsrc num-buffers=20 samplesperbuffer=1024 freq=1170.8 "
+          "audiotestsrc num-buffers=20 samplesperbuffer=1024 freq=1188.5 "
           "volume=1.0 ! audio/x-raw,format=%1,rate=44100,channels=2,"
           "layout=%2 ! fakesink name=sink sync=false")
           .arg(format, layout)
@@ -89,11 +89,11 @@ void TestAudioTaps::gstBuffers_fillTheTapWithStreamTimes() {
     QCOMPARE(tap.read(endUs, samples), 0);
     return;
   }
-  SpectrumAnalyzer analyzer(SpectrumBands::logSpaced(50.0, 20000.0, 20));
+  SpectrumAnalyzer analyzer(SpectrumBands::fractionalOctave(20));
   QCOMPARE(tap.read(endUs, samples), 44100);
   const std::vector<float> levels = analyzer.analyze(samples, 44100);
-  QCOMPARE(std::max_element(levels.begin(), levels.end()) - levels.begin(), 10);
-  QVERIFY2(levels[10] > -0.5f, qPrintable(QString::number(levels[10])));
+  QCOMPARE(std::max_element(levels.begin(), levels.end()) - levels.begin(), 11);
+  QVERIFY2(levels[11] > -0.5f, qPrintable(QString::number(levels[11])));
   QCOMPARE(tap.read(endUs + 200'000, samples), 0);
 }
 
