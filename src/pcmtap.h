@@ -4,11 +4,12 @@
 #include <cstdint>
 #include <deque>
 #include <mutex>
-#include <vector>
+#include <span>
 
 // The recently decoded audio of the playing song, mixed to mono, with stream
-// times, for the spectrum. A player pushes on its decoding thread; the GUI
-// thread reads the samples at the play position. Thread-safe.
+// times, for the plugins that show it (PluginAudioHost). A player pushes on
+// its decoding thread; the GUI thread reads the samples at the play position.
+// Thread-safe.
 //
 // The audio is one run of samples. A push that does not follow on (more than
 // kMaxGapUs off, or a new sample rate) starts a new run: late buffers from
@@ -38,7 +39,7 @@ public:
   // Fills out with the out.size() samples that end at stream time endUs,
   // with zeros where there is no audio. Returns the sample rate, or 0 when no
   // audio overlaps them.
-  int read(int64_t endUs, std::vector<float> &out) const;
+  int read(int64_t endUs, std::span<float> out) const;
   void clear();
 
 private:

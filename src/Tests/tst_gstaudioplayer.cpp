@@ -10,9 +10,8 @@
 #include <vector>
 
 #include "../audioplayer.h"
+#include "../pcmtap.h"
 #include "../playbackbackendmanager.h"
-#include "../spectrum/pcmtap.h"
-#include "../spectrum/spectrumanalyzer.h"
 #include "testaudiofiles.h"
 
 // Plays a file through the real GStreamer player (pipeline, ReplayGain and
@@ -52,15 +51,10 @@ void TestGstAudioPlayer::playing24BitAudio_fillsTheTapAtThePosition() {
   player->setSource(QUrl(path));
   player->play();
 
-  SpectrumAnalyzer analyzer(SpectrumBands::fractionalOctave(20));
-  std::vector<float> samples(analyzer.fftSize());
+  std::vector<float> samples(4096);
   const auto readsTheToneAt = [&](qint64 ms) {
-    if (tap->read(ms * 1000, samples) != 44100) {
-      return false;
-    }
-    const std::vector<float> levels = analyzer.analyze(samples, 44100);
-    const auto loudest = std::max_element(levels.begin(), levels.end());
-    return loudest - levels.begin() == 11 && std::abs(*loudest + 6.0f) < 1.0f;
+    return tap->read(ms * 1000, samples) == 44100 &&
+           std::abs(toneLevelDb(samples) + 6.0) < 1.0;
   };
   // The decoder runs ahead of the position, so the tap holds the audio
   // there (from 200 ms, a whole window).
@@ -90,15 +84,11 @@ void TestGstAudioPlayer::replayGain_appliesTheModesGain() {
   player->setPcmTap(tap);
   player->setVolume(0);
 
-  SpectrumAnalyzer analyzer(SpectrumBands::fractionalOctave(20));
-  std::vector<float> samples(analyzer.fftSize());
-  const auto readsTheToneAt = [&](float db) {
-    if (positionMs < 200 || tap->read(positionMs * 1000, samples) != 44100) {
-      return false;
-    }
-    const std::vector<float> levels = analyzer.analyze(samples, 44100);
-    const auto loudest = std::max_element(levels.begin(), levels.end());
-    return loudest - levels.begin() == 11 && std::abs(*loudest - db) < 1.0f;
+  std::vector<float> samples(4096);
+  const auto readsTheToneAt = [&](double db) {
+    return positionMs >= 200 &&
+           tap->read(positionMs * 1000, samples) == 44100 &&
+           std::abs(toneLevelDb(samples) - db) < 1.0;
   };
 
   // The mode set before the song applies from its start.

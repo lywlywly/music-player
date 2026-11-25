@@ -1,6 +1,6 @@
 #include "gstaudioplayer.h"
 #include "audiotaps.h"
-#include "spectrum/pcmtap.h"
+#include "pcmtap.h"
 #include <QAudioDevice>
 #include <QtGlobal>
 #include <cmath>

@@ -3,6 +3,7 @@
 
 #include <QByteArray>
 #include <QString>
+#include <span>
 
 // Writes a short silent 8 kHz mono 8-bit PCM WAV file that TagLib can open.
 bool writeSilentWav(const QString &path);
@@ -18,5 +19,9 @@ bool writeToneWavWithReplayGain(const QString &path, double hz, double seconds,
 // front-cover APIC frame with imageData (e.g. PNG bytes) of mimeType.
 bool writeWavWithCover(const QString &path, const QByteArray &imageData,
                        const QByteArray &mimeType);
+// The level of a tone in samples, in dB relative to a full-scale sine
+// (20 log10(rms * sqrt 2)): 0 dB at full scale, -6 dB for writeToneWav's.
+// Only a pure tone reads its amplitude; silence reads -infinity.
+double toneLevelDb(std::span<const float> samples);
 
 #endif // TESTAUDIOFILES_H

@@ -65,7 +65,6 @@ myplayer_add_efsw()
 
 pkg_check_modules(GST IMPORTED_TARGET REQUIRED gstreamer-1.0)
 
-add_subdirectory(spectrum)
 add_subdirectory(layout)
 add_subdirectory(pluginapi)
 
@@ -94,6 +93,7 @@ endfunction()
 add_subdirectory(plugins/lyrics lyrics-plugin-build)
 add_subdirectory(plugins/abrepeat abrepeat-plugin-build)
 add_subdirectory(plugins/playstats playstats-plugin-build)
+add_subdirectory(plugins/spectrum spectrum-plugin-build)
 
 if(WIN32)
   find_package(FFmpeg REQUIRED COMPONENTS avcodec avformat avutil)
@@ -172,6 +172,8 @@ set(PROJECT_SOURCES
   librarysearchresultsmodel.cpp
   monitoredlibrary.h
   monitoredlibrary.cpp
+  pcmtap.h
+  pcmtap.cpp
   nowplayingdisplay.h
   nowplayingdisplay.cpp
   nowplayingpresenter.h
@@ -209,6 +211,10 @@ set(PROJECT_SOURCES
   playlistsearch.cpp
   playlistsearchdialog.h
   playlistsearchdialog.cpp
+  playpositionestimate.h
+  playpositionestimate.cpp
+  pluginaudiohost.h
+  pluginaudiohost.cpp
   pluginmanager.h
   pluginmanager.cpp
   pluginplayerhost.h
@@ -292,7 +298,6 @@ target_link_libraries(
   ${MYPLAYER_TAGLIB_TARGET}
   PkgConfig::GST
   efsw
-  myspectrum
   mylayout
   pluginapi
 )
@@ -332,7 +337,8 @@ endif()
 add_executable(EXEC main.cpp)
 target_link_libraries(EXEC MYLib)
 # The app loads the plugins at runtime; building it builds them.
-add_dependencies(EXEC lyricsplugin abrepeatplugin playstatsplugin)
+add_dependencies(EXEC lyricsplugin abrepeatplugin playstatsplugin
+  spectrumplugin)
 
 if(APPLE)
   set_target_properties(EXEC PROPERTIES

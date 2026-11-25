@@ -171,14 +171,6 @@
            </size>
           </property>
          </widget>
-         <widget class="SpectrumWidget" name="spectrumWidget" native="true">
-          <property name="minimumSize">
-           <size>
-            <width>120</width>
-            <height>240</height>
-           </size>
-          </property>
-         </widget>
          <widget class="QLabel" name="coverLabel">
           <property name="minimumSize">
            <size>
@@ -394,11 +386,6 @@
    <extends>QWidget</extends>
    <header>songinfopanel.h</header>
    <container>1</container>
-  </customwidget>
-  <customwidget>
-   <class>SpectrumWidget</class>
-   <extends>QWidget</extends>
-   <header>spectrum/spectrumwidget.h</header>
   </customwidget>
   <customwidget>
    <class>PlaylistTabs</class>

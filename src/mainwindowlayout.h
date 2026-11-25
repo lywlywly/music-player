@@ -10,7 +10,6 @@ namespace MainWindowLayout {
 // The built-in panels' ids. A plugin panel's id is its plugin's id.
 inline constexpr const char *kPlaylist = "playlist";
 inline constexpr const char *kProperties = "properties";
-inline constexpr const char *kSpectrum = "spectrum";
 inline constexpr const char *kCover = "cover";
 // The toolbar's controls' ids.
 inline constexpr const char *kPlaybackButtons = "playbackbuttons";

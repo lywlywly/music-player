@@ -14,7 +14,7 @@ struct SpectrumBands {
 
   // The fractional-octave bands of IEC 61260-1 (base 10, reference 1 kHz),
   // count / 10 bands per octave over the ten octaves from 22.4 Hz to
-  // 22.4 kHz. count is a positive multiple of 10. See docs/spectrum.md.
+  // 22.4 kHz. count is a positive multiple of 10. See docs/plugins/spectrum.md.
   static SpectrumBands fractionalOctave(int count);
 };
 

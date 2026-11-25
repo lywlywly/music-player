@@ -1,5 +1,5 @@
 #include "audioplayer.h"
-#include "spectrum/pcmtap.h"
+#include "pcmtap.h"
 #include <algorithm>
 
 AudioPlayer::AudioPlayer(QObject *parent) : QObject{parent} {}

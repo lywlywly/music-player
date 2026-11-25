@@ -9,6 +9,7 @@
 #include <QtConcurrent>
 #include <vector>
 
+#include "../pluginapi/iaudiohost.h"
 #include "../pluginapi/iplayercontrol.h"
 #include "../pluginapi/iplayerhost.h"
 #include "../pluginapi/iplugin.h"
@@ -38,7 +39,8 @@ public:
 // The host services a plugin gets, with no playback behind them.
 class FakePluginHost : public IPluginHost,
                        public IPlayerHost,
-                       public IPlayerControl {
+                       public IPlayerControl,
+                       public IAudioHost {
 public:
   explicit FakePluginHost(QString dataFolder)
       : dataFolder_(std::move(dataFolder)) {}
@@ -47,6 +49,7 @@ public:
   IPlayerControl &control() override { return *this; }
   QString dataFolder() const override { return dataFolder_; }
   ISongFieldHost &songFieldHost() override { return fields; }
+  IAudioHost &audio() override { return *this; }
 
   void addListener(IPlayerListener *listener) override {
     listeners.push_back(listener);
@@ -56,6 +59,8 @@ public:
   }
   void seek(qint64) override {}
   void play() override {}
+  void setWanted(bool) override {}
+  int read(std::span<float>) const override { return 0; }
 
   RecordingFieldHost fields;
   std::vector<IPlayerListener *> listeners;

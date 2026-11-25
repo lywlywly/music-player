@@ -7,7 +7,8 @@ class PcmTap;
 class QAudioBuffer;
 
 // Push one decoded buffer of a playback backend into a PcmTap (see
-// docs/spectrum.md). Buffers in a format the tap does not take are skipped.
+// docs/playback.md, "Audio tap"). Buffers in a format the tap does not take
+// are skipped.
 
 // A buffer passing pad: the format comes from the pad's current caps
 // (interleaved only), the stream time from its PTS and the pad's segment.

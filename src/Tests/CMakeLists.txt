@@ -54,6 +54,7 @@ set(TEST_NAMES
     plugins
     spectrum
     spectrumpresenter
+    playpositionestimate
     audiotaps
     gstaudioplayer
     replaygain
@@ -83,9 +84,15 @@ foreach(_test playstats playcompletiontracker cloudplaystatssyncservice
   target_link_libraries(${_test} myplaystats)
 endforeach()
 add_dependencies(playstats playstatsplugin)
+# The spectrum code, tested directly.
+foreach(_test spectrum spectrumpresenter)
+  target_link_libraries(${_test} myspectrum)
+endforeach()
 # These load the plugins from Tests/plugins.
-add_dependencies(mainwindow lyricsplugin abrepeatplugin playstatsplugin)
-add_dependencies(plugins lyricsplugin abrepeatplugin playstatsplugin)
+add_dependencies(mainwindow lyricsplugin abrepeatplugin playstatsplugin
+    spectrumplugin)
+add_dependencies(plugins lyricsplugin abrepeatplugin playstatsplugin
+    spectrumplugin)
 
 set_tests_properties(mainwindow PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"

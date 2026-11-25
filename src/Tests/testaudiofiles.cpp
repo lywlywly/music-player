@@ -167,3 +167,12 @@ bool writeWavWithCover(const QString &path, const QByteArray &imageData,
   return writeWav(path, 8000, 1, 8, kSilence,
                   id3Chunk(coverFrame(imageData, mimeType)));
 }
+
+double toneLevelDb(std::span<const float> samples) {
+  double sumOfSquares = 0.0;
+  for (float sample : samples) {
+    sumOfSquares += static_cast<double>(sample) * sample;
+  }
+  const double rms = std::sqrt(sumOfSquares / samples.size());
+  return 20.0 * std::log10(rms * std::numbers::sqrt2);
+}

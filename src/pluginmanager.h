@@ -1,6 +1,7 @@
 #ifndef PLUGINMANAGER_H
 #define PLUGINMANAGER_H
 
+#include "pluginaudiohost.h"
 #include "pluginplayerhost.h"
 #include <QList>
 #include <QObject>
@@ -76,6 +77,8 @@ private:
   // Destroyed after the destructor's shutdown calls, so the plugins' listeners
   // are gone before it.
   PluginPlayerHost player_;
+  // The audio every plugin's IAudioHost reads.
+  PluginAudioHost audio_;
   // One per loaded plugin, destroyed after the shutdown calls; each is the
   // context of its plugin's queued valuesChanged calls, which are dropped
   // with it.

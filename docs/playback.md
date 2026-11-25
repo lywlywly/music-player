@@ -70,11 +70,11 @@ fit the rest of the app is in [architecture.md](architecture.md).
     integer percentage (`0..100`), mapped to `QAudioOutput::setVolume` or to
     `playbin`'s `volume` property.
   * `setPcmTap(tap)`: decoded audio, before the volume, goes to the tap for
-    the spectrum. `GstAudioPlayer` probes the src pad of its audio filter,
-    after ReplayGain; `QtAudioPlayer` sets a `QAudioBufferOutput`, which
-    only Qt's FFmpeg media backend fills (not the `darwin` one of Homebrew's
-    Qt). The conversion is in
-    `audiotaps.{h,cpp}`; see [spectrum.md](spectrum.md).
+    the plugins that show it (the Spectrum). `GstAudioPlayer` probes the src
+    pad of its audio filter, after ReplayGain; `QtAudioPlayer` sets a
+    `QAudioBufferOutput`, which only Qt's FFmpeg media backend fills (not
+    the `darwin` one of Homebrew's Qt). The conversion is in
+    `audiotaps.{h,cpp}`; see "Audio tap".
   * `bitrateChanged(bitsPerSecond)` reports the bitrate while playing.
   * `setReplayGainMode(mode)`: see "ReplayGain". `PlaybackController` keeps
     the mode for a new backend, like the volume.
@@ -110,7 +110,7 @@ fit the rest of the app is in [architecture.md](architecture.md).
   more than the delay:
   * the gain in `playbin`'s `volume` (with the slider's), after the queue:
     `wasapi2sink`'s volume stops at 1.0, which cuts positive gains, and the
-    spectrum would read the audio before ReplayGain;
+    plugins' audio tap would read the audio before ReplayGain;
   * the gain element in a sink bin before the sink: `playbin` takes a
     volume element in the sink bin for the slider, which could be ours;
   * a smaller `aqueue`, set through `element-setup`: depends on `playbin`'s
@@ -151,8 +151,77 @@ fit the rest of the app is in [architecture.md](architecture.md).
 * Cost: the app keeps `rgvolume`'s rules itself, and a change to them in
   GStreamer does not reach it.
 * Tests: `tst_replaygain`, each rule; `tst_gstaudioplayer`, a tagged tone
-  read at the spectrum tap in each mode, switched while it plays, and an
+  read at the audio tap in each mode, switched while it plays, and an
   untagged song after it.
+
+## Audio tap (`PcmTap`, `audiotaps`)
+
+The players copy the decoded audio into one tap, for the plugins that show it
+([plugins/plugin-system.md](plugins/plugin-system.md), "Audio for plugins",
+which owns the tap and sets it while a plugin wants audio).
+
+### `PcmTap`
+
+Qt-free.
+
+* `push(data, frames, channels, format, sampleRate, startUs)`: any thread.
+  Interleaved little-endian frames in `UInt8`, `Int8`, `Int16`, `Int24`
+  (packed, 3 bytes), `Int32`, `Float32` or `Float64`, converted to float in
+  [-1, 1] and mixed to mono (the mean of the channels). `startUs` is the
+  stream time of the first frame.
+* Audio is kept as one run of samples. A push that does not follow on (more
+  than 50 ms off, or a different sample rate) starts a new run; this covers
+  buffers still in flight after a seek. Samples more than 2 s before the
+  newest are dropped.
+* `read(endUs, out)`: the `out.size()` samples ending at stream time `endUs`
+  (rounded to the nearest sample), with zeros where there is no audio.
+  Returns the sample rate, or 0 when no audio overlaps.
+* `clear()`; the players call it on a new source, a seek and stop.
+* A mutex guards the samples: the GStreamer streaming thread pushes, the GUI
+  thread reads.
+
+### The players' taps
+
+* `AudioPlayer`: `virtual void setPcmTap(std::shared_ptr<PcmTap>)` and
+  `pcmTap()`. The base stores the tap behind a mutex, because the GStreamer
+  streaming thread reads it. Protected `clearPcmTap()`. With no tap, no
+  audio is copied: the GStreamer probe only finds no tap, and the Qt player
+  has no buffer output set.
+* `GstAudioPlayer`: a buffer probe (`onPcmProbe`) on the `src` pad of the
+  ReplayGain `volume` element, `playbin`'s audio filter (see "ReplayGain"),
+  installed with the pipeline. That is after ReplayGain and before the volume
+  slider, which playsink applies later: the audio is there at volume 0. It is not
+  removed: teardown sets the pipeline to NULL first, and the probe goes with
+  the element. `setSource`, `setPosition` and `stop` clear the tap.
+* `QtAudioPlayer`: one `QAudioBufferOutput` (no requested format, so buffers
+  come in the decoded format), set on the `QMediaPlayer` only while a tap is
+  set, connected with `Qt::DirectConnection`: the push runs in whatever
+  thread sends the buffer. `setSource`, `setPosition` and `stop` clear the
+  tap. With the `darwin` backend no buffer arrives
+  ([plugins/spectrum.md](plugins/spectrum.md), "Summary").
+* `audiotaps.{h,cpp}`, free functions, so they are tested without an audio
+  device:
+  * `pushGstBuffer(pad, buffer, tap)`: reads `format`, `rate`, `channels`
+    and `layout` from the pad's current caps with core `GstStructure` calls
+    (no `gstreamer-audio-1.0`). It takes every format the `volume` element
+    can output: `F32LE`, `F64LE`, `S8`, `S16LE`, `S24LE`, `S32LE`,
+    interleaved only (the supported platforms are little-endian); a 24-bit
+    FLAC arrives as `S24LE`. The buffer PTS becomes stream time through the
+    pad's sticky segment (`gst_segment_to_stream_time`), which is what the
+    position query reports.
+  * `pushAudioBuffer(buffer, tap)`: maps `QAudioFormat` to the tap's
+    formats; `QAudioBuffer::startTime()` is the stream time. Buffers without
+    one are skipped.
+* `PlaybackController::setPcmTap(tap)`: kept, set on the current player,
+  and set again on the new player in `setBackend` (as the volume is), so a
+  backend switch keeps the audio.
+* Tests: `tst_audiotaps`, `PcmTap` (formats, reads at a time with zero fill,
+  runs and dropping old audio) and every format the `volume` element can
+  output through a real pipeline and a `QAudioBuffer`, and what is skipped;
+  `tst_playbackcontroller`, the tap moving to a new player;
+  `tst_gstaudioplayer`, the real `GstAudioPlayer` filling the tap at the
+  reported position, after a seek, and cleared on stop (skipped without an
+  audio output).
 
 ## Stopping and skipping (`PlaybackController`)
 

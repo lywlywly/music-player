@@ -3,18 +3,20 @@
 #include <QMenu>
 #include <QObject>
 #include <QSettings>
-#include <QSignalSpy>
 #include <QTest>
 #include <QTimer>
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <numbers>
+#include <span>
 #include <vector>
 
-#include "../spectrum/pcmtap.h"
-#include "../spectrum/spectrumanalyzer.h"
-#include "../spectrum/spectrumpresenter.h"
-#include "../spectrum/spectrumwidget.h"
+#include "../pluginapi/iaudiohost.h"
+#include "../pluginapi/iplayerhost.h"
+#include "../plugins/spectrum/spectrumanalyzer.h"
+#include "../plugins/spectrum/spectrumpresenter.h"
+#include "../plugins/spectrum/spectrumwidget.h"
 
 namespace {
 constexpr float kFloor = SpectrumAnalyzer::kFloorDb;
@@ -22,17 +24,36 @@ constexpr float kFloor = SpectrumAnalyzer::kFloorDb;
 constexpr double kToneHz = 1188.5;
 constexpr int kToneBand = 11;
 
-// seconds of a full-scale tone at 44.1 kHz, from stream time 0.
-void pushTone(PcmTap &tap, double seconds) {
-  const int rate = 44100;
-  std::vector<float> samples(static_cast<size_t>(seconds * rate));
-  for (size_t i = 0; i < samples.size(); ++i) {
-    samples[i] = static_cast<float>(
-        std::sin(2.0 * std::numbers::pi * kToneHz * i / rate));
+// Keeps the one listener the presenter adds.
+class TestPlayerHost : public IPlayerHost {
+public:
+  void addListener(IPlayerListener *added) override { listener = added; }
+  void removeListener(IPlayerListener *) override { listener = nullptr; }
+
+  IPlayerListener *listener = nullptr;
+};
+
+// Audio as the host reads it at the play position: while hasAudio, a
+// full-scale tone at 44.1 kHz; otherwise none.
+class TestAudioHost : public IAudioHost {
+public:
+  void setWanted(bool value) override { wanted = value; }
+  int read(std::span<float> out) const override {
+    if (!hasAudio) {
+      std::ranges::fill(out, 0.0f);
+      return 0;
+    }
+    for (size_t i = 0; i < out.size(); ++i) {
+      out[i] = static_cast<float>(
+          std::sin(2.0 * std::numbers::pi * kToneHz * i / kRate));
+    }
+    return kRate;
   }
-  tap.push(samples.data(), static_cast<int>(samples.size()), 1,
-           PcmTap::SampleFormat::Float32, rate, 0);
-}
+
+  static constexpr int kRate = 44100;
+  bool wanted = false;
+  bool hasAudio = false;
+};
 
 int loudestBand(const std::vector<float> &levels) {
   return static_cast<int>(std::max_element(levels.begin(), levels.end()) -
@@ -45,55 +66,57 @@ class TestSpectrumPresenter : public QObject {
 
 private slots:
   void init() { QSettings().clear(); }
-  void tap_offeredOnlyWhileShown();
+  void audio_wantedOnlyWhileShown();
   void playing_showsTheToneThenPauseFreezesAndStopFalls();
   void noAudioWhilePlaying_showsTheMessage();
   void contextMenu_setsAndSavesTheBandCount();
 };
 
-void TestSpectrumPresenter::tap_offeredOnlyWhileShown() {
+void TestSpectrumPresenter::audio_wantedOnlyWhileShown() {
   SpectrumWidget widget;
-  SpectrumPresenter presenter(&widget);
-  QSignalSpy spy(&presenter, &SpectrumPresenter::tapChanged);
+  TestPlayerHost player;
+  TestAudioHost audio;
+  auto presenter = std::make_unique<SpectrumPresenter>(&widget, player, audio);
+  QCOMPARE(player.listener, presenter.get());
   QCOMPARE(widget.levels().size(), size_t{20});
+  QVERIFY(!audio.wanted);
 
   widget.show();
   QVERIFY(QTest::qWaitForWindowExposed(&widget));
-  QCOMPARE(spy.size(), 1);
-  QCOMPARE(spy.at(0).at(0).value<std::shared_ptr<PcmTap>>(), presenter.tap());
-
-  // Hidden: withdrawn, and the audio is forgotten.
-  pushTone(*presenter.tap(), 0.5);
+  QVERIFY(audio.wanted);
   widget.hide();
-  QCOMPARE(spy.size(), 2);
-  QCOMPARE(spy.at(1).at(0).value<std::shared_ptr<PcmTap>>(), nullptr);
-  std::vector<float> out(16);
-  QCOMPARE(presenter.tap()->read(100'000, out), 0);
+  QVERIFY(!audio.wanted);
+
+  // Destroyed while shown: it stops wanting audio and listening.
+  widget.show();
+  QVERIFY(audio.wanted);
+  presenter.reset();
+  QVERIFY(!audio.wanted);
+  QCOMPARE(player.listener, nullptr);
 }
 
 void TestSpectrumPresenter::playing_showsTheToneThenPauseFreezesAndStopFalls() {
   SpectrumWidget widget;
   widget.resize(400, 300);
-  SpectrumPresenter presenter(&widget);
+  TestPlayerHost player;
+  TestAudioHost audio;
+  audio.hasAudio = true;
+  SpectrumPresenter presenter(&widget, player, audio);
   widget.show();
   QVERIFY(QTest::qWaitForWindowExposed(&widget));
-  pushTone(*presenter.tap(), 2.0);
 
-  // At position 0 no audio ends there yet; the estimate moves on from the
-  // last reported position, without another report.
-  presenter.setPosition(0);
-  presenter.setState(SpectrumPresenter::State::Playing);
+  presenter.trackStarted({});
   QTRY_VERIFY(widget.levels()[kToneBand] > -1.0f);
   QCOMPARE(loudestBand(widget.levels()), kToneBand);
   QVERIFY(widget.peaks()[kToneBand] >= widget.levels()[kToneBand]);
 
-  presenter.setState(SpectrumPresenter::State::Paused);
+  presenter.paused();
   const std::vector<float> frozen = widget.levels();
   QTest::qWait(150);
   QCOMPARE(widget.levels(), frozen);
 
   // Stopped: no more audio is read, so the bars fall.
-  presenter.setState(SpectrumPresenter::State::Stopped);
+  presenter.stopped();
   QTRY_VERIFY(widget.levels()[kToneBand] < -20.0f);
   QTRY_VERIFY_WITH_TIMEOUT(widget.levels()[kToneBand] == kFloor &&
                                widget.peaks()[kToneBand] == kFloor,
@@ -102,38 +125,41 @@ void TestSpectrumPresenter::playing_showsTheToneThenPauseFreezesAndStopFalls() {
 
 void TestSpectrumPresenter::noAudioWhilePlaying_showsTheMessage() {
   SpectrumWidget widget;
-  SpectrumPresenter presenter(&widget);
+  TestPlayerHost player;
+  TestAudioHost audio;
+  SpectrumPresenter presenter(&widget, player, audio);
   widget.show();
   QVERIFY(QTest::qWaitForWindowExposed(&widget));
-  presenter.setNoAudioMessage("No audio");
 
-  // A backend that does not feed the tap: the message, after a while.
-  presenter.setState(SpectrumPresenter::State::Playing);
+  // A backend that sends no audio: the message, after a while. A resumed
+  // song plays as a started one.
+  presenter.paused();
+  presenter.resumed();
   QTest::qWait(300);
   QVERIFY(widget.message().isEmpty());
-  QTRY_COMPARE(widget.message(), QString("No audio"));
+  QTRY_VERIFY(widget.message().contains("Playback backend"));
 
   // Audio arrives: gone.
-  pushTone(*presenter.tap(), 2.0);
-  presenter.setPosition(500);
+  audio.hasAudio = true;
   QTRY_VERIFY(widget.message().isEmpty());
 
   // Stopping clears it too.
-  presenter.tap()->clear();
-  QTRY_COMPARE(widget.message(), QString("No audio"));
-  presenter.setState(SpectrumPresenter::State::Stopped);
+  audio.hasAudio = false;
+  QTRY_VERIFY(!widget.message().isEmpty());
+  presenter.stopped();
   QVERIFY(widget.message().isEmpty());
 }
 
 void TestSpectrumPresenter::contextMenu_setsAndSavesTheBandCount() {
   SpectrumWidget widget;
   widget.resize(400, 300);
-  SpectrumPresenter presenter(&widget);
+  TestPlayerHost player;
+  TestAudioHost audio;
+  audio.hasAudio = true;
+  SpectrumPresenter presenter(&widget, player, audio);
   widget.show();
   QVERIFY(QTest::qWaitForWindowExposed(&widget));
-  pushTone(*presenter.tap(), 2.0);
-  presenter.setPosition(500);
-  presenter.setState(SpectrumPresenter::State::Playing);
+  presenter.trackStarted({});
   QTRY_VERIFY(widget.levels()[kToneBand] > -1.0f);
 
   // The menu lists every count, the current one checked; pick 80.
@@ -172,7 +198,8 @@ void TestSpectrumPresenter::contextMenu_setsAndSavesTheBandCount() {
   // Saved: the next presenter starts with 80.
   QCOMPARE(QSettings().value("spectrum/bands").toInt(), 80);
   SpectrumWidget other;
-  SpectrumPresenter next(&other);
+  TestPlayerHost otherPlayer;
+  SpectrumPresenter next(&other, otherPlayer, audio);
   QCOMPARE(other.levels().size(), size_t{80});
 }
 

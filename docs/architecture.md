@@ -41,13 +41,14 @@ The backend must not depend on how (or whether) it is displayed.
   `LibraryScanner`, `IFileSystemMonitor` implementations, `SongMatcher`.
 * Frontend (Qt view adapters and widgets): `PlaylistTableModel`,
   `PlaylistTableView`, `PlaylistTabs`, `LibrarySearchResultsModel`, dialogs,
-  presenters (`SongInfoPresenter`, `SpectrumPresenter`, ...),
-  `SongInfoPanel`, `SpectrumWidget`, `buildSongInfo`, `PanelLayout`,
-  `PanelLayoutView`, `PanelLayoutEditor`, `MainWindowLayout`, `PluginManager`,
-  `PluginPlayerHost`, `PluginsPage`, `MainWindow`.
-* The spectrum module (`src/spectrum/`, library `myspectrum`) depends on Qt
-  only, never on app classes. Its analysis classes (`fft`, `SpectrumBands`,
-  `SpectrumAnalyzer`, `SpectrumSmoother`, `PcmTap`) use no Qt.
+  presenters (`SongInfoPresenter`, `CoverArtPresenter`, ...),
+  `SongInfoPanel`, `buildSongInfo`, `PanelLayout`, `PanelLayoutView`,
+  `PanelLayoutEditor`, `MainWindowLayout`, `PluginManager`,
+  `PluginPlayerHost`, `PluginAudioHost`, `PluginsPage`, `MainWindow`.
+* The players' audio tap for plugins (`PcmTap`, filled by `audiotaps`;
+  [playback.md](playback.md), "Audio tap") and the play position estimate
+  (`PlayPositionEstimate`; [plugins/plugin-system.md](plugins/plugin-system.md),
+  "Audio for plugins") use no Qt.
 * The layout module (`src/layout/`, library `mylayout`: `PanelLayout`,
   `PanelLayoutView`, `PanelLayoutEditor`) depends on Qt only, never on app
   classes; its tests link it without the app, so using an app class fails
@@ -155,8 +156,7 @@ The top-level window and what it owns.
     `setUpLayout` registers each layout's elements and builds them
     ([layout-editing.md](layout-editing.md)).
   * Connects the presenters to their widgets and to `PlaybackController`:
-    the Properties panel ([info-panel.md](info-panel.md)) and the spectrum
-    ([spectrum.md](spectrum.md)).
+    the Properties panel and the cover ([info-panel.md](info-panel.md)).
   * Edit > Search Playlist shows the one `PlaylistSearchDialog`
     ([monitored-library.md](monitored-library.md), "Playlist Search"). The
     destructor deletes it first, as it uses `columnLayoutManager_`, a member
@@ -325,7 +325,8 @@ Each has its own doc; the classes are listed here with where they sit.
 * Info panels ([info-panel.md](info-panel.md)): `SongInfoPresenter`,
   `SongInfoPanel` and `buildSongInfo` (the Properties panel) and
   `CoverArtPresenter` (frontend). The Spectrum panel (`SpectrumPresenter`,
-  `SpectrumWidget`) is in [spectrum.md](spectrum.md); the Lyrics panel
+  `SpectrumWidget`, the analysis, in `src/plugins/spectrum/`) is in
+  [plugins/spectrum.md](plugins/spectrum.md); the Lyrics panel
   (`LyricsPanel`, `LyricsPresenter`, `LyricsLoader`, `LyricsManager`,
   `LyricsSettingsPage`, in `src/plugins/lyrics/`) in
   [plugins/lyrics.md](plugins/lyrics.md), and the A-B Repeat plugin

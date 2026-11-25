@@ -21,7 +21,6 @@
 #include "songdialogs.h"
 #include "songinfopanel.h"
 #include "songinfopresenter.h"
-#include "spectrum/spectrumpresenter.h"
 #include "systemmediainterfacefactory.h"
 #include <QActionGroup>
 #include <QApplication>
@@ -149,12 +148,6 @@ MainWindow::MainWindow(QString databaseName, QString connectionName,
             openSongProperties(this, songPk, songLibrary, columnRegistry_,
                                *playlists_);
           });
-  spectrum_ = new SpectrumPresenter(ui->spectrumWidget, this);
-  // Only the GStreamer backend feeds the spectrum everywhere; the Qt one
-  // does only where Qt has its FFmpeg media backend (docs/spectrum.md).
-  spectrum_->setNoAudioMessage(
-      tr("No audio for the spectrum from this playback backend. Choose "
-         "GStreamer in Settings > Playback > Playback backend."));
   systemMedia_ = new SystemMediaPresenter(*createSystemMediaInterface(this),
                                           *playback_, this);
   connect(coverArt_, &CoverArtPresenter::artworkChanged, systemMedia_,
@@ -280,8 +273,6 @@ void MainWindow::setUpLayout() {
                         ui->playlistTabs);
   panelView->addElement(MainWindowLayout::kProperties, tr("Properties"),
                         ui->songInfoPanel);
-  panelView->addElement(MainWindowLayout::kSpectrum, tr("Spectrum"),
-                        ui->spectrumWidget);
   panelView->addElement(MainWindowLayout::kCover, tr("Cover Art"),
                         ui->coverLabel);
   // The loaded plugins' panels, in load order, each named by its plugin's id.
@@ -509,11 +500,7 @@ void MainWindow::setUpPlayback() {
             systemMedia_->showSong(song);
             // After systemMedia_->showSong, which clears the system artwork.
             coverArt_->showSong(song);
-            // Starting a song sends songStarted, not playbackStateChanged.
-            spectrum_->setState(SpectrumPresenter::State::Playing);
           });
-  connect(spectrum_, &SpectrumPresenter::tapChanged, playback_,
-          &PlaybackController::setPcmTap);
   connect(playback_, &PlaybackController::playbackStateChanged, this,
           &MainWindow::playbackStateChanged);
   connect(playback_, &PlaybackController::movedToRow, this,
@@ -578,17 +565,6 @@ void MainWindow::playbackStateChanged(PlaybackQueue::PlaybackStatus status) {
   if (status == PlaybackQueue::PlaybackStatus::None) {
     coverArt_->clear();
   }
-  switch (status) {
-  case PlaybackQueue::PlaybackStatus::Playing:
-    spectrum_->setState(SpectrumPresenter::State::Playing);
-    break;
-  case PlaybackQueue::PlaybackStatus::Paused:
-    spectrum_->setState(SpectrumPresenter::State::Paused);
-    break;
-  case PlaybackQueue::PlaybackStatus::None:
-    spectrum_->setState(SpectrumPresenter::State::Stopped);
-    break;
-  }
 }
 
 void MainWindow::navigateIndex(int row, Playlist *pl) {
@@ -612,7 +588,6 @@ void MainWindow::durationChanged(qint64 newDuration) {
 void MainWindow::positionChanged(qint64 progress) {
   if (!ui->seekSlider->isSliderDown())
     ui->seekSlider->setValue(progress);
-  spectrum_->setPosition(progress);
 }
 
 void MainWindow::updateSettingsDisplayPreviewContext(SettingsDialog *dialog) {

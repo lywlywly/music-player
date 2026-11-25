@@ -8,7 +8,8 @@
     Buttons, Seek Bar, Volume), which stays while they are placed, moved
     and removed in it;
   * the **panel layout** below it: splitters and tabs of the panels
-    (Playlist, Properties, Spectrum, Cover Art, and each plugin panel).
+    (Playlist, Properties, Cover Art, and each plugin panel: Lyrics,
+    Spectrum).
 
   A control goes only in the toolbar, and a panel only in the panel layout.
   Only the menu bar and the status bar are fixed.
@@ -45,16 +46,16 @@
 ### Elements are single, existing widgets that the layout places
 
 Each element is one widget that `MainWindow` already has (`playlistTabs`,
-`songInfoPanel`, `spectrumWidget`, `coverLabel`, `playbackButtons`,
-`seekSlider`, `volumeSlider`, each plugin's panel from `createPanel`). The
-layout only places it: building puts it in a container, and an element
+`songInfoPanel`, `coverLabel`, `playbackButtons`, `seekSlider`,
+`volumeSlider`, each plugin's panel from `createPanel`). The layout only
+places it: building puts it in a container, and an element
 that is not in its tree waits, hidden, in the hidden `layoutElements`
 widget. Each element appears at most once.
 
 * Why: the presenters stay one-to-one with their widgets and keep their
   state across edits.
-  * `SpectrumPresenter` offers the one `PcmTap` that
-    `PlaybackController::setPcmTap` takes.
+  * The spectrum's presenter wants the host's audio only while its panel is
+    shown.
   * `CoverArtPresenter` also sends the artwork to the system media controls.
   * `SongInfoPresenter` holds a debounce timer.
   * `PlaylistTabs` holds the tabs, views and models, and playback depends on
@@ -71,8 +72,8 @@ widget. Each element appears at most once.
   which `setupUi` creates before `PluginManager`, so the plugin panels are
   destroyed before the plugins shut down.
 * An element outside the tree is hidden, so it behaves as a hidden tab does:
-  the spectrum withdraws its tap, and the lyrics panel re-centers when shown
-  again. The playlist can be left out too. The app still works: the shown
+  the spectrum stops wanting audio, and the lyrics panel re-centers when
+  shown again. The playlist can be left out too. The app still works: the shown
   playlist is the hidden `PlaylistTabs`' current tab. Both reference players
   allow it as well.
 * Rejected: DeaDBeeF's model, where each node creates a new widget instance
@@ -87,7 +88,7 @@ widget. Each element appears at most once.
 | Layout | Host (`mainwindow.ui`) | Elements | Containers offered | Key |
 | --- | --- | --- | --- | --- |
 | Toolbar | `toolbarHost` | Playback Buttons, Seek Bar, Volume | none: one fixed row (an `hbox`) | `layout/toolbar` |
-| Panel layout | `layoutHost`, in `frame` | Playlist, Properties, Spectrum, Cover Art, plugin panels | splitters, tabs | `layout/tree` |
+| Panel layout | `layoutHost`, in `frame` | Playlist, Properties, Cover Art, plugin panels | splitters, tabs | `layout/tree` |
 
 Each is a `PanelLayoutView` with its own `PanelLayoutEditor`, tree, key and
 default. Both views keep their elements in `layoutElements`; a view parks
@@ -151,10 +152,10 @@ and moves only the elements registered with it.
 | Element | `{"type": "element", "id": "playlist"}` | none |
 | Placeholder (empty slot) | `{"type": "placeholder"}` | none |
 
-* Built-in element ids are `playlist`, `properties`, `spectrum`, `cover`,
+* Built-in element ids are `playlist`, `properties`, `cover`,
   `playbackbuttons`, `seekbar` and `volume` (`MainWindowLayout::kPlaylist`,
-  ...). A plugin panel's id is its plugin's id (`lyrics`). The layout module
-  does not know any of them: the app names the elements it registers.
+  ...). A plugin panel's id is its plugin's id (`lyrics`, `spectrum`). The
+  layout module does not know any of them: the app names the elements it registers.
 * **Delete and Cut leave a placeholder** (as in DeaDBeeF), so a container
   never changes its number of children through them. A splitter always has
   two, and no edit has to collapse or merge containers. Three panels side by
@@ -282,8 +283,8 @@ module has both directions, and boxes nest; the app uses the one row.
     needs; the panes' minimum widths still hold.
 
   The panel layout has no tabs and holds none of the plugins' panels, so it
-  is the same whatever plugins are loaded. `spectrum` and the plugin panels
-  (Lyrics) start in the store. Cost: Lyrics and the spectrum are not shown
+  is the same whatever plugins are loaded. The plugin panels (Lyrics,
+  Spectrum) start in the store. Cost: Lyrics and the spectrum are not shown
   until the user inserts them in edit mode.
 * An incompatible format change later gets a new key, as DeaDBeeF's
   `gtkui.layout.<version>` does, rather than a version field and migration
@@ -407,9 +408,9 @@ shown (Qt delivers the pending resize then); see
 ## Classes
 
 The layout module, `src/layout/` (static library `mylayout`), holds
-`PanelLayout`, `PanelLayoutView` and `PanelLayoutEditor`. Like the spectrum
-module, it depends on Qt only, never on app classes. It knows no element
-ids, no default layout and no app menu; the app passes them in.
+`PanelLayout`, `PanelLayoutView` and `PanelLayoutEditor`. It depends on Qt
+only, never on app classes. It knows no element ids, no default layout and no
+app menu; the app passes them in.
 
 * **The module's tests enforce it.** `tst_panellayout`,
   `tst_panellayoutview` and `tst_panellayouteditor` link `mylayout`, Qt and
@@ -482,8 +483,8 @@ ids, no default layout and no app menu; the app passes them in.
 ### `MainWindowLayout` (app; `mainwindowlayout.{h,cpp}`)
 
 * The app's side of the layouts: the built-in element ids (`kPlaylist`,
-  `kProperties`, `kSpectrum`, `kCover`, `kPlaybackButtons`, `kSeekBar`,
-  `kVolume`), `defaultToolbar()` and `defaultPanels()`.
+  `kProperties`, `kCover`, `kPlaybackButtons`, `kSeekBar`, `kVolume`),
+  `defaultToolbar()` and `defaultPanels()`.
 
 ### `MainWindow`
 

@@ -296,7 +296,7 @@ not on the app's threads. The app's code runs there in two ways:
 
 * **Pad probes**: callbacks on an element's pad, called for each buffer or
   event that passes, on the streaming thread. `GstAudioPlayer` has three:
-  the PCM tap for the spectrum (`onPcmProbe`), the bitrate counter
+  the PCM tap for the plugins' audio (`onPcmProbe`), the bitrate counter
   (`onBitrateProbe`) and the ReplayGain tag reader (`onTagProbe`).
 * **Signals of elements**, which GStreamer emits on whatever thread is
   acting, such as `playbin`'s `element-setup`.
@@ -565,8 +565,8 @@ Data crosses threads in two ways only:
   on the main thread, gets `finished` as a posted event.
 * **Pulled from shared state.** The other thread writes, the main thread
   reads, and a mutex or an atomic guards it: the PCM tap's samples
-  (`PcmTap`, [docs/spectrum.md](../docs/spectrum.md)), the bitrate byte
-  count, the ReplayGain tags.
+  (`PcmTap`, [docs/playback.md](../docs/playback.md), "Audio tap"),
+  the bitrate byte count, the ReplayGain tags.
 
 ### Rules that follow
 
@@ -610,8 +610,8 @@ Two problems come from this model, both covered with their timing in
 * [docs/event-ordering.md](../docs/event-ordering.md): delivery, re-entry,
   the known races, the plan (a synchronous core with queued edges, plugin
   commands), how foobar2000 and DeaDBeeF order their events.
-* [docs/spectrum.md](../docs/spectrum.md): the PCM tap shared between the
-  streaming thread and the main thread.
+* [docs/playback.md](../docs/playback.md), "Audio tap": the PCM tap shared
+  between the streaming thread and the main thread.
 * `src/gstaudioplayer.cpp`: the bus watch (`onBusMessage`) and the pad
   probes; `src/playbackbackendmanager.cpp`: the GLib thread;
   `src/efswfilesystemmonitor.cpp`: a foreign thread handing off.

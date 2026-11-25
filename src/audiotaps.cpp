@@ -1,6 +1,6 @@
 #include "audiotaps.h"
 
-#include "spectrum/pcmtap.h"
+#include "pcmtap.h"
 #include <QAudioBuffer>
 #include <cstring>
 

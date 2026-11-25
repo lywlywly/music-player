@@ -1,6 +1,7 @@
 #include "pluginmanager.h"
 
 #include "columnregistry.h"
+#include "iaudiohost.h"
 #include "iplugin.h"
 #include "ipluginhost.h"
 #include "isongfieldhost.h"
@@ -73,19 +74,38 @@ QString songFieldsRefusal(const ISongFieldProvider &provider,
 } // namespace
 
 // The host a plugin gets: its own, so the services that belong to one plugin
-// (its data folder, its fields' changes) know which plugin calls. player()
-// and control() are the manager's shared ones.
-class PluginHost : public QObject, public IPluginHost, public ISongFieldHost {
+// (its data folder, its fields' changes, whether it wants audio) know which
+// plugin calls. player() and control() are the manager's shared ones; audio
+// reads go to the shared PluginAudioHost.
+class PluginHost : public QObject,
+                   public IPluginHost,
+                   public ISongFieldHost,
+                   public IAudioHost {
 public:
-  PluginHost(PluginManager &manager, PluginPlayerHost &player, QString id,
-             QString dataFolder)
-      : manager_(manager), player_(player), id_(std::move(id)),
+  PluginHost(PluginManager &manager, PluginPlayerHost &player,
+             PluginAudioHost &audio, QString id, QString dataFolder)
+      : manager_(manager), player_(player), audio_(audio), id_(std::move(id)),
         dataFolder_(std::move(dataFolder)) {}
 
   IPlayerHost &player() override { return player_; }
   IPlayerControl &control() override { return player_; }
   QString dataFolder() const override { return dataFolder_; }
   ISongFieldHost &songFieldHost() override { return *this; }
+  IAudioHost &audio() override { return *this; }
+
+  // A state, not a count: the plugin counts once however often it says so.
+  void setWanted(bool wanted) override {
+    if (wanted == audioWanted_) {
+      return;
+    }
+    audioWanted_ = wanted;
+    if (wanted) {
+      audio_.addUser();
+    } else {
+      audio_.removeUser();
+    }
+  }
+  int read(std::span<float> out) const override { return audio_.read(out); }
 
   void valuesChanged(const QStringList &keys) override {
     // Queued, so a call inside a listener call (a song start) refreshes the
@@ -102,8 +122,10 @@ public:
 private:
   PluginManager &manager_;
   PluginPlayerHost &player_;
+  PluginAudioHost &audio_;
   const QString id_;
   const QString dataFolder_;
+  bool audioWanted_ = false;
 };
 
 QStringList loadDisabledPluginIds() {
@@ -117,7 +139,7 @@ void saveDisabledPluginIds(const QStringList &ids) {
 PluginManager::PluginManager(PlaybackController &playback,
                              const QString &folder, const QString &dataRoot,
                              QObject *parent)
-    : QObject(parent), player_(playback) {
+    : QObject(parent), player_(playback), audio_(playback) {
   const QStringList disabled = loadDisabledPluginIds();
   const QDir dir(folder);
   const QDir dataDir(dataRoot);
@@ -176,7 +198,7 @@ PluginManager::PluginManager(PlaybackController &playback,
       continue;
     }
     PluginHost &host = *hosts_.emplace_back(std::make_unique<PluginHost>(
-        *this, player_, entry.id, dataDir.filePath(entry.id)));
+        *this, player_, audio_, entry.id, dataDir.filePath(entry.id)));
     plugin->initialize(host);
     entry.state = PluginEntry::State::Loaded;
     entry.root = root;

@@ -7,7 +7,7 @@
 #include <vector>
 
 // Turns a window of mono samples into one level per band, in dB relative to
-// a full-scale sine, clamped to [kFloorDb, 0]. See docs/spectrum.md.
+// a full-scale sine, clamped to [kFloorDb, 0]. See docs/plugins/spectrum.md.
 class SpectrumAnalyzer {
 public:
   static constexpr float kFloorDb = -60.0f;

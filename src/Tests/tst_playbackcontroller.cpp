@@ -10,11 +10,11 @@
 #include "../databasemanager.h"
 #include "../dummyaudioplayer.h"
 #include "../monitoredlibrary.h"
+#include "../pcmtap.h"
 #include "../playbackcontroller.h"
 #include "../playlistcollection.h"
 #include "../songlibrary.h"
 #include "../songparser.h"
-#include "../spectrum/pcmtap.h"
 #include "testaudiofiles.h"
 
 namespace {

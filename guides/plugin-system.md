@@ -13,8 +13,8 @@ feature that the app does not know about in advance. The app is built without
 it and runs without it; with it, the app gains a panel, a Settings page or
 anything else the plugin offers.
 
-The **Lyrics** panel was the first plugin. The Properties and Spectrum panels
-are built into the app. All of them are elements of the main window's
+The **Lyrics** panel was the first plugin; the **Spectrum** panel is one too.
+The Properties panel is built into the app. All of them are elements of the main window's
 editable layout, which places them where the user puts them
 ([docs/layout-editing.md](../docs/layout-editing.md)).
 
@@ -164,10 +164,11 @@ The interfaces in `src/pluginapi/` come in three groups.
 | | `ISettingsPageProvider` | plugin (root object) | Makes a page for the Settings dialog, as an `IPluginSettingsPage` (`widget()`, `apply()` on OK) |
 | | `IMenuProvider` | plugin (root object) | Makes a submenu for the end of the Playback menu |
 | | `ISongFieldProvider` | plugin (root object) | Song fields the plugin keeps the values of, shown as columns and usable in expressions |
-| Host services | `IPluginHost` | app | What the app offers one plugin (each gets its own): `player()`, `control()`, `dataFolder()` and `songFieldHost()` |
+| Host services | `IPluginHost` | app | What the app offers one plugin (each gets its own): `player()`, `control()`, `dataFolder()`, `songFieldHost()` and `audio()` |
 | | `IPlayerHost` | app | `addListener` / `removeListener` for playback events |
 | | `IPlayerControl` | app | Playback commands, deferred: today `seek(ms)` and `play()` |
 | | `ISongFieldHost` | app | `valuesChanged(keys)`: tells the app which of the plugin's values to read again, deferred like a command |
+| | `IAudioHost` | app | The playing song's decoded audio: `setWanted(bool)` while the plugin wants it, `read(samples)` for the samples being heard now |
 | | `IPlayerListener` | plugin | Receives `trackStarted(TrackInfo)`, `stopped()`, `paused()`, `resumed()`, `positionChanged(ms)`, `durationChanged(ms)`, `seeked(ms)`, `finished()` |
 | | `TrackInfo` | (plain data) | The playing song's fields as text, copied from the app's song |
 
@@ -210,6 +211,18 @@ The A-B Repeat plugin (`abrepeatplugin.dll`) has the same shape: its root
 object makes a submenu of Playback, and its `ABRepeat` gets the events and
 calls `seek` to jump back to A.
 
+The Spectrum plugin (`spectrumplugin.dll`) has a panel too. Its presenter
+listens for play, pause and stop, and about 30 times a second reads the
+samples being heard from `host.audio()` and draws their spectrum. The app
+copies decoded audio only while some plugin wants it (a shown panel), into
+one tap shared by every plugin, and the host works out which samples are
+being heard: the players decode ahead and report the position only every
+100 ms, so it adds the time since the last report. A spectrogram, a VU meter
+or an oscilloscope would read the same audio. Its design is in
+[docs/plugins/spectrum.md](../docs/plugins/spectrum.md), the audio's in
+[docs/plugins/plugin-system.md](../docs/plugins/plugin-system.md) ("Audio for
+plugins").
+
 The Play Stats plugin (`playstatsplugin.dll`) has no panel. Its listener
 counts plays into the plugin's own SQLite file, in its data folder, and its
 root object provides `play_count` and `last_played_timestamp` as song fields:
@@ -225,12 +238,15 @@ plugin's fields, are in
 | `pluginapi` | `src/pluginapi/` | The interfaces, header-only |
 | `PluginManager` | app | Lists the plugins and loads those not disabled, gives each its own `IPluginHost`, registers their song fields, shuts them down |
 | `PluginPlayerHost` | app | The `IPlayerHost`: turns `PlaybackController`'s signals into listener calls; and the `IPlayerControl`: queues the plugins' seeks |
+| `PluginAudioHost` | app | Behind every plugin's `IAudioHost`: the one audio tap, on the player while some plugin wants audio, and the play position estimate reads are made at |
 | `MainWindow`, `SettingsDialog` | app | Use the capabilities: add the plugins' panels to the layout, their menus and their Settings pages |
 | `PluginsPage` | app | Settings > Plugins: lists every plugin with its state, enables and disables them |
 | `mylyrics` | `src/plugins/lyrics/` | The lyrics code: panel, presenter, lyrics loading, settings page |
 | `lyricsplugin` | `src/plugins/lyrics/` | The DLL: only the root object, `LyricsPlugin`, linking `mylyrics` |
 | `myabrepeat` | `src/plugins/abrepeat/` | The A-B loop, with no UI |
 | `abrepeatplugin` | `src/plugins/abrepeat/` | The DLL: the root object, `ABRepeatPlugin`, and its menu, linking `myabrepeat` |
+| `myspectrum` | `src/plugins/spectrum/` | The spectrum code: the analysis (FFT, bands), the panel and its presenter |
+| `spectrumplugin` | `src/plugins/spectrum/` | The DLL: the root object, `SpectrumPlugin`, linking `myspectrum` |
 
 ## How it builds
 
@@ -330,7 +346,9 @@ mismatch only happens with an old DLL left in the plugins folder.
    settings keys start with it (`<id>/...`).
 4. To follow playback, add a listener to `host.player()`, and remove it by the
    time `shutdown()` returns. To control it, call `host.control()`'s
-   commands; their effect arrives later, as events.
+   commands; their effect arrives later, as events. To show the audio, call
+   `host.audio().setWanted(true)` while the panel is shown and read from it
+   on a timer.
 5. Register it in `src/CMakeLists.txt` (`add_subdirectory`, and a dependency
    of `EXEC`).
 

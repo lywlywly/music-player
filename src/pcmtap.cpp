@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 namespace {
 
@@ -83,9 +84,9 @@ void PcmTap::push(const void *data, int frames, int channels,
   }
 }
 
-int PcmTap::read(int64_t endUs, std::vector<float> &out) const {
+int PcmTap::read(int64_t endUs, std::span<float> out) const {
   std::lock_guard lock(mutex_);
-  std::fill(out.begin(), out.end(), 0.0f);
+  std::ranges::fill(out, 0.0f);
   if (samples_.empty()) {
     return 0;
   }

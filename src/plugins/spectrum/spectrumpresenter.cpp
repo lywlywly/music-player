@@ -1,6 +1,7 @@
 #include "spectrumpresenter.h"
 
-#include "pcmtap.h"
+#include "iaudiohost.h"
+#include "iplayerhost.h"
 #include "spectrumwidget.h"
 #include <QSettings>
 #include <algorithm>
@@ -20,12 +21,13 @@ int savedBandCount() {
 }
 } // namespace
 
-SpectrumPresenter::SpectrumPresenter(SpectrumWidget *widget, QObject *parent)
-    : QObject(parent), widget_(widget), tap_(std::make_shared<PcmTap>()),
+SpectrumPresenter::SpectrumPresenter(SpectrumWidget *widget,
+                                     IPlayerHost &player, IAudioHost &audio,
+                                     QObject *parent)
+    : QObject(parent), widget_(widget), player_(player), audio_(audio),
       analyzer_(SpectrumBands::fractionalOctave(savedBandCount())),
       smoother_(analyzer_.bands().count(), SpectrumAnalyzer::kFloorDb),
-      samples_(analyzer_.fftSize()),
-      noAudioMessage_(tr("No audio from the playback backend.")) {
+      samples_(analyzer_.fftSize()) {
   clock_.start();
   frameTimer_.setInterval(kFrameIntervalMs);
   connect(&frameTimer_, &QTimer::timeout, this, &SpectrumPresenter::showFrame);
@@ -35,9 +37,27 @@ SpectrumPresenter::SpectrumPresenter(SpectrumWidget *widget, QObject *parent)
           &SpectrumPresenter::setActive);
   connect(widget_, &SpectrumWidget::bandCountRequested, this,
           &SpectrumPresenter::setBandCount);
+  player_.addListener(this);
 }
 
-SpectrumPresenter::~SpectrumPresenter() = default;
+SpectrumPresenter::~SpectrumPresenter() {
+  player_.removeListener(this);
+  // Destroyed with a panel that is still shown (no hideEvent): the host
+  // stops copying audio for it.
+  if (active_) {
+    audio_.setWanted(false);
+  }
+}
+
+void SpectrumPresenter::trackStarted(const TrackInfo & /*track*/) {
+  setState(State::Playing);
+}
+
+void SpectrumPresenter::resumed() { setState(State::Playing); }
+
+void SpectrumPresenter::paused() { setState(State::Paused); }
+
+void SpectrumPresenter::stopped() { setState(State::Stopped); }
 
 void SpectrumPresenter::setBandCount(int count) {
   if (count == bandCount()) {
@@ -60,32 +80,20 @@ void SpectrumPresenter::showBandLabels() {
   widget_->setBandLabels(labels, SpectrumAnalyzer::kFloorDb);
 }
 
-void SpectrumPresenter::setNoAudioMessage(const QString &message) {
-  noAudioMessage_ = message;
-}
-
-void SpectrumPresenter::setPosition(qint64 positionMs) {
-  positionMs_ = positionMs;
-  positionAtMs_ = clock_.elapsed();
-}
-
 void SpectrumPresenter::setState(State state) {
   state_ = state;
   if (state_ == State::Stopped) {
     updateNoAudioMessage(true);
   }
-  // The position is reported again soon; restart the estimate from now.
-  positionAtMs_ = clock_.elapsed();
   updateTimer();
 }
 
 void SpectrumPresenter::setActive(bool active) {
   active_ = active;
-  emit tapChanged(active_ ? tap_ : nullptr);
+  // Hidden: the host forgets the audio once no plugin wants it, so the panel
+  // starts clean when shown again.
+  audio_.setWanted(active_);
   if (!active_) {
-    // Hidden: forget the audio (after withdrawing the tap, so the player does
-    // not refill it), so the tab starts clean when shown again.
-    tap_->clear();
     smoother_.reset();
     updateNoAudioMessage(true);
     widget_->setLevels(smoother_.levels(), smoother_.peaks());
@@ -104,20 +112,12 @@ void SpectrumPresenter::updateTimer() {
   }
 }
 
-qint64 SpectrumPresenter::estimatedPositionUs() const {
-  qint64 ms = positionMs_;
-  if (state_ == State::Playing) {
-    ms += clock_.elapsed() - positionAtMs_;
-  }
-  return ms * 1000;
-}
-
 void SpectrumPresenter::showFrame() {
   const double nowSeconds = clock_.elapsed() / 1000.0;
   std::vector<float> targets(analyzer_.bands().count(),
                              SpectrumAnalyzer::kFloorDb);
   if (state_ == State::Playing) {
-    const int sampleRate = tap_->read(estimatedPositionUs(), samples_);
+    const int sampleRate = audio_.read(samples_);
     if (sampleRate > 0) {
       targets = analyzer_.analyze(samples_, sampleRate);
     }
@@ -138,5 +138,10 @@ void SpectrumPresenter::updateNoAudioMessage(bool hadAudio) {
   } else {
     show = clock_.elapsed() - noAudioSinceMs_ >= kNoAudioDelayMs;
   }
-  widget_->setMessage(show ? noAudioMessage_ : QString());
+  // Only the GStreamer backend feeds the audio everywhere; the Qt one does
+  // only where Qt has its FFmpeg media backend (docs/plugins/spectrum.md).
+  widget_->setMessage(
+      show ? tr("No audio for the spectrum from this playback backend. Choose "
+                "GStreamer in Settings > Playback > Playback backend.")
+           : QString());
 }

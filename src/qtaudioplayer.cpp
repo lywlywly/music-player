@@ -1,6 +1,6 @@
 #include "qtaudioplayer.h"
 #include "audiotaps.h"
-#include "spectrum/pcmtap.h"
+#include "pcmtap.h"
 
 QtAudioPlayer::QtAudioPlayer(QObject *parent) : AudioPlayer(parent) {
   connect(&mediaDevices_, &QMediaDevices::audioOutputsChanged, this,

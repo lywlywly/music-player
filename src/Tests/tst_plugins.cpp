@@ -23,12 +23,14 @@
 #include "../databasemanager.h"
 #include "../dummyaudioplayer.h"
 #include "../monitoredlibrary.h"
+#include "../pcmtap.h"
 #include "../playbackcontroller.h"
 #include "../playlistcollection.h"
 #include "../pluginapi/ipanelprovider.h"
 #include "../pluginapi/iplayercontrol.h"
 #include "../pluginapi/iplayerlistener.h"
 #include "../pluginapi/isettingspageprovider.h"
+#include "../pluginaudiohost.h"
 #include "../pluginmanager.h"
 #include "../pluginplayerhost.h"
 #include "../songlibrary.h"
@@ -109,6 +111,7 @@ private slots:
   void playerHost_seekRunsAfterTheDelivery();
   void playerHost_dropsQueuedSeekWhenDestroyed();
   void playerHost_playResumesAfterTheCall();
+  void audioHost_tapWhileAnyUserAndReadsAtTheEstimate();
   void manager_loadsLyricsPlugin();
   void lyricsSettings_loadSaveAndRestyleOpenPanels();
   void manager_skipsNonLibrariesAndDuplicateIds();
@@ -325,6 +328,41 @@ void TestPlugins::playerHost_playResumesAfterTheCall() {
            PlaybackQueue::PlaybackStatus::Paused);
   QTRY_COMPARE(controller_->manager().getStatus(),
                PlaybackQueue::PlaybackStatus::Playing);
+}
+
+void TestPlugins::audioHost_tapWhileAnyUserAndReadsAtTheEstimate() {
+  addSong();
+  PluginAudioHost audio(*controller_);
+  QCOMPARE(player()->pcmTap(), nullptr);
+  audio.addUser();
+  audio.addUser();
+  const std::shared_ptr<PcmTap> tap = player()->pcmTap();
+  QVERIFY(tap != nullptr);
+
+  // One second at 1 kHz from stream time 0, sample i being i / 1000.
+  std::vector<float> ramp(1000);
+  for (int i = 0; i < 1000; ++i) {
+    ramp[i] = i / 1000.0f;
+  }
+  controller_->play();
+  tap->push(ramp.data(), 1000, 1, PcmTap::SampleFormat::Float32, 1000, 0);
+
+  // Paused: the read ends at the reported position.
+  controller_->pause();
+  player()->setPosition(500);
+  std::vector<float> out(2);
+  QCOMPARE(audio.read(out), 1000);
+  QCOMPARE(out, (std::vector<float>{0.498f, 0.499f}));
+  // Playing: it moves on from there without another report.
+  controller_->play();
+  QTRY_VERIFY(audio.read(out) == 1000 && out[1] > 0.52f);
+
+  // Withdrawn and cleared only after the last user.
+  audio.removeUser();
+  QCOMPARE(player()->pcmTap(), tap);
+  audio.removeUser();
+  QCOMPARE(player()->pcmTap(), nullptr);
+  QCOMPARE(audio.read(out), 0);
 }
 
 void TestPlugins::manager_loadsLyricsPlugin() {

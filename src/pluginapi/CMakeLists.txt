@@ -3,6 +3,7 @@
 # gets src/pluginapi/ on its include path but not src/, and cannot include app
 # headers.
 add_library(pluginapi INTERFACE
+  iaudiohost.h
   imenuprovider.h
   ipanelprovider.h
   iplayercontrol.h

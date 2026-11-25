@@ -1,15 +1,16 @@
 # Info Panels (Properties and cover art)
 
 The Spectrum panel is described in
-[spectrum.md](spectrum.md), the Lyrics panel's classes in
+[plugins/spectrum.md](plugins/spectrum.md), the Lyrics panel's classes in
 [plugins/lyrics.md](plugins/lyrics.md), and where the panels go in
 [layout-editing.md](layout-editing.md).
 
 ## Summary
 
 * The info panels are **Properties**, **Lyrics** (`LyricsPanel`, from the
-  lyrics plugin), **Spectrum** and the playing song's **cover art**. Each is
-  an element of the editable layout ([layout-editing.md](layout-editing.md)).
+  lyrics plugin), **Spectrum** (from the spectrum plugin) and the playing
+  song's **cover art**. Each is an element of the editable layout
+  ([layout-editing.md](layout-editing.md)).
   The default layout has Properties at the top left of the main window with
   the cover below it; Lyrics and Spectrum are inserted from edit mode, for
   example as tabs beside Properties.
@@ -64,9 +65,10 @@ The Spectrum panel is described in
 ### Layout
 
 The default layout, the saved current tab and a disabled plugin's place are
-in [layout-editing.md](layout-editing.md). `songInfoPanel` and
-`spectrumWidget` have a minimum size of 120 x 240 and `coverLabel` of
-120 x 120, set in `mainwindow.ui`, wherever the layout places them.
+in [layout-editing.md](layout-editing.md). `songInfoPanel` has a minimum
+size of 120 x 240 and `coverLabel` of 120 x 120, set in `mainwindow.ui`,
+wherever the layout places them; the Spectrum plugin gives its panel the
+same 120 x 240.
 
 ### Properties panel contents
 

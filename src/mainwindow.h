@@ -27,7 +27,6 @@ class PlaylistSearchDialog;
 class PluginManager;
 class SettingsDialog;
 class SongInfoPresenter;
-class SpectrumPresenter;
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -109,7 +108,6 @@ private:
   CoverArtPresenter *coverArt_ = nullptr;
   PluginManager *plugins_ = nullptr;
   SongInfoPresenter *songInfo_ = nullptr;
-  SpectrumPresenter *spectrum_ = nullptr;
   SystemMediaPresenter *systemMedia_ = nullptr;
   NowPlayingPresenter *nowPlaying_ = nullptr;
   QActionGroup *playbackOrderMenuActionGroup;

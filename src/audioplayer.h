@@ -21,7 +21,7 @@ public:
   virtual void setSource(const QUrl &) = 0;
   virtual void setPosition(qint64 position) = 0;
   virtual void setVolume(int volumePercent);
-  // The decoded audio, before the volume, goes to tap (for the spectrum);
+  // The decoded audio, before the volume, goes to tap (for the plugins);
   // nullptr stops it. Players clear the tap on a new source, a seek and stop.
   virtual void setPcmTap(std::shared_ptr<PcmTap> tap);
   // Any thread: the GStreamer player pushes on its streaming thread.

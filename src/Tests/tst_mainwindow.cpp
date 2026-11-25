@@ -51,7 +51,6 @@
 #include "../songinfopanel.h"
 #include "../songparser.h"
 #include "../songpropertiesdialog.h"
-#include "../spectrum/spectrumwidget.h"
 #include "scopedhomedir.h"
 #include "testaudiofiles.h"
 #include <algorithm>
@@ -109,12 +108,11 @@ QString statusAt(const Playlist *playlist, int row, int statusCol) {
   return model->data(model->index(row, statusCol), Qt::DisplayRole).toString();
 }
 
-// The default panel layout with Lyrics (from the plugin in Tests/plugins),
-// Properties and Spectrum in tabs in place of Properties.
+// The default panel layout with Lyrics, Properties and Spectrum in tabs in
+// place of Properties (Lyrics and Spectrum from the plugins in Tests/plugins).
 PanelLayout infoTabsLayout() {
   PanelLayout::Node tabs{.kind = PanelLayout::Kind::Tabs};
-  for (const char *id :
-       {"lyrics", MainWindowLayout::kProperties, MainWindowLayout::kSpectrum}) {
+  for (const char *id : {"lyrics", MainWindowLayout::kProperties, "spectrum"}) {
     tabs.children.push_back(
         {.kind = PanelLayout::Kind::Element, .elementId = id});
     tabs.tabTitles.emplace_back();
@@ -1335,9 +1333,8 @@ void TestMainWindow::layout_defaultAndSavedTabsAndShowSelectedSong() {
   QTRY_COMPARE(row->parentWidget()->height(), row->sizeHint().height());
   auto *store = window_->findChild<QWidget *>("layoutElements");
   QCOMPARE(window_->findChild<QWidget *>("lyricsPanel")->parentWidget(), store);
-  QCOMPARE(
-      window_->findChild<SpectrumWidget *>("spectrumWidget")->parentWidget(),
-      store);
+  QCOMPARE(window_->findChild<QWidget *>("spectrumWidget")->parentWidget(),
+           store);
 
   // A saved layout with tabs.
   QSettings().setValue("layout/tree",
@@ -1414,11 +1411,13 @@ void TestMainWindow::settings_pluginPageAppliesToItsPanelOnOk() {
 }
 
 void TestMainWindow::plugins_disabledPluginsHaveNoPanelPageOrMenu() {
-  QSettings().setValue("plugins/disabled",
-                       QStringList{"lyrics", "abrepeat", "playstats"});
+  QSettings().setValue(
+      "plugins/disabled",
+      QStringList{"lyrics", "abrepeat", "playstats", "spectrum"});
   recreateWindow();
 
   QCOMPARE(window_->findChild<QWidget *>("lyricsPanel"), nullptr);
+  QCOMPARE(window_->findChild<QWidget *>("spectrumWidget"), nullptr);
 
   // A saved layout keeps the Lyrics tab's place, with a label for the panel,
   // and saves it again, for when the plugin is enabled again.
@@ -1433,6 +1432,10 @@ void TestMainWindow::plugins_disabledPluginsHaveNoPanelPageOrMenu() {
   auto *label = qobject_cast<QLabel *>(infoTabs->widget(0));
   QVERIFY(label != nullptr);
   QCOMPARE(label->text(), QString("Lyrics is not available"));
+  QCOMPARE(infoTabs->tabText(2), QString("Spectrum"));
+  label = qobject_cast<QLabel *>(infoTabs->widget(2));
+  QVERIFY(label != nullptr);
+  QCOMPARE(label->text(), QString("Spectrum is not available"));
   infoTabs->setCurrentIndex(2);
   QVERIFY(QSettings()
               .value("layout/tree")
@@ -1650,7 +1653,7 @@ void TestMainWindow::layout_editModeIsWiredAndItsEditsAreSaved() {
   menu = requestMenu(panel);
   QVERIFY(menu != nullptr);
   QCOMPARE(replaceWithItems(menu),
-           (QStringList{"Spectrum", "Lyrics", "Splitter (Left and Right)",
+           (QStringList{"Lyrics", "Spectrum", "Splitter (Left and Right)",
                         "Splitter (Top and Bottom)", "Tabs"}));
   menu->close();
   menu = requestMenu(window_->findChild<QWidget *>("playbackButtons"));
@@ -1667,16 +1670,25 @@ void TestMainWindow::layout_editModeIsWiredAndItsEditsAreSaved() {
 }
 
 void TestMainWindow::spectrum_tapGoesToThePlayerWhileShown() {
-  auto *widget = window_->findChild<SpectrumWidget *>("spectrumWidget");
+  // The plugin's panel in a tab: shown only while its tab is in front.
+  QSettings().setValue("layout/tree",
+                       QString::fromUtf8(infoTabsLayout().toJson()));
+  recreateWindow();
+  auto *widget = window_->findChild<QWidget *>("spectrumWidget");
   QVERIFY(widget != nullptr);
+  QTabWidget *infoTabs = tabWidgetOf(widget);
+  QVERIFY(infoTabs != nullptr);
   PlaybackBackendManager *backend =
       window_->findChild<PlaybackBackendManager *>();
   QVERIFY(backend != nullptr);
-  // The test window is not shown; stand in for the tab's show and hide.
+
+  infoTabs->setCurrentIndex(1);
+  window_->show();
+  QVERIFY(QTest::qWaitForWindowExposed(window_));
   QCOMPARE(backend->player()->pcmTap(), nullptr);
-  emit widget->shownChanged(true);
+  infoTabs->setCurrentWidget(widget);
   QVERIFY(backend->player()->pcmTap() != nullptr);
-  emit widget->shownChanged(false);
+  infoTabs->setCurrentIndex(1);
   QCOMPARE(backend->player()->pcmTap(), nullptr);
 }
 

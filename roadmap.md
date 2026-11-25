@@ -47,11 +47,14 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
   - ✅ Properties tab for the selected song: file name, folder, path, size,
     modified/created times, audio properties, main tags, play stats
   - See `docs/info-panel.md`
-- ✅ Spectrum tab (`src/spectrum/` module, library `myspectrum`)
+- ✅ Spectrum panel, in the Spectrum plugin (`src/plugins/spectrum/`)
   - ✅ 10, 20, 40 or 80 bands (context menu): IEC 61260-1 octave to
     eighth-octave bands, 0 to -60 dB, peak hold, own FFT
   - ✅ GStreamer backend; Qt backend only with Qt's FFmpeg media backend
-  - See `docs/spectrum.md`
+  - See `docs/plugins/spectrum.md`
+- ⬜ More visualization plugins on the plugins' audio (`IAudioHost`):
+  spectrogram, VU meter, oscilloscope (the last two need left and right
+  channels in the tap)
 - ✅ Playback statistics, in the Play Stats plugin with its own database
   - ✅ `play_count` with completion/listen gating
   - ✅ `last_played_timestamp`
@@ -80,11 +83,15 @@ Status legend: `✅ done`, `🟡 in progress`, `⬜ not started`
     fields provided by a plugin (`ISongFieldProvider`), one host object per
     plugin with a data folder, pause/resume/duration/seek/end events, its
     own SQLite file, cloud sync, a Settings page and a Playback submenu
+  - ✅ Spectrum plugin (`src/plugins/spectrum/`, `spectrumplugin`): the
+    playing song's decoded audio for plugins (`IAudioHost`), at the
+    estimated play position
   - ⬜ Playback commands for plugins checked against the playback
     generation; see `docs/event-ordering.md` (Plan: A synchronous core with
     queued edges)
   - See `docs/plugins/plugin-system.md`, `docs/plugins/lyrics.md`,
-    `docs/plugins/abrepeat.md` and `docs/plugins/playstats.md`
+    `docs/plugins/abrepeat.md`, `docs/plugins/playstats.md` and
+    `docs/plugins/spectrum.md`
 - ✅ Settings dialog navigation tree instead of tabs
   - See `docs/settings-dialog.md`
 - ✅ Custom layout editing: splitters, tabs and panels below the toolbar,

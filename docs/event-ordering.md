@@ -311,7 +311,7 @@ states all but rule 6, which comes with the generation:
   change the sender", not condition 3. With a backend that emits the
   position inside `setPosition` (the test player), it nests a second
   delivery, and the receivers after the plugin (other listeners, possibly
-  the slider and the spectrum, by connection order) get the old position
+  the slider and the plugins' audio host, by connection order) get the old position
   after the new one: the lyrics panel shows 30 s while playback is at 10 s,
   until the next position update. `GstAudioPlayer::setPosition` emits no
   position, so with GStreamer nothing nests and a correct plugin's seek is

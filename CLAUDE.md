@@ -53,10 +53,11 @@ From `src/`. After cloning: `git submodule update --init --recursive`.
 - Run `ctest` without `-j`: the test executables share one QSettings folder, which each one deletes when
   it starts.
 - A new source file goes in `PROJECT_SOURCES` in `src/CMakeLists.txt` (or the module's own
-  CMakeLists.txt, as `src/spectrum/`); a new test `tst_<name>.cpp` goes in `TEST_NAMES` in
-  `src/Tests/CMakeLists.txt`, with `QT_QPA_PLATFORM=offscreen` if it shows a widget. A test of the
-  layout module (`src/layout/`) goes in that file's layout block instead: it links the module and
-  Qt only, which keeps app classes out of the module.
+  CMakeLists.txt, as `src/layout/` or a plugin's `src/plugins/<name>/`); a new test
+  `tst_<name>.cpp` goes in `TEST_NAMES` in `src/Tests/CMakeLists.txt`, with
+  `QT_QPA_PLATFORM=offscreen` if it shows a widget. A test of the layout module (`src/layout/`)
+  goes in that file's layout block instead: it links the module and Qt only, which keeps app classes
+  out of the module.
 
 ## Commands (Windows)
 
@@ -98,7 +99,7 @@ Without Qt's `bin` on `PATH`, the app and tests exit with `0xc0000135`.
 - **Structured and modular.** Code lives where docs/architecture.md puts it, in focused classes with clear
   boundaries: backend classes hold state and operations and never depend on the UI; presenters connect
   them to widgets; `MainWindow` only wires subsystems together. A self-contained feature can be its own
-  library (as `src/spectrum/`, which depends on Qt only). One responsibility per class; no catch-all
+  library (as `src/layout/`, which depends on Qt only). One responsibility per class; no catch-all
   utility files.
 - **Explicit and minimal.** Implement exactly what the task needs, in clear, direct code: no abstraction
   layers, configuration flags or generic machinery for hypothetical needs. Name things for what they do.
@@ -125,7 +126,8 @@ Without Qt's `bin` on `PATH`, the app and tests exit with `0xc0000135`.
   keeps no play stats; it shows a plugin's fields through `ISongFieldProvider`.
 - The main window's fixed parts (menu bar, status bar) live in `src/mainwindow.ui`; its central widget
   holds two editable layouts, the toolbar and the panel layout (`PanelLayout`, docs/layout-editing.md),
-  whose element widgets (`SongInfoPanel`, `SpectrumWidget`, the playback controls, ...) are still
-  declared and promoted in `mainwindow.ui` (`<customwidget>`), in `layoutElements`.
+  whose built-in element widgets (`SongInfoPanel`, the cover, the playback controls, ...) are still
+  declared in `mainwindow.ui` (custom ones promoted, `<customwidget>`), in `layoutElements`; the
+  plugins' panels (Lyrics, Spectrum) come from their plugins.
 - Settings are `QSettings` keys named `<area>/<name>` (e.g. `layout/tree`), documented in the feature's
   doc.

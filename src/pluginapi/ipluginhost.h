@@ -3,6 +3,7 @@
 
 #include <QString>
 
+class IAudioHost;
 class IPlayerControl;
 class IPlayerHost;
 class ISongFieldHost;
@@ -22,6 +23,8 @@ public:
   virtual QString dataFolder() const = 0;
   // For a plugin that provides song fields (ISongFieldProvider).
   virtual ISongFieldHost &songFieldHost() = 0;
+  // The playing song's decoded audio, for a plugin that shows it.
+  virtual IAudioHost &audio() = 0;
 };
 
 #endif // IPLUGINHOST_H
