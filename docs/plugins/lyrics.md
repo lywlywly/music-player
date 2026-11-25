@@ -32,13 +32,27 @@ Built and deployed as every plugin is ([plugin-system.md](plugin-system.md),
   settings to the panel. `LyricsManager` holds the lyrics, moves the current
   line with the play position, and gives a line's timestamp
   (`lineStartMs`).
-* `LyricsPanel` keeps the index of its current line and re-centers on it,
-  without animation, in `showEvent` and `resizeEvent`: the panel keeps getting
-  positions while hidden, but a hidden panel is not resized (a `QTabWidget`
-  sizes only its current page), so it can be resized later
-  ([info-panel.md](../info-panel.md)).
-  It handles the hover, the click and the scroll hold ("Seeking from a line,
-  hover and the scroll hold").
+* `LyricsPanel` re-centers on its current line when shown or resized
+  ("While hidden"), and handles the hover, the click and the scroll hold
+  ("Seeking from a line, hover and the scroll hold").
+
+## While hidden
+
+`LyricsPresenter` is not told whether its panel is shown: the panel keeps
+receiving positions while hidden (outside the layout, or on a tab not in
+front), and `LyricsPanel` keeps scrolling to the current line. That alone
+would show the wrong line when the panel comes back: a hidden panel is not
+resized (a `QTabWidget` page lives in a `QStackedLayout`, which sizes only
+the current page), so a window or splitter resize meanwhile leaves it at its
+old size, and `scrollToIndexCenter` centers by the viewport height at the
+time it runs.
+
+So `LyricsPanel` keeps the index of its current line (`currentLine_`, set by
+`scrollToIndexCenter`, reset by `setLyricsPanel`) and re-centers on it
+without animation in `showEvent` and `resizeEvent`, stopping a scroll
+animation started while hidden. This also keeps the line centered when the
+shown panel is resized. Not while the user holds following by scrolling
+("Scroll hold"): the view stays where they scrolled it.
 
 ## Where lyrics come from (`LyricsLoader`)
 
@@ -210,8 +224,8 @@ The click calls `IPlayerControl::seek`, the command A-B Repeat uses, then
   hold and restarts its timer; the filter lets the text edit scroll as
   usual. Touchpad scrolling arrives as wheel events.
 * **While held**, a line change moves the current line's color but does not
-  scroll, and `showEvent` and `resizeEvent` do not re-center (the re-center
-  of [info-panel.md](../info-panel.md), "Lyrics while hidden").
+  scroll, and `showEvent` and `resizeEvent` do not re-center ("While
+  hidden").
 * A Ctrl+wheel zooms the text, as a `QTextEdit` without `TextEditable` does;
   it is a wheel event, so it holds following too.
 * **The hold ends**:
@@ -230,31 +244,15 @@ The click calls `IPlayerControl::seek`, the command A-B Repeat uses, then
 
 ## Tests
 
-* `tst_lyrics`, `tst_lyricspanel`: link `mylyrics`; `resolveLyrics` cases
-  take `TrackInfo`.
-* `tst_lyricspanel`, besides the re-center ([info-panel.md](../info-panel.md)):
-  * A click on line N sends `lineClicked(N)`; a release on another line, a
-    click below the last line, and a click on an empty panel send nothing.
-  * A mouse move over line N gives it a selection in the highlight color,
-    beside the current line's, and the pointing hand; a `QEvent::Leave`
-    sent to the viewport clears both.
-  * After a wheel event sent to the viewport, a line change does not
-    scroll; once the hold ends the current line is centered. A click ends
-    the hold at once: the next line change scrolls.
-  * The presenter, with an `IPlayerHost` and an `IPlayerControl` made by
-    the test (the control records commands): after a `trackStarted` with
-    timestamped lyrics, a click on a line seeks to its timestamp, then
-    plays.
-* `tst_plugins`, through the built plugin in `Tests/plugins`:
-  * The panel shows the tag lyrics of the song that starts and clears on
-    stop.
-  * The settings: an open panel's font puts the stored family before the
-    application font's families; the page shows the stored size, system
-    font choice and color; the system font disables the family combo;
-    `apply()` writes the four `lyrics/*` keys (the family as typed) and
-    restyles the open panel. Which font the combo selects for a stored
-    family is Qt's substitution, checked by hand: the offscreen platform has
-    no fonts.
+* `tst_lyrics` (`resolveLyrics`) and `tst_lyricspanel` link `mylyrics`.
+  `tst_lyricspanel` covers the re-center while hidden, the click, the hover
+  and the scroll hold, and the
+  presenter seeking then playing, with an `IPlayerControl` made by the test
+  that records commands.
+* `tst_plugins`, through the built plugin: the panel following songs, and
+  the settings page and its effect on an open panel. Which font the combo
+  selects for a stored family is Qt's substitution, checked by hand: the
+  offscreen platform has no fonts.
 * By hand: a click plays from the line, playing and paused, with GStreamer
   and Qt Multimedia, with no moment of the paused position heard; the hover
   highlight; touchpad scrolling on macOS and Windows, the hold, and the

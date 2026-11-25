@@ -207,68 +207,51 @@ fit the rest of the app is in [architecture.md](architecture.md).
   entry in the parser's index: the file's seek table, or a frame already
   parsed), else at byte 0, and reads forward to the target on the
   streaming thread. The call returns at once.
-* Rejected: a seek without `ACCURATE` (`GST_SEEK_FLAG_KEY_UNIT`). It
-  estimates the byte position from the bitrate and bisects
-  (`gst_base_parse_locate_time`) to a frame up to 20 s before the target
-  (`TARGET_DIFFERENCE`), then reads forward from there. With no index
-  entry near the target, `gst_base_parse_handle_seek` runs the bisection
-  in the thread that called seek, the UI thread here, holding the parser's
-  stream lock. In a FLAC file without a seek table, a step of it, or the
-  read after it, can land on a false sync code (`0xFFF8` inside the audio
-  data): `gst_flac_parse_frame_is_valid` finds the header invalid and
-  returns 0, which `gst_flac_parse_handle_frame` takes for a whole frame
-  of size 0 (`if (next == 0) ret = TRUE`, GStreamer 1.26.5 and 1.28.7). What
-  follows depends on how GLib and GStreamer were built:
-  * Checks compiled out (vcpkg's Release build: `-Dglib_checks=false`,
-    `-Dglib_assert=false`; the app on Windows): `gst_base_parse_finish_frame`
-    takes the empty frame. Depending on the target, the seek call freezes
-    the app for seconds (up to about a minute), the parser posts
-    `Failed to parse stream` (`gst_base_parse_check_sync`, no frame within
-    2 MiB), which the app takes for an unplayable file ("Stopping and
-    skipping"), or the parser thread reads the missing buffer and crashes.
-  * Checks compiled in (Homebrew's build on macOS, vcpkg's Debug build):
-    `gst_base_parse_finish_frame` rejects it
-    (`assertion 'size > 0 || frame->out_buffer' failed`, logged), the seek
-    call returns at once and playback resumes a fraction of a second late;
-    at a few targets the parser posts `Internal data stream error`, which
-    the app takes for an unplayable file.
+* Rejected: a seek without `ACCURATE` (`GST_SEEK_FLAG_KEY_UNIT`). With no
+  index entry near the target, `gst_base_parse_handle_seek` bisects from a
+  bitrate estimate (`gst_base_parse_locate_time`, to up to 20 s before the
+  target, `TARGET_DIFFERENCE`) on the thread that called seek, the UI
+  thread, holding the parser's stream lock. In a FLAC file without a seek
+  table it can land on a false sync code (`0xFFF8` in the audio data):
+  `gst_flac_parse_frame_is_valid` returns 0 for the invalid header, which
+  `gst_flac_parse_handle_frame` takes for a frame of size 0 (`if (next ==
+  0) ret = TRUE`, GStreamer 1.26.5 and 1.28.7). With GLib's checks compiled
+  out (vcpkg's Release build, `-Dglib_checks=false -Dglib_assert=false`, the
+  app on Windows), `gst_base_parse_finish_frame` takes that empty frame: the
+  seek freezes the app for seconds (up to about a minute), the parser posts
+  `Failed to parse stream` (`gst_base_parse_check_sync`, no frame within 2
+  MiB) and the song is skipped, or the parser thread crashes. With them
+  compiled in (Homebrew, vcpkg's Debug build), it is rejected (`assertion
+  'size > 0 || frame->out_buffer' failed`, logged) and playback resumes a
+  fraction of a second late, but a few targets post `Internal data stream
+  error` and skip the song.
 * Cost, a known issue: in a FLAC file without a seek table, a seek ahead
-  of the frames already parsed reads every byte from there, checking each
-  for a frame start (`gst_flac_parse_frame_is_valid`), before playback
-  resumes. The pause grows with the distance: near half a second near the
-  end of a 4-minute high-bitrate file (96 kHz, 24-bit, 3.2 Mbit/s).
-  libFLAC's seek (foobar2000, DeaDBeeF) has none: it estimates the byte
-  position, reads frame headers to correct it, and decodes part of one
-  frame. A seek table in the file removes it (the index then has an entry
-  every few seconds). Fixes, not built:
-  * Patch `flacparse` so an invalid header after a sync code skips one
-    byte (`*skipsize = 1`) instead of finishing a frame of size 0, and seek
-    without `ACCURATE` again. The freezes, skips and crashes all follow the
-    empty frame (with checks compiled in, only the skips remain), so the
-    bisection would resume about as fast as libFLAC, at the same exact
-    sample. Cost: a patched GStreamer, an overlay port of vcpkg's on
-    Windows, while macOS and Linux use their system's or Homebrew's, which
-    keep the bug until a release fixes it; and the bisection, a few small
-    reads, still runs on the UI thread.
-  * Build vcpkg's GStreamer with GLib's checks compiled in, as Homebrew
-    does, and seek without `ACCURATE` again: no source patch, only build
-    options in an overlay port. Cost: the rejected frames still log a
-    critical warning, playback resumes late after them, a few targets
-    still skip the song (`Internal data stream error`), and every check
-    runs in the release build.
+  of the frames already parsed checks every byte from there for a frame
+  start before playback resumes: near half a second near the end of a
+  4-minute 96 kHz 24-bit file (3.2 Mbit/s). libFLAC's seek (foobar2000,
+  DeaDBeeF) estimates the byte position, corrects it from frame headers and
+  decodes part of one frame. A seek table in the file removes the cost.
+  Fixes, not built, each also seeking without `ACCURATE` again:
+  * Patch `flacparse` to skip one byte (`*skipsize = 1`) after an invalid
+    header instead of finishing an empty frame, which causes every freeze,
+    skip and crash, so the bisection resumes about as fast as libFLAC, at
+    the same sample. Cost: a patched GStreamer (an overlay port on Windows;
+    macOS and Linux keep the bug until a release fixes it), and the
+    bisection's few small reads stay on the UI thread.
+  * Build vcpkg's GStreamer with GLib's checks, as Homebrew does: build
+    options in an overlay port, no patch. Cost: the logged warnings, late
+    resumes and a few skipped songs remain, and every check runs in
+    Release.
 * Known issue (Windows, `wasapi2sink`, GStreamer 1.28.7): a seek can skip
-  the song with `Failed to write to device` (`AUDCLNT_E_BUFFER_TOO_LARGE`).
-  A flushing seek empties the sink's ring buffer. When the device asks for
-  audio, `gst_wasapi2_rbuf_process_write` copies segments into the free
-  space (`can_write` frames), setting `can_write` to each segment's size;
-  if the ring buffer runs out partway, it fills the rest with silence but
-  asks `GetBuffer` for the last segment's `can_write` frames, not the
-  frames left (`can_write_bytes` over the frame size). When the last
-  segment was larger than what is left, WASAPI refuses, the sink posts an
-  error, and the app takes it for an unplayable file ("Stopping and
-  skipping"). Clicking around the seek slider hits it after many seeks.
-  Fix: GStreamer's, the frames left in that `GetBuffer` and
-  `ReleaseBuffer`.
+  the song with `Failed to write to device` (`AUDCLNT_E_BUFFER_TOO_LARGE`),
+  after many clicks around the seek slider. A flushing seek empties the
+  sink's ring buffer; when it runs out partway through a write,
+  `gst_wasapi2_rbuf_process_write` fills the rest with silence but asks
+  `GetBuffer` for the last segment's `can_write` frames, not the frames
+  left (`can_write_bytes` over the frame size), and WASAPI refuses when that
+  is more. The app takes the error for
+  an unplayable file ("Stopping and skipping"). Fix: GStreamer's, the
+  frames left in that `GetBuffer` and `ReleaseBuffer`.
 
 ## Order (`PlaybackPolicySequential`, `PlaybackPolicyShuffle`)
 
@@ -295,10 +278,10 @@ fit the rest of the app is in [architecture.md](architecture.md).
 `PlaybackController` does not count plays: the Play Stats plugin does, from
 the listener events `PluginPlayerHost` forwards (start, pause, resume,
 position, duration, seek, end); see
-[plugins/playstats.md](plugins/playstats.md), "Counting plays". It keeps
-the duration across sessions, since the backend may not report an unchanged
-duration again (replaying the same song). `playSong` repaints the started
-song's rows after its tag refresh (`notifySongChanged`).
+[plugins/playstats.md](plugins/playstats.md), "Counting plays". `playSong`
+repaints the started song's rows after its tag refresh
+(`notifySongChanged`), so tags changed on disk and read at play show at
+once, with the plugin disabled too.
 
 ## System media controls
 
@@ -316,8 +299,6 @@ song's rows after its tag refresh (`notifySongChanged`).
     publish the title and artist. That clears the system artwork, so it is
     called before `CoverArtPresenter::showSong`, whose `artworkChanged`
     `MainWindow` connects to `setArtwork` ([info-panel.md](info-panel.md)).
-  * It does not know `CoverArtPresenter` or `NowPlayingPresenter`;
-    `MainWindow` drives all three.
 
 ## GStreamer bus messages (`GstAudioPlayer`, `PlaybackBackendManager`)
 
@@ -485,19 +466,15 @@ match.
   deletes `libexec`, so step 2 finds nothing. It moves the plugins too, from
   `lib\gstreamer-1.0` to `plugins\gstreamer`. The README's run commands
   therefore set `GST_PLUGIN_SCANNER`, as they set `GST_PLUGIN_PATH`.
-* Source: this behavior is not in GStreamer's documentation (`running.md`
-  lists `GST_PLUGIN_PATH` and `GST_REGISTRY_FORK`, not `GST_PLUGIN_SCANNER`).
-  The five bullets above, from the helper process to vcpkg's layout, are
-  checked against the GStreamer 1.28.7 source that vcpkg builds (its archive
-  is in vcpkg's `downloads` folder):
-  * `gst/gstpluginloader-win32.c`: `find_helper_bin_location`,
-    `gst_plugin_loader_new`, `gst_plugin_loader_retry_pending`.
-  * `gst/gstregistry.c`: `gst_registry_scan_plugin_file`, and the size and
-    modification-time check in `gst_registry_scan_path_level`.
-  * `gst/gstinfo.h`: `GST_WARNING` under `GST_DISABLE_GST_DEBUG`.
-  * vcpkg's `ports/gstreamer/portfile.cmake`.
-
-  A newer GStreamer or vcpkg port may change this behavior without notice.
+* Source: not GStreamer's documentation (`running.md` doesn't list
+  `GST_PLUGIN_SCANNER`), but the GStreamer 1.28.7 source vcpkg builds (its
+  archive is in vcpkg's `downloads` folder):
+  `gstpluginloader-win32.c` (`find_helper_bin_location`,
+  `gst_plugin_loader_new`, `gst_plugin_loader_retry_pending`),
+  `gstregistry.c` (`gst_registry_scan_plugin_file`,
+  `gst_registry_scan_path_level`), `gstinfo.h` (`GST_WARNING`), and vcpkg's
+  `ports/gstreamer/portfile.cmake`. A newer GStreamer or vcpkg port
+  may change it without notice.
 * The crash this guards against: Intel's video plugin, `gstqsv`, probes the
   GPU's codecs in `plugin_init`, and the Intel driver can corrupt the heap
   there ([roadmap.md](../roadmap.md), Known Issues).

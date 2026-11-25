@@ -200,12 +200,10 @@ module has both directions, and boxes nest; the app uses the one row.
   its 110-pixel maximum), and the others keep their size hint. A box's
   widget counts as expanding when its layout is
   (`QWidgetItem::expandingDirections`).
-  * This is DeaDBeeF's default too: a child is appended with Expand on
-    unless its widget is flagged `DDB_GTKUI_WIDGET_FLAG_NON_EXPANDABLE`
-    (`playtb`), in `w_hvbox_append`.
-  * Rejected: DeaDBeeF's per-child Expand and Fill toggles and its
-    Homogeneous toggle, saved in the node. They would add three menu items
-    and two lists to the JSON for what the elements' policies already
+  * DeaDBeeF's default too: `w_hvbox_append` turns Expand on unless the
+    widget is `DDB_GTKUI_WIDGET_FLAG_NON_EXPANDABLE` (`playtb`).
+  * Rejected: DeaDBeeF's per-child Expand and Fill and its Homogeneous
+    toggle: three menu items and two JSON lists for what the policies
     decide. Cost: two expanding children share the space evenly.
 * **A box is no larger than its children allow**: its layout's size
   constraint is `QLayout::SetMaximumSize`, so the box's widget takes the
@@ -272,11 +270,16 @@ module has both directions, and boxes nest; the app uses the one row.
 * The defaults are the app's (`MainWindowLayout`):
   * `defaultToolbar()`: an `hbox` of `playbackbuttons`, `volume` and
     `seekbar`, the seek bar taking the rest of the width;
-  * `defaultPanels()`: `hsplitter [320, 960]`, so the info side starts at a
-    quarter of the width (the reason is in
-    [architecture.md](architecture.md), "App composition"), with
-    `vsplitter [300, 500]` (3 to 5) of `properties` and `cover` on the left
-    and `playlist` on the right.
+  * `defaultPanels()`: `hsplitter [320, 960]` with `vsplitter [300, 500]`
+    (3 to 5) of `properties` and `cover` on the left and `playlist` on the
+    right. The info side starts at a quarter of the width (the sizes scaled
+    to the splitter), so its width does not depend on the panels' size
+    hints. Rejected: the splitter's sizing by size hint, which starts the
+    side too narrow, since it uses a hint cached before the plugin panels
+    are placed (Qt does not pass a hidden widget's hint change up to that
+    cache), and clearing those caches by hand, which depends on Qt's
+    internals. Cost: that first width ignores what the panels' content
+    needs; the panes' minimum widths still hold.
 
   The panel layout has no tabs and holds none of the plugins' panels, so it
   is the same whatever plugins are loaded. `spectrum` and the plugin panels
@@ -332,10 +335,10 @@ module has both directions, and boxes nest; the app uses the one row.
      (`vbox`), and **Remove Slot**. Each is disabled where it can't apply
      (first, last, only child). Rename Tab asks for a name, prefilled with
      the tab's label. An empty name, or one equal to the label the tab would
-     have unnamed, makes it unnamed again. DeaDBeeF's boxes have Expand and
-     Shrink Box by 1 Item instead, the shrink removing the last child, and
-     no moves. Rejected: a row could then be reordered only by Cut and Paste
-     through a placeholder; ours mirror the tab items;
+     have unnamed, makes it unnamed again. Rejected: DeaDBeeF's Expand and
+     Shrink Box by 1 Item (removing the last child) with no moves, which
+     reorder a row only by Cut and Paste through a placeholder; ours mirror
+     the tab items;
   7. **Parent**: the parent's menu, as a submenu, when the node has a parent.
      It reaches a container whose children cover it, as in DeaDBeeF.
 
@@ -396,12 +399,10 @@ rebuilds the whole widget tree from it:
 
 ### Cover art follows its label
 
-`CoverArtPresenter` rescales the cover on each of its label's
-`QEvent::Resize` (an event filter on the label), so the cover follows the
-label in any splitter or tab, and when a hidden label is shown (Qt delivers
-the pending resize then). The scaled pixmap fits the label's contents rect,
-and the label keeps its 120 x 120 minimum, so rescaling does not grow the
-label.
+`CoverArtPresenter` rescales the cover on each of its label's resizes, so
+it follows the label in any splitter or tab, and when a hidden label is
+shown (Qt delivers the pending resize then); see
+[info-panel.md](info-panel.md), "`CoverArtPresenter`".
 
 ## Classes
 
@@ -526,80 +527,22 @@ ids, no default layout and no app menu; the app passes them in.
 
 ## Tests
 
-* `tst_panellayout`:
-  * JSON round trip, and the JSON written for a hand-made tree and for
-    boxes;
-  * rejecting bad trees (not JSON, an array, unknown type, wrong child
-    count, missing, negative or non-number sizes, a box or tabs without
-    children, `current` out of range, titles not one string per tab,
-    element without id, element or placeholder with children, an invalid
-    child);
-  * repeated elements becoming placeholders;
-  * each edit: replace on an element, a container and a placeholder; split
-    into a splitter or a box and wrap in tabs keeping the node; take
-    leaving a placeholder; paste with an element inserted since; adding,
-    moving and removing a box's children and tabs, with the current tab
-    following;
-  * tab names staying with their tabs through split, take, add, move and
-    remove, kept in the JSON, and left out of it when no tab is named.
-* `tst_panellayoutview` (offscreen):
-  * building places each element in its splitter or tab, with the tab
-    labels (a named tab shows its name), the placeholder label (the text
-    the view was given) and the "not available" labels; an element not in
-    the tree stays hidden in the store;
-  * a box places its children in order, shown; a row of a fixed-height
-    element in a `vbox` keeps that height beside a panel that doesn't
-    expand; a rebuild that deletes the boxes keeps their elements;
-  * a rebuild keeps the element widgets alive and moves an element left out
-    to the store, hidden, including an element that was the root;
-  * splitter moves and tab switches are written to the tree and emit
-    `layoutChanged`, and a rebuild emits nothing and keeps the current tab;
-  * `pathOf` for a child of an element, a tab page, a splitter handle and a
-    tab bar, and nothing for the store and the window.
-* `tst_panellayouteditor` (offscreen):
-  * a context-menu request opens the layout menu only in edit mode, with
-    the overlay over the node until the menu closes; it reaches the
-    widget's own menu otherwise, and a request outside the layout passes
-    through;
-  * the menu's items for an element, its parent splitter, a tab, a
-    placeholder tab, a child of an `hbox` and an `hbox` in a `vbox`, and
-    which are enabled; an editor offering only the container kinds it was
-    given, under the names it was given; a fixed root's menu (its title and
-    its own items); Replace with disabled when it has nothing to offer;
-  * each item without state of its own (Replace with an element, both
-    splitters, both boxes, Tabs, Delete, Move Tab Left and Right, Remove
-    Tab, Add Tab) makes the same edit as its `PanelLayout` call, and reports
-    it once; a box's Move, Remove Slot and Add Slot are the same actions
-    under other labels, covered by the menu's items;
-  * Cut and Paste (the cut subtree is pasted once) and Rename Tab (the
-    dialog shows the tab's label; renaming to that label unnames the tab).
-* `tst_coverartpresenter`: a resize of the shown label rescales the cover.
-* `tst_mainwindow`:
-  * `layout_defaultAndSavedTabsAndShowSelectedSong`: the default toolbar
-    as built (the buttons, volume and seek bar in a row in `toolbarHost`,
-    as tall as the row) and the default panel layout (Properties above the
-    cover in a vertical splitter, the playlist beside them, no tabs, in
-    `layoutHost`), Lyrics and Spectrum in the store; a saved layout's tabs
-    and their order, and the current tab restored after restarting the
-    window;
-  * `layout_startsAtAQuarterAndRestoresDraggedSizes`: the quarter width,
-    and both splitters' dragged sizes restored;
-  * `layout_resetAndInvalidSavedLayoutGiveTheDefault`: saved layouts of the
-    playlist alone and a row of the seek bar alone, with Properties and the
-    buttons in the store; Reset Layout after its confirmation resets and saves
-    both; an invalid `layout/toolbar`, with its warning, gives the default
-    toolbar and leaves the saved panel layout;
-  * `layout_editModeIsWiredAndItsEditsAreSaved`: View > Edit Layout turns
-    the layout menus on and off; an edit in the toolbar is saved in its
-    key; each layout's Replace with offers only its own elements and
-    containers (the seek bar deleted from the toolbar is offered in the
-    toolbar, not in the panel layout; the toolbar offers no container, so
-    its Replace with is empty while every control is placed); the row's
-    menu is "Toolbar" and Add Slot;
-  * `plugins_disabledPluginsHaveNoPanelPageOrMenu`: a disabled plugin's
-    node shown as not available and kept in `layout/tree`;
-  * the button, seek and volume tests, with the controls placed by the
-    toolbar.
+* `tst_panellayout`: the JSON (round trip, each rejected tree, repeated
+  elements) and each edit, with tab names and the current tab following.
+* `tst_panellayoutview` (offscreen): building (elements, boxes, labels, the
+  store), rebuilding (elements kept and parked), the tree following
+  splitter moves and tab switches, and `pathOf`.
+* `tst_panellayouteditor` (offscreen): edit mode and the overlay, each
+  node's menu (the container kinds and names given, a fixed root, Replace
+  with disabled when empty), each item's edit, Cut and Paste, and Rename
+  Tab.
+* `tst_coverartpresenter`: the cover rescaling on a resize.
+* `tst_mainwindow`, the `layout_*` tests: both defaults as built, saved
+  layouts and the current tab restored, the quarter width and dragged
+  sizes, Reset Layout and an invalid key, and edit mode in both layouts
+  (each offering only its own elements, the toolbar's row menu). Also a
+  disabled plugin's node kept, and the controls' tests with the controls
+  placed by the toolbar.
 * By hand: edit mode in both layouts on each platform; the overlay; that no
   widget's own menu opens in edit mode; the cover rescaling in a splitter
   and in a tab; the look of the default toolbar (the row's spacing, the

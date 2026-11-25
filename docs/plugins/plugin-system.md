@@ -280,7 +280,8 @@ after it. The design, with the Play Stats plugin that uses it, is in
 * **No I/O while plugins load.** `initialize`, `shutdown` and the capability
   calls made while the window is built (`createPanel`, `createMenu`,
   `songFields`, `keyFields`) do no file, database or network I/O; reading
-  `QSettings` is allowed. Work that needs I/O starts later: on a listener
+  `QSettings` is allowed (it reads its store once). Work that needs I/O
+  starts later: on a listener
   event, from the event loop, on the plugin's own thread, or in a
   provider's reads, which the host makes from the load's workers or the
   event loop.
@@ -521,54 +522,24 @@ The places using a capability go through the `Loaded` entries.
 Each plugin's own tests are in its doc. These cover the API and the host,
 through the built plugins in `Tests/plugins`.
 
-* `tst_plugins`:
-  * `PluginPlayerHost` forwards song start (with its tag fields), position
-    (also from the player a backend switch creates) and stop to a listener
-    the test adds, and nothing after it is removed; and pause, resume,
-    seek, duration and the song's end.
-  * A listener seeking inside `positionChanged`: the next listener gets the
-    old position first, and the new one once the event loop runs
-    (`QTRY_COMPARE`). The dummy player emits the position inside
-    `setPosition`, so a seek run at once would show as the new position
-    first.
-  * A seek queued by a host that is then destroyed never runs.
-  * `play` on a paused song: still paused right after the call, playing
-    once the event loop runs.
-  * `PluginManager` lists the built lyrics plugin from `Tests/plugins` as
-    `Loaded`, with the id `lyrics`, the name `Lyrics` and its file name, and
-    with a panel and a settings page.
-  * `PluginManager` does not list a file that is not a library, and of two
-    copies of the plugin the second is `Skipped`, with a reason naming the
-    first.
-  * With `lyrics` in `plugins/disabled`, its entry is `Disabled` with its
-    name and no root object. That its code is not loaded is not checked:
-    other test functions load it first, and Qt never unloads it.
-  * `registerSongFields` registers the Play Stats plugin's fields and
-    source, and refuses the provider when a field of its id exists.
-  * A `valuesChanged` the Play Stats plugin calls at a song start reaches
-    `providedValuesChanged` only from the event loop, and its file is under
-    the data root the test gives, not created while loading.
+* `tst_plugins`: `PluginPlayerHost`'s events (also after a backend
+  switch) and commands, deferred and dropped with the host (a listener
+  seeking inside `positionChanged` gets the new position only once the
+  event loop runs: the dummy player emits it inside `setPosition`, so an
+  immediate seek would show); `PluginManager`'s listing (loaded, a
+  non-library ignored, a duplicate id skipped, a disabled entry), and
+  `registerSongFields` and `valuesChanged`. That a disabled plugin's code is
+  not loaded is not checked: other test functions load it first, and Qt
+  never unloads it.
 * `tst_settingsdialog_ui::pluginsPage_stateFollowsBoxAndOkSavesDisabledIds`,
   with entries made by the test (no DLL, so skipped rows are covered too):
-  the state column follows the box; OK writes the unchecked ids and keeps
-  the stored ids that no row with a check box has; a skipped row has no
-  check box, its `reason` and its `details` as its tooltip.
-* `tst_mainwindow`:
-  * `layout_defaultAndSavedTabsAndShowSelectedSong` checks that the Lyrics
-    panel (through the plugin in `Tests/plugins`) starts outside the default
-    layout, and the Lyrics, Properties and Spectrum tabs of a saved layout
-    with the restored tab.
-  * `settings_pluginPageAppliesToItsPanelOnOk` finds the Lyrics page under
-    Plugins in Preferences, and checks that its size reaches the panel on
-    OK. It finds the lyrics panel by object name: across a DLL, the test's
-    `LyricsPanel` metaobject is not the plugin's, so
-    `findChild<LyricsPanel *>` (or `<LyricsManager *>`) finds nothing, and
-    the panel's lines are checked in `tst_plugins` instead.
-  * `plugins_disabledPluginsHaveNoPanelPageOrMenu`: with `lyrics`,
-    `abrepeat` and `playstats` in `plugins/disabled`, no lyrics panel; with
-    a saved layout that has a Lyrics tab, the tab stays with
-    "Lyrics is not available" and is saved again; no page under Plugins,
-    and no plugin submenu or separator in Playback.
+  the state column, what OK saves, and a skipped row's reason and tooltip.
+* `tst_mainwindow`: a plugin panel in the default and a saved layout; the
+  Lyrics page under Plugins applying to its panel on OK; every plugin
+  disabled (no panel, page or submenu; a saved Lyrics tab kept "not
+  available"). It finds the lyrics panel by object name: across a DLL, the
+  test's `LyricsPanel` metaobject is not the plugin's, so `findChild`
+  finds nothing.
 * The plugin's `QSettings` uses the tests' QSettings folder: the folder is
   set in QtCore, which the plugin shares.
 * By hand: the Plugins page's layout, the state column following the box,

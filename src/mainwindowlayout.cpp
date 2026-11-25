@@ -26,7 +26,7 @@ PanelLayout MainWindowLayout::defaultToolbar() {
 
 PanelLayout MainWindowLayout::defaultPanels() {
   // The info side starts at a quarter of the width, not at its panels' size
-  // hints (docs/architecture.md, "App composition"); Properties and the cover
+  // hints (docs/layout-editing.md, "Storage"); Properties and the cover
   // share it 3 to 5.
   Node info = splitter(Kind::VSplitter, {300, 500}, element(kProperties),
                        element(kCover));

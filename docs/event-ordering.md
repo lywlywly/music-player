@@ -367,64 +367,27 @@ states all but rule 6, which comes with the generation:
 
 ## How other players handle it
 
-### foobar2000
+* **foobar2000**, from the SDK headers (the core is closed): commands and
+  callbacks are main-thread only, and `playback_control.h` forbids calling
+  commands inside a callback ("otherwise race conditions may occur"); a
+  component defers with `fb2k::inMainThread` (FIFO). `playback_seek` takes
+  no track, and the SDK doesn't say what a deferred seek does after a track
+  change. The core owns decoding and output, flushes the output on a seek
+  and knows its latency (`output.h`), so a stale end of track most likely
+  can't undo a seek.
+* **DeaDBeeF**, from its source (`messagepump.c`, `main.c`, `streamer.c`):
+  commands and events are messages in one mutex-protected FIFO (100
+  messages; a full queue drops silently). A message thread pops each,
+  broadcasts it to the plugins, then runs it if it is a command, so a
+  command sent inside `message()` runs after the broadcast; the GTK UI
+  hands work back with `g_idle_add`. A seek is queued again for the
+  streamer thread (`STR_EV_SEEK`). Playback is gapless: the end of a track
+  is a flag on the next track's first decoded block, switched and cleared
+  under `streamer_lock`, so nothing left over can undo a seek. But
+  `DB_EV_SEEK` carries no track and a track change doesn't clear the queued
+  seek, so a seek can land in the next track, a window widened by the
+  switch happening ahead of the device's buffer.
 
-From the SDK headers only (the core is closed source):
-
-* Playback commands (`playback_control`) and playback callbacks
-  (`play_callback`) are main-thread only, and the documentation forbids
-  calling commands from inside a callback: "Do not call `playback_control`
-  methods from inside any kind of global callback (e.g. playlist callback),
-  otherwise race conditions may occur" (`playback_control.h`). A component
-  defers its call with `fb2k::inMainThread`, "to execute some code outside
-  the current call stack / global fb2k callbacks", in a guaranteed FIFO
-  order (`threadsLite.h`, `main_thread_callback.h`). The core most likely
-  runs commands at once (otherwise the rule would not be needed): deferral
-  is the component's job.
-* `playback_seek(double)` "Seeks in currently played track", with no track
-  argument; the SDK does not say what happens to a deferred seek after the
-  track changed.
-* Decoding and output run on a playback thread that the core owns. The
-  output is flushed after a seek, the core knows the exact latency between
-  queued and heard audio (`output.h`), and the output's obsolete track marks
-  suggest that track boundaries were once markers in the audio stream. So a
-  stale end of track most likely cannot undo a seek, as in DeaDBeeF.
-
-### DeaDBeeF
-
-From its source (`src/messagepump.c`, `src/main.c`, `src/streamer.c`):
-
-* **One queue for events and commands.** Plugins send with `sendmessage`
-  and receive with `message`; commands (`DB_EV_SEEK`, `DB_EV_NEXT`, ...)
-  are messages in the same id space as events. `sendmessage` only appends to
-  a mutex-protected FIFO (`messagepump_push`). A message thread
-  (`player_mainloop`) pops each message, broadcasts it to every plugin, then
-  runs it if it is a command. A command sent inside `message()` therefore
-  runs after the whole broadcast: deferral is built into the host, and
-  plugins cannot re-enter. The queue holds 100 messages; a message sent to a
-  full queue is dropped silently.
-* **Plugin callbacks run on the message thread**, not the GUI thread; the
-  GTK UI plugin passes work to GTK with `g_idle_add`.
-* **A seek crosses two queues**: the message thread calls
-  `streamer_set_seek`, which queues `STR_EV_SEEK` for the streamer thread,
-  which runs `streamer_seek_real` between decoded blocks, then sends
-  `DB_EV_SEEKED` as a report.
-* **The end of a track is a marker in the decoded data.** Playback is
-  gapless: the streamer decodes the next track ahead and flags its first
-  block. The output thread switches `playing_track` when it reads that block
-  (`handle_track_change` in `_streamer_get_bytes`), under `streamer_lock`. A
-  seek seeks `playing_track` (what is heard), pulls the decoder back from
-  the next track if it had moved on, and clears the decoded blocks under the
-  same lock (`streamer_reset`). Nothing left over can undo a seek.
-* **A seek can land in the next track.** `DB_EV_SEEK` carries no track; a
-  track change resets only the displayed position (`last_seekpos`), not the
-  queued `STR_EV_SEEK`, and only a stop clears the streamer's queue
-  (`handler_reset`). If the output thread reaches the next track's first
-  block before the seek runs, the next track is seeked. `playing_track`
-  switches when the block is read, ahead of the device's buffer, which can
-  widen this window.
-
-### Compared
 
 | | This app | foobar2000 (SDK) | DeaDBeeF (source) |
 | --- | --- | --- | --- |

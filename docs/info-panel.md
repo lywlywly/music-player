@@ -63,43 +63,10 @@ The Spectrum panel is described in
 
 ### Layout
 
-The default panel layout ([layout-editing.md](layout-editing.md)):
-
-```
-horizontal splitter [320, 960]
-├── vertical splitter [300, 500]
-│   ├── songInfoPanel (SongInfoPanel, Properties)
-│   └── coverLabel    (cover art)
-└── playlistTabs
-```
-
-* `spectrumWidget` (`SpectrumWidget`) and each plugin panel (`IPanelProvider`;
-  the lyrics panel's object name is `lyricsPanel`) start outside the layout.
-* `songInfoPanel` and `spectrumWidget` have a minimum size of 120 x 240 and
-  `coverLabel` of 120 x 120, set in `mainwindow.ui`, wherever the layout
-  places them.
-* In a layout with tabs, the current tab is saved with the layout
-  (`layout/tree`). A saved layout whose plugin is disabled keeps that
-  plugin's place, with "*Name* is not available" in place of the panel.
-
-### Lyrics while hidden
-
-`LyricsPresenter` is not told whether its panel is shown: the Lyrics panel
-keeps receiving positions while hidden (outside the layout, or on a tab not
-in front), and `LyricsPanel` keeps scrolling to the current line. That alone
-would show the wrong line when the panel comes back: a hidden panel is not
-resized (a `QTabWidget` page lives in a `QStackedLayout`, which sizes only
-the current page), so a window or splitter resize meanwhile leaves it at its
-old size, and `scrollToIndexCenter` centers by the viewport height at the
-time it runs.
-
-So `LyricsPanel` keeps the index of its current line (`currentLine_`, set by
-`scrollToIndexCenter`, reset by `setLyricsPanel`) and re-centers on it without
-animation in `showEvent` and `resizeEvent`, stopping a scroll animation
-started while hidden. This also keeps the line centered when the shown panel
-is resized. Not while the user holds following by scrolling
-([plugins/lyrics.md](plugins/lyrics.md), "Scroll hold"): the view stays where
-they scrolled it.
+The default layout, the saved current tab and a disabled plugin's place are
+in [layout-editing.md](layout-editing.md). `songInfoPanel` and
+`spectrumWidget` have a minimum size of 120 x 240 and `coverLabel` of
+120 x 120, set in `mainwindow.ui`, wherever the layout places them.
 
 ### Properties panel contents
 
@@ -287,25 +254,11 @@ have, is left out, and so is a section with no rows.
 
 ## Tests
 
-* `tst_songinfo`: `buildSongInfo` with a temp file of known size and mtime
-  (File, Audio with units, Tags, Library and Watched folder rows), a song
-  only in a manual playlist (no Watched folder row), a missing file, a song
-  in an offline watched folder (Status "Folder offline", no Size), and a
-  removed song (empty). Then `SongInfoPresenter`: debounced showing, a
-  rebuild for its own row only, and a rebuild when the song's folder goes
-  offline. Then `SongInfoPanel`'s buttons: enabled only with a song, sending
-  its pk, side by side or stacked by width.
-* `tst_monitoredlibrary`: `folderOf` for two folders, an offline folder, an
-  unmonitored pk, and a song whose folder was removed.
-* `tst_playlisttabs`: `selectedSongChanged` on selection (smallest row
-  first), on tab change, on a sort that puts a different selected song first
-  and not on one that keeps it first, on removing selected rows and not on
-  removing an unselected one, and on an autoplaylist reset.
-* `tst_lyricspanel`: the current line is centered after a line change and a
-  resize while hidden, then show; new lyrics forget the current line. Its
-  click, hover and scroll hold tests are in
-  [plugins/lyrics.md](plugins/lyrics.md).
-* `tst_mainwindow`: Properties in the default layout; the Lyrics (from the
-  plugin in `Tests/plugins`), Properties and Spectrum tabs of a saved
-  layout, with the saved tab restored; Properties shows the selected song in
-  the real window, and Edit Properties... opens Song Properties.
+* `tst_songinfo`: `buildSongInfo`'s rows and edge cases (missing file,
+  offline folder, removed song), `SongInfoPresenter`'s rebuilds, and
+  `SongInfoPanel`'s buttons.
+* `tst_monitoredlibrary`: `folderOf`.
+* `tst_playlisttabs`: `selectedSongChanged` on each of its signals, and not
+  where the first selected song stays.
+* `tst_mainwindow`: the panels in the default and a saved layout, and
+  Properties following the selection in the real window.

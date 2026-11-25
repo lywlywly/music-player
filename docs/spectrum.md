@@ -221,32 +221,19 @@ send no buffers.
 
 ## Tests
 
-* `tst_spectrum` (no GUI): FFT against a DFT; band centers, edges and
-  labels; a full-scale sine at a band center reads about 0 dB in its band,
-  neighbors below -40 dB; half amplitude about -6 dB; silence the floor; a
-  band narrower than a bin (192 kHz); bands above Nyquist;
-  smoother rise, fall, hold and floor; `PcmTap` downmix and formats, reads
-  with zero fill, new runs on a gap or a rate change, dropping old audio.
-* `tst_spectrumpresenter` (offscreen): the tap is offered only while the
-  widget is shown and cleared when hidden; a tone in the tap reaches the
-  widget while playing, from position 0 with no further position report (the
-  estimate moves on); pause freezes; stop falls to the floor; the no-audio
-  message appears after the delay and goes with audio or stop.
-* `tst_audiotaps`: for each format the `volume` element can output, an
-  `audiotestsrc` pipeline with the probe fills a tap with the right rate and
-  stream times (the tone reads in its band at about 0 dB); big-endian and
-  non-interleaved audio is skipped; a `QAudioBuffer` does the same, and one
-  without a start time is skipped.
-* `tst_playbackcontroller`: the tap moves to the new player on a backend
-  switch.
-* `tst_mainwindow`: the Spectrum panel starts outside the default layout, and
-  is a tab of a saved layout; the player has the tap only while the Spectrum
-  widget is shown.
-* `tst_gstaudioplayer`: a 24-bit WAV tone played through the real
-  `GstAudioPlayer` at volume 0 fills the tap at the reported position, in
-  its band at the expected level; after a seek, at the new position; stop
-  clears it. It opens the default audio output, so it is skipped on a
-  machine without one.
+* `tst_spectrum` (no GUI): the FFT against a DFT, the bands and labels, the
+  analyzer's levels (full scale reads 0 dB, bins narrower than a band,
+  above Nyquist), the smoother, and `PcmTap`.
+* `tst_spectrumpresenter` (offscreen): the tap only while shown, the
+  position estimate, pause, stop and the no-audio message.
+* `tst_audiotaps`: every format the `volume` element can output through a
+  real pipeline and a `QAudioBuffer`, and what is skipped.
+* `tst_playbackcontroller`: the tap moving to a new player.
+* `tst_mainwindow`: the panel in the default and a saved layout, the tap set
+  only while it is shown.
+* `tst_gstaudioplayer`: the real `GstAudioPlayer` filling the tap at the
+  reported position, after a seek, and cleared on stop (skipped without an
+  audio output).
 * Check by hand: a high-rate file (96 kHz 24-bit FLAC) shows on the
   GStreamer backend; on the Qt backend without Qt's FFmpeg media backend, the
   panel shows the no-audio message.

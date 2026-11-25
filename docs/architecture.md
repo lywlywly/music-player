@@ -141,47 +141,26 @@ The top-level window and what it owns.
     (`PlaylistTabs::currentPlaylistChanged`).
   * File > New Autoplaylist and Library Search's Save as Autoplaylist call
     `PlaylistTabs::newAutoPlaylist`.
-  * A permanent status bar label shows `MonitoredLibrary` scan progress, then
-    the number of offline watched folders, if any.
+  * Shows the library scan's status in a permanent status bar label
+    ([monitored-library.md](monitored-library.md), "Frontend").
   * Creates `PluginManager`, which lists the plugins and loads those not
     disabled, as a child after `PlaybackController`, so the plugins' panels
     (in the UI) are destroyed before it shuts the plugins down. It passes the
     loaded plugins' panels to the layout, their menus to the Playback menu,
     and the manager's entries to `SettingsDialog`. See
     [plugins/plugin-system.md](plugins/plugin-system.md).
-  * The central widget holds two editable layouts (`PanelLayout`,
-    `PanelLayoutView`, `PanelLayoutEditor`), edited from View > Edit
-    Layout: the toolbar, one row of the Playback Buttons, Seek Bar and
-    Volume (`layout/toolbar`), and below it the panel layout, splitters and tabs of
-    the Playlist, Properties, Spectrum and Cover Art elements and each
-    loaded plugin's panel (Lyrics) (`layout/tree`). `setUpLayout` registers
-    each layout's elements and builds the saved or default layouts
-    (`MainWindowLayout`): the controls in a row, and Properties above the
-    cover on the left and the playlist on the right; Spectrum and the
-    plugin panels start outside the panel layout. See
-    [layout-editing.md](layout-editing.md).
-  * `MainWindow` connects `PlaylistTabs::selectedSongChanged` to
-    `SongInfoPresenter::showSong`, and the Properties panel's buttons to
-    `revealSongFile` and `openSongProperties`. See
-    [info-panel.md](info-panel.md). It connects
-    `SpectrumPresenter::tapChanged` to `PlaybackController::setPcmTap`, and
-    the playback state and position to the presenter. See
-    [spectrum.md](spectrum.md).
-  * In the default layout the info panel starts at a quarter of the width
-    (its splitter's sizes, `[320, 960]`, scaled to the splitter), so its
-    width does not depend on the panels' size hints. Cost: that first width
-    ignores what the panels' content needs; the panes' minimum widths still
-    hold. Rejected: the splitter's default sizing by size hint, which starts
-    the panel too narrow, since it uses a hint cached before the plugin
-    panels are placed (Qt does not pass a hidden widget's hint change up to
-    that cache), and clearing those caches by hand, which depends on Qt's
-    internals.
-  * Edit > Search Playlist (`QKeySequence::Find`) shows the one
-    `PlaylistSearchDialog`, kept on the shown playlist through
-    `currentPlaylistChanged`. Its row requests go to `PlaybackController::playRow`,
-    `PlaylistTabs::navigateIndex`, `PlaybackManager::queueEnd` and
-    `PlaylistTabs::openPropertiesForRow`. The destructor deletes it first, as it
-    uses `columnLayoutManager_`, a member destroyed before the window's children.
+  * The central widget holds two editable layouts, edited from View > Edit
+    Layout: the toolbar of playback controls (`layout/toolbar`) and below it
+    the panel layout (`layout/tree`), splitters and tabs of the panels.
+    `setUpLayout` registers each layout's elements and builds them
+    ([layout-editing.md](layout-editing.md)).
+  * Connects the presenters to their widgets and to `PlaybackController`:
+    the Properties panel ([info-panel.md](info-panel.md)) and the spectrum
+    ([spectrum.md](spectrum.md)).
+  * Edit > Search Playlist shows the one `PlaylistSearchDialog`
+    ([monitored-library.md](monitored-library.md), "Playlist Search"). The
+    destructor deletes it first, as it uses `columnLayoutManager_`, a member
+    destroyed before the window's children.
 
 ### Persistence and schema
 
@@ -242,28 +221,11 @@ The in-memory song store and reading/writing audio file tags.
   * `takeSnapshot()` moves the worker-loaded library state (songs, paths,
     provided keys) out as a plain-data `Snapshot` for the main-thread
     instance, without copying it.
-* `MonitoredLibrary` (backend, owned by `MainWindow`)
-  * Watched folders (`library_folders`) and the songs found under them
-    (`monitored_files`), kept in sync by scans (`LibraryScanner` on a worker
-    thread, applied on the main thread). Never deletes song rows; songs that
-    leave it are announced with `songsLeft`. See
-    [monitored-library.md](monitored-library.md).
-  * Watches online folders through an `IFileSystemMonitor`
-    (`EfswFileSystemMonitor` in the app). Watcher events only mark paths,
-    which are scanned 1 s after the last event; offline folders are polled
-    every 60 s instead.
-  * `folderOf(songPk)` returns the watched folder holding a song (with its
-    `online` flag), or none; the Properties panel uses it.
-* `EfswFileSystemMonitor` (backend, owned by `MainWindow`)
-  * Recursive efsw watches. Events arrive on efsw's thread and are forwarded
-    to the main thread as queued `pathsChanged` / `folderNeedsRescan`
-    signals. `DummyFileSystemMonitor` replaces it in tests.
-* `LibraryFoldersPage` (frontend, the Settings > Library page)
-  * Lists the watched folders (marked "Offline" or "Live updates
-    unavailable") and calls `MonitoredLibrary`
-    for Add, Remove, Rescan Now and Remove Missing Songs (enabled for a folder
-    offline although its root exists, so offline because empty). Actions apply
-    at once, not on the Settings dialog's OK.
+* `MonitoredLibrary`, `LibraryScanner`, `EfswFileSystemMonitor` (backend,
+  owned by `MainWindow`) and `LibraryFoldersPage` (the Settings > Library
+  page): watched folders and the songs under them, kept in sync by scans
+  that the file system watcher triggers. See
+  [monitored-library.md](monitored-library.md).
 * `SongParser`
   * Parses file tags into built-in + dynamic fields and remaining raw tag fields.
   * Multi-value tag fields are displayed as comma-separated text (`", "`).
@@ -286,45 +248,37 @@ are the Qt frontend.
   * Owns playlist metadata behavior (`playlists` table): load, create/delete playlist rows, rename, persist/repair `tab_order`. Refuses to remove the last playlist.
   * `loadAll()` emits no signals; after it, `playlistCreated` / `playlistAboutToBeRemoved` / `playlistRemoved` / `playlistRenamed` report changes. `playlistAboutToBeRemoved` is sent while the `Playlist` still exists.
   * `notifySongChanged(songPk)` / `notifySongsChanged(songPks)` update autoplaylist rows and refresh a song's rows in every playlist after non-playlist song writes (a plugin's provided values, Song Properties, `Playlist::songsRefreshed`, and the songs `MonitoredLibrary` added or re-read: `songsEntered`, `songsUpdated`).
-  * Autoplaylists (`createAutoPlaylist`, `setAutoPlaylistExpression`, `reloadAutoPlaylistExpressions`): their rows are the `MonitoredLibrary` songs matching a `parseSongFilter` expression, filled in `filepath` order, with songs that start matching appended. An invalid expression gives no rows and `autoPlaylistError`. See [monitored-library.md](monitored-library.md).
-  * `releaseSongs` is the only place that deletes songs: it removes from `SongLibrary` the songs that are in no manual playlist and not held by `MonitoredLibrary`. It runs on each playlist's `songPksRemoved` (Remove from Playlist, Clear Playlist), in `removePlaylist` (Remove Tab), and on `MonitoredLibrary::songsLeft`. Then emits `songsRemovedFromLibrary(songPks)`.
+  * Fills and updates the autoplaylists, and owns song deletion
+    (`releaseSongs`, the only place that deletes songs: those in no manual
+    playlist and not monitored). See
+    [monitored-library.md](monitored-library.md), "Invariants" and
+    "Autoplaylists".
 * `PlaylistTabs` (frontend)
   * Builds tabs from a loaded `PlaylistCollection` and follows its signals; delegates create/remove/rename/reorder to it.
   * Creates one `PlaylistTableView` per tab and handles its row context menu and double-click.
   * Properties (row context menu, and the table's shortcut) and Open Containing Folder (row context menu) call `openSongProperties` and `revealSongFile` for the row's song.
   * Remove from Playlist (row context menu) removes the selected rows with `Playlist::removeSongs`.
   * Clear Playlist (row context menu, and the `MainWindow` menu action) calls `clearCurrentPlaylist`.
-  * Autoplaylist tabs show an icon, or a warning icon with `autoPlaylistError` as tooltip, updated on `autoPlaylistExpressionChanged`. Their row context menu hides Remove from Playlist and Clear Playlist; their tab context menu adds Edit Autoplaylist (`editAutoPlaylist`). `newAutoPlaylist` and `editAutoPlaylist` open an `AutoPlaylistDialog` (name and expression, checked with `parseSongFilter` as you type, with the number of matching monitored songs).
-  * Emits `currentPlaylistChanged` when the shown playlist changes.
-  * Emits `selectedSongChanged(playlist, songPk)` when the song of the current
-    tab's first selected row changes (`-1` with none). Besides
-    `selectionChanged`, it re-checks on the view model's
-    `modelReset` and `layoutChanged`, which clear or move the selection
-    without `selectionChanged`. These are the model's signals, not the
-    `Playlist`'s, so the selection model (connected first, in `setModel`) has
-    already updated the selection.
+  * Autoplaylist tabs and menus, and `newAutoPlaylist` / `editAutoPlaylist`
+    (`AutoPlaylistDialog`): [monitored-library.md](monitored-library.md),
+    "Frontend".
+  * Emits `currentPlaylistChanged` when the shown playlist changes, and
+    `selectedSongChanged(playlist, songPk)` for the first selected row
+    ([info-panel.md](info-panel.md), "`PlaylistTabs`").
   * Refresh (tab context menu) re-reads the playlist's tags with `refreshMetadataWithProgress`.
   * The Properties context-menu action carries `PlaylistTableView::propertiesShortcuts()`
     only so the menu can display the platform binding (`Command+I` on macOS,
     `Alt+Enter` elsewhere); the table handles the keys (see `PlaylistTableView`).
 * `Playlist` (backend)
   * One playlist: song-id ordering, sorting, `last_played`, and per-playlist operations (`addFiles`, `addSong`, `addSongByPk`, `removeSongs`, `clear`, `sortByField`, `moveRows`, `refreshMetadataFromFiles`).
-  * `Kind::Manual` or `Kind::Auto`. An auto playlist stores no `playlist_items` and refuses the write operations; `PlaylistCollection` sets its rows with `resetRows`, `appendRows` and `removeRowsByPk`, which never emit `songPksRemoved`. Its row order is stored in `autoplaylist_order`, which mirrors its rows and owns no songs; `resetRows` keeps the order of the rows that stay and appends the others.
+  * `Kind::Manual` or `Kind::Auto`. An auto playlist refuses the write operations, and `PlaylistCollection` sets its rows ([monitored-library.md](monitored-library.md), "Classes").
   * Both kinds can be reordered: `sortByField` and `moveRows(rows, destinationRow)` (a drag) renumber the stored positions to the new rows, so the order survives a restart.
   * A song appears at most once per playlist. Adding a song already present is a silent no-op (`addSong` / `addSongByPk` return `false`; `addFiles` skips it and returns only the appended pks). `playlist_items` enforces this with `UNIQUE (playlist_id, song_id)`.
   * Ingests/refreshes songs through `SongLibrary`; owns `playlist_items`, `autoplaylist_order` and `playlists.last_played` persistence. `playlistId <= 0` is non-persistent (used by tests).
   * Sends before/after signals for insert, remove, reset and reorder (`aboutToReorderSongs` / `songsReordered`), and after-only signals for song-data changes. `addFiles` parses and ingests all paths first, then sends one insert pair for the batch. `removeSongs` sends one remove pair per row; after it and `clear`, `songPksRemoved(songPks)` reports the songs that left. Does not know playback status.
-* `SongMatcher`, `matchPlaylistRows` (backend, playlistsearch.h)
-  * A Playlist Search query: a `parseSongFilter` condition, else plain words
-    matched case-insensitively against the displayed values of the given
-    fields, or an error for a broken expression. `matchPlaylistRows` returns
-    the pks of a playlist's matching rows in row order.
-* `PlaylistSearchDialog` (frontend)
-  * Non-modal search over one playlist with `SongMatcher` and the visible
-    columns, results in a `LibrarySearchResultsModel`. Re-runs (debounced) on
-    typing, row changes and column layout changes. Double-click or Enter,
-    Show in Playlist, Add to Playback Queue and Properties emit the result's
-    current row, looked up by pk when they run.
+* `SongMatcher`, `matchPlaylistRows` (backend, playlistsearch.h) and
+  `PlaylistSearchDialog` (frontend): Playlist Search
+  ([monitored-library.md](monitored-library.md), "Playlist Search").
 * `PlaylistTableModel` (frontend)
   * `QAbstractTableModel` adapter for one `Playlist`: columns, header, cell text, sortable-column check (`sortByColumnId`).
   * Renders the status column from `PlaybackQueue::statusOf` and refreshes only the status cell on `PlaybackQueue::statusChanged` for its own playlist.

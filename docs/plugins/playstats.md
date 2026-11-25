@@ -127,10 +127,6 @@ CREATE TABLE song_play_stats (
   rows (merging the ones that collide) and a re-key of the cloud; the
   comment at `songIdentityKey` says so.
 
-### The app's database
-
-`myplayer.db` has no play stats and no identity.
-
 ## Counting plays
 
 ### Events
@@ -161,7 +157,8 @@ playing; a seek adds no listened time.
   session, so a play counts for the song that played even if its tags change
   while it plays.
 * **The duration can arrive first.** The backend may report the duration
-  during `setSource`, before `songStarted`; the tracker keeps the duration
+  during `setSource`, before `songStarted`, and may not report an unchanged
+  duration again (replaying the same song); the tracker keeps the duration
   across sessions (`startSession` does not reset it).
 * **Playing or not** follows the events: `trackStarted` and `resumed` set
   it, `paused` and `stopped` clear it.
@@ -202,53 +199,18 @@ read no member and would take the data folder as an argument. Cost: closing
 the window during the load waits for the rest of it (under a second for 50k
 songs; the tests' delayed load is 300 ms).
 
-### `PlaybackController`
-
-* It does not count; it sends the events above.
-* `playSong` refreshes the song's rows after its tag refresh
-  (`refreshSongFromFile`), with `notifySongChanged(songPk)`: tags changed on
-  disk and read at play repaint at once, with the plugin disabled too.
-
 ## Fields in the host
 
 ### The capability: `ISongFieldProvider`
 
-```cpp
-enum class SongFieldType { Number, DateTime };  // DateTime: epoch seconds
-
-struct SongField {
-  QString id;                 // lowercase, e.g. "play_count"
-  QString title;              // column title, e.g. tr("Play Count")
-  SongFieldType type;
-  int defaultWidth;
-  bool visibleByDefault;
-};
-
-// One value per field of songFields(), in that order; an invalid QVariant
-// means no value. Both types are a qint64.
-using SongFieldValues = QList<QVariant>;
-// Values by key; a key with no entry has no values.
-using SongFieldValuesByKey = QHash<QString, SongFieldValues>;
-
-// Threads: songFields and keyFields on the main thread; songKey, values and
-// allValues on the main thread or the library load's workers. All between
-// initialize and shutdown.
-class ISongFieldProvider {
-public:
-  virtual QList<SongField> songFields() const = 0;
-  // The built-in tag fields the key is computed from, e.g. title, artist,
-  // album.
-  virtual QStringList keyFields() const = 0;
-  // Songs with the same key share values. keyFieldValues holds the fields'
-  // text in keyFields() order (an absent field is an empty string).
-  // Deterministic and reentrant.
-  virtual QString songKey(const QStringList &keyFieldValues) const = 0;
-  // The current values of these keys.
-  virtual SongFieldValuesByKey values(const QStringList &keys) const = 0;
-  // The current values of every key that has any, for the startup load.
-  virtual SongFieldValuesByKey allValues() const = 0;
-};
-```
+`src/pluginapi/isongfieldprovider.h`: `songFields()` declares each field
+(id, title, `Number` or `DateTime` in epoch seconds, default width and
+visibility); `keyFields()` names the built-in tag fields the key is computed
+from; `songKey(keyFieldValues)` turns their text, in that order (an absent
+field is an empty string), into a key (deterministic and reentrant);
+`values(keys)` and `allValues()` return, per key, one `QVariant` per field
+in `songFields()` order (invalid: no value). The header states each call's
+thread.
 
 * **One type enum, holding only what a plugin uses** (plugin-system.md, "The
   API holds only what its plugins use"); the host maps it to its
@@ -483,25 +445,17 @@ a move would take plays that may be theirs.
   plugin's file (`PlayStatsStore`): a page is one `mergeCloudCounts`, then
   `valuesChanged` with its keys, and the rebase's local counts are a
   `SELECT`.
-* **Started after the window shows**: `initialize` queues the start with a
-  zero-delay timer, which runs at the event loop's first turn, after
-  `w.show()`. The sync does not wait for the library load: it writes only
-  the plugin's file, and its `valuesChanged` reaches the songs after the
-  load ("What `SongLibrary` keeps", "The load").
 * **Settings**: the plugin's `ISettingsPageProvider` page, Play Stats under
-  Plugins (`PlayStatsSettingsPage`). Its keys are in the plugin's area:
-  `playstats/user_uuid`, `playstats/disabled_by_user`,
-  `playstats/last_synced_at`, `playstats/rebase_pending`
-  (`CloudSyncSettings`). The UUID field is read-only and a UUID is entered
-  only through the page's dialogs, which refuse an invalid one, so `apply()`
-  has nothing to refuse (an invalid stored value is kept and sync skips it).
-  When the UUID changed, the page sends `uuidChanged` and the plugin starts
-  a rebase.
+  Plugins (`PlayStatsSettingsPage`), with its keys under `playstats/`
+  ([cloud-sync.md](../cloud-sync.md)). The UUID field is read-only and a
+  UUID is entered only through the page's dialogs, which refuse an invalid
+  one, so `apply()` has nothing to refuse (an invalid stored value is kept
+  and sync skips it).
 * **Manual rebase** is in a Play Stats submenu at the end of Playback
-  (`IMenuProvider`), the only menu plugins add to. It is enabled while the
-  UUID is valid, checked when the menu opens (as A-B Repeat's items); it
-  does not wait for the library load, which the sync does not need.
-  Rejected: a new capability for the Library menu, for one item.
+  (`IMenuProvider`), the only menu plugins add to. Its enabled state is
+  checked when the menu opens (as A-B Repeat's items); it does not wait for
+  the library load, which the sync does not need. Rejected: a new capability
+  for the Library menu, for one item.
 
 ## With the plugin disabled
 
@@ -525,15 +479,8 @@ a move would take plays that may be theirs.
 | `dataFolder`, `songFieldHost` | plugin → host | main |
 
 Every call in the table happens between the plugin's `initialize` and its
-`shutdown` ("Lifetime"). plugin-system.md's "Rules" list the exceptions,
-that lifetime rule, and **no I/O while plugins load**. The
-plugin's `initialize`, `shutdown` and the capability calls made while the
-window is built (`createPanel`, `createMenu`, `songFields`, `keyFields`) do
-no file, database or network I/O; reading QSettings is allowed (QSettings
-reads its store once). Loading the library files themselves is the host's.
-Work that needs I/O starts later: on a listener event, from the event loop,
-on the plugin's own thread, or in the provider's reads, which the host makes
-only from the library load's workers or the event loop.
+`shutdown` ("Lifetime"), and none made while plugins load does I/O:
+plugin-system.md, "Rules".
 
 ## Rejected
 
@@ -578,37 +525,23 @@ only from the library load's workers or the event loop.
 
 ## Tests
 
-* **Host**: `tst_songlibrary` (keys and the fill at load; a batch of adds is
-  one `values` call; a song removed before the refresh and keys no song has
-  are not read; a re-tag drops the old key's values at once, reads the new
-  key's, and an unchanged re-read reads nothing; a change marked during a
-  load is read after `replaceWithSnapshot`; a provided date field in
-  expressions), `tst_libraryloader` (the values filled at load, read off the
-  main thread for a file database), `tst_columnregistry` (plugin fields as
-  symbols, kept by `loadDynamicColumns`, reserving their names),
-  `tst_columnlayout` (a column registered after the layout loads keeps its
-  saved width), `tst_plugins` (the counting's listener events; the fields
-  registered, a provider whose id clashes refused; `valuesChanged` deferred;
-  the plugin's file under the data root the test gives, none created while
-  loading), `tst_autoplaylist` and `tst_songinfo` (a refresh reaches
-  autoplaylists and the Properties panel).
-* **Plugin** (`tst_playstats`, linking its static library `myplaystats`):
-  the key rule; the store on a temporary file, read from another thread,
-  with and without a file (a missing file is not created); counting through
-  listener events (pause, seek, finish, duration before the start or only at
-  the end); the plugin loaded from `Tests/plugins`, initialized and shut
-  down twice on one root object, `initialize` creating no file, and a
-  shutdown before the event loop runs dropping the queued sync.
-  `tst_playcompletiontracker`, `tst_cloudplaystatssyncservice` and
-  `tst_cloudplaystatssynccoordinator` (on the store) link the same library.
-  No test reaches the network (`MYPLAYER_USE_DUMMY_CLOUD_SYNC`): the static
-  library is built with `MYPLAYER_TESTING` in test builds, as `MYLib` is
-  (`src/Tests/CMakeLists.txt`), so the plugin `tst_mainwindow` loads has the
-  dummy too; its state is the plugin's copy, which the tests cannot set, so
-  the cloud's flows are tested on the coordinator.
-* **App** (`tst_mainwindow`): a counted play shows in its row and fills an
-  autoplaylist on `play_count`; with the plugin disabled, no Play Count
-  column and no submenu; a window closed during a delayed load
-  (`MYPLAYER_TEST_LIBRARY_LOAD_DELAY_MS`) waits for it.
+* **Host**: `tst_songlibrary` ("What `SongLibrary` keeps": the fill, the
+  batched refresh, re-tags, changes during the load), `tst_libraryloader`
+  (the fill off the main thread), `tst_columnregistry` and
+  `tst_columnlayout` (registration), `tst_plugins` (the listener events,
+  registration, `valuesChanged` deferred, the data folder), and
+  `tst_autoplaylist`, `tst_songinfo` (a refresh reaching autoplaylists and
+  the Properties panel).
+* **Plugin**: `tst_playstats` (the key rule, the store, counting, the
+  lifetime on one root object), `tst_playcompletiontracker`,
+  `tst_cloudplaystatssyncservice` and `tst_cloudplaystatssynccoordinator`,
+  linking `myplaystats`. No test reaches the network
+  (`MYPLAYER_USE_DUMMY_CLOUD_SYNC`): `myplaystats` is built with
+  `MYPLAYER_TESTING` in test builds, as `MYLib` is, so the plugin
+  `tst_mainwindow` loads has the dummy too; the cloud's flows are tested on
+  the coordinator, since the loaded plugin's state can't be set.
+* **App** (`tst_mainwindow`): counting reaching a row and an autoplaylist,
+  the plugin disabled, and a window closed during a delayed load
+  (`MYPLAYER_TEST_LIBRARY_LOAD_DELAY_MS`).
 * By hand: the Play Stats page and submenu, a sync with a real UUID, and
   re-enabling the plugin.

@@ -24,8 +24,16 @@ of the Play Stats plugin ([plugins/playstats.md](plugins/playstats.md)), in
     to the main thread.
   * Created in the plugin's `initialize` and destroyed in its `shutdown`,
     which stops the thread. Startup sync is queued with a zero-delay timer
-    and runs at the event loop's first turn; it does not wait for the
-    library load, as it writes only the plugin's file.
+    and runs at the event loop's first turn, after the window shows. It
+    does not wait for the library load, as it writes only the plugin's
+    file; its `valuesChanged` reaches the songs after the load
+    ([plugins/playstats.md](plugins/playstats.md), "What `SongLibrary`
+    keeps").
+* Each counted play pushes a single increment (`delta=1`) with a valid UUID.
+  Its result is ignored: a failed push is not retried, so the cloud stays
+  behind until a rebase, which pushes `local - cloud` for each key where
+  that is positive. Rejected: a queue of unsent plays, kept on disk; a rare
+  lost push does not justify it, and the rebase fixes it.
 * Cloud pull inter-page waits and rebase-push chunking are paced by `QTimer`.
 
 ## Cursor and Rebase
@@ -38,12 +46,15 @@ of the Play Stats plugin ([plugins/playstats.md](plugins/playstats.md)), in
   UUID. The keys and the UUID check are in `CloudSyncSettings`
   (`cloudsyncsettings.h`), shared by the coordinator and the Settings page,
   so the page does not depend on the coordinator.
+* While no UUID is stored, the Play Stats page offers a new one, saved on
+  `OK`, unless `playstats/disabled_by_user` is set: the page sets it when
+  the user clears the UUID, so sync stays off until they set one.
 * On Settings `OK` (the Play Stats page, `PlayStatsSettingsPage`), a changed
   UUID (or a changed `playstats/disabled_by_user`) sets
   `rebase_pending=true` and resets `last_synced_at=0`; clearing the UUID
   sets `rebase_pending=false`.
-* On UUID change, the plugin also triggers a rebase as the page applies, so
-  it starts right away (not only next startup).
+* On UUID change, the page also sends `uuidChanged` as it applies, and the
+  plugin starts a rebase right away (not only next startup).
 * Startup runs sync at once:
   * if `rebase_pending=true`, it runs rebase first
   * otherwise it runs incremental pull
