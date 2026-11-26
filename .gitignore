@@ -57,3 +57,6 @@ compile_commands.json
 .DS_Store
 # CTest output
 Testing/
+
+# App icon previews, written by src/resources/app-icon/make_icon.py
+src/resources/app-icon/preview/

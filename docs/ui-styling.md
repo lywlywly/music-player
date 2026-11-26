@@ -1,7 +1,52 @@
 # UI Styling
 
-The playback toolbar's icons, the Windows application font and its CJK
-fallback, the Windows table selection fix, and the light and dark theme.
+The app icon, the playback toolbar's icons, the Windows application font and
+its CJK fallback, the Windows table selection fix, and the light and dark
+theme.
+
+## App icon
+
+* The icon is an eighth note whose stem rises into a wave, white on a
+  coral-to-rose rounded square (`note-wave.svg`). The note says music; the
+  wave says sound being played: together, a player of music.
+* Rejected: images of one feature (spectrum bars, lyric lines) or of the
+  library (folders, a record crate, playlist tabs), because they show a part
+  of the app rather than what it is for; symbolic images (tree rings, a
+  heart, a cochlea), because they do not read as a music player.
+* Where the app uses it:
+  * The window icon: `main.cpp` sets `note-wave.svg` (from the qrc, prefix
+    `/app-icon`) as the application's window icon, so every window shows it.
+    It is set after `MainWindow` is constructed, because that constructor
+    registers the resources. On Linux under Wayland, the taskbar and dock
+    take an app's icon from its `.desktop` file, which the app does not
+    install, so they show a generic icon (roadmap.md, Known Issues).
+  * Windows: `app-icon.rc` embeds `note-wave.ico` in `EXEC.exe`, for
+    Explorer and shortcuts.
+  * macOS: `note-wave.icns` is the bundle's icon (`MACOSX_BUNDLE_ICON_FILE`).
+    The tile fills the whole canvas, so it looks larger than icons that follow
+    Apple's grid, which insets the tile and adds a shadow.
+* `src/resources/app-icon/make_icon.py` (Python 3 and ImageMagick's `magick`)
+  generates, into the same folder, `note-wave.svg`, `note-wave.ico` and
+  `note-wave.icns`, and a 256 px preview in `preview/` (ignored by git). The
+  outputs are committed, so building needs neither tool.
+  * ImageMagick renders `note-wave.svg` once at 1024 px and scales it down to
+    each size; the script packs the PNGs into both containers itself (PNG
+    images in an `.ico` need Windows Vista or later).
+  * Change the icon by changing the script and running it, never by editing
+    an output: the `.ico` and `.icns` are rendered from the SVG, and a hand
+    edit to one would leave the others behind.
+* The geometry is computed, so the joins stay smooth when a size changes:
+  * The stem's outer edge is the vertical tangent of the tilted elliptical
+    head, so that side runs straight into the head's outline.
+  * A fillet circle tangent to the stem's inner edge and the head rounds the
+    inside corner.
+  * The stem and wave are one stroke; the wave is equal semicircles on one
+    baseline, each starting and ending with a vertical tangent, so the stroke
+    has no corners. A Bezier wave was rejected: its crests came out uneven,
+    the first lopsided where it leaves the stem.
+  * The glyph's bounding box is centred on the tile.
+* `note-wave.svg` uses only an ellipse, paths and a linear gradient, which Qt
+  SVG and ImageMagick's built-in renderer both draw.
 
 ## Playback toolbar icons
 

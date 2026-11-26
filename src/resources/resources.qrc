@@ -7,4 +7,7 @@
     <file alias="media-skip-forward.svg">icons/media-skip-forward.svg</file>
     <file alias="media-playback-random.svg">icons/media-playback-random.svg</file>
   </qresource>
+  <qresource prefix="/app-icon">
+    <file alias="note-wave.svg">app-icon/note-wave.svg</file>
+  </qresource>
 </RCC>

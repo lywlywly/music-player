@@ -340,11 +340,27 @@ target_link_libraries(EXEC MYLib)
 add_dependencies(EXEC lyricsplugin abrepeatplugin playstatsplugin
   spectrumplugin)
 
+# The app icon (docs/ui-styling.md, "App icon"): the executable's icon on
+# Windows, the bundle's icon on macOS. The window icon comes from the qrc.
+if(WIN32)
+  target_sources(EXEC PRIVATE resources/app-icon/app-icon.rc)
+  # CMake tracks a .rc file's #includes but not the files its ICON statements
+  # name, so without this a changed .ico would not rebuild the executable's
+  # icon.
+  set_source_files_properties(resources/app-icon/app-icon.rc PROPERTIES
+    OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/resources/app-icon/note-wave.ico")
+endif()
+
 if(APPLE)
+  set(MYPLAYER_ICNS "${CMAKE_CURRENT_SOURCE_DIR}/resources/app-icon/note-wave.icns")
+  target_sources(EXEC PRIVATE "${MYPLAYER_ICNS}")
+  set_source_files_properties("${MYPLAYER_ICNS}" PROPERTIES
+    MACOSX_PACKAGE_LOCATION Resources)
   set_target_properties(EXEC PROPERTIES
     MACOSX_BUNDLE TRUE
     MACOSX_BUNDLE_BUNDLE_NAME "myplayer"
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.example.myplayer"
+    MACOSX_BUNDLE_ICON_FILE note-wave.icns
   )
 endif()
 

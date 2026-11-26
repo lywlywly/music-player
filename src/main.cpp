@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include <QApplication>
+#include <QIcon>
 #include <glib.h>
 #include <thread>
 #ifdef Q_OS_WIN
@@ -35,6 +36,11 @@ int main(int argc, char *argv[]) {
 #endif
 
   MainWindow w;
+  // After MainWindow: its constructor registers the resources (the qrc is in
+  // the static library MYLib). Every window without its own icon uses this
+  // one, including those already created.
+  QApplication::setWindowIcon(
+      QIcon(QStringLiteral(":/app-icon/note-wave.svg")));
   w.show();
 
   // std::thread glib_thread([]() {

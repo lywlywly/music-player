@@ -337,7 +337,8 @@ Each has its own doc; the classes are listed here with where they sit.
 * `SystemMediaPresenter`, `CoverArtPresenter` and `NowPlayingPresenter` do not
   know about each other; `MainWindow` drives them from `PlaybackController`'s
   signals.
-* Toolbar icons, the Windows font and table selection, and the theme:
+* The app icon, toolbar icons, the Windows font and table selection, and the
+  theme:
   [ui-styling.md](ui-styling.md).
 * Event ordering: re-entry in synchronous signals and listener calls,
   races between commands and playback events, and the plan for a
